@@ -17,7 +17,7 @@ Future<void> showReleaseNotes(BuildContext context, UpdateInfo update) => showMo
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(Space.xl, 0, Space.xl, Space.sm),
-              child: Text('What\'s new in build ${update.build}', style: AppText.title),
+              child: Text('What\'s new', style: AppText.title),
             ),
             Flexible(
               child: ListView(
@@ -25,12 +25,12 @@ Future<void> showReleaseNotes(BuildContext context, UpdateInfo update) => showMo
                 padding: const EdgeInsets.fromLTRB(Space.xl, 0, Space.xl, Space.md),
                 children: [
                   if (update.notes.isEmpty)
-                    const Text('No notes for this release.', style: AppText.caption),
+                    const Text('Improvements and fixes.', style: AppText.caption),
                   for (final notes in update.notes) ...[
                     if (update.notes.length > 1)
                       Padding(
                         padding: const EdgeInsets.only(top: Space.md, bottom: Space.xs),
-                        child: Text('BUILD ${notes.build}', style: AppText.overline),
+                        child: Text('VERSION ${notes.build}', style: AppText.overline),
                       ),
                     ..._lines(notes.text),
                   ],

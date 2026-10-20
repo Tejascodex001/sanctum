@@ -104,7 +104,7 @@ class _FriendPickerState extends State<_FriendPicker> {
               padding: EdgeInsets.fromLTRB(Space.xl, Space.xs, Space.xl, Space.xs),
               child: Text(
                 'Only friends can be added. Each joins as soon as their phone is reached; '
-                'members connect to each other directly, with no server.',
+                'messages go straight between your phones.',
                 style: AppText.caption,
               ),
             ),
@@ -300,7 +300,7 @@ class _GroupSheetState extends State<_GroupSheet> {
           ),
           Text(
             g.active
-                ? '${g.members.length} members · end-to-end encrypted, no server'
+                ? '${g.members.length} members · end-to-end encrypted'
                 : 'You\'re no longer in this group',
             textAlign: TextAlign.center,
             style: AppText.caption,

@@ -7,6 +7,9 @@ OUT_ALL: this build and up to 30 before it, newest first, as
 "## Build N" sections (the app shows the ones newer than what's installed).
 OUT_THIS: just this build's section (the release notes on GitHub).
 A failed build has no tag; its commits roll into the next build.
+
+The notes are for the app's users: commits whose subject starts with
+"Internal:", "Docs:" or "CI:" (developer-only changes) are left out.
 """
 import re
 import subprocess
@@ -24,10 +27,13 @@ def commits(rev_range):
         yield subject.strip(), body
 
 
+DEVELOPER_ONLY = ("internal:", "docs:", "ci:")
+
+
 def section(build, rev_range):
     lines = [f"## Build {build}", ""]
     for subject, body in commits(rev_range):
-        if not subject:
+        if not subject or subject.lower().startswith(DEVELOPER_ONLY):
             continue
         lines.append(f"- **{subject}**")
         for raw in body.splitlines():
@@ -39,7 +45,7 @@ def section(build, rev_range):
             elif text.startswith("  ") and lines[-1].startswith("  - "):
                 lines[-1] += " " + text.strip()
     if len(lines) == 2:
-        lines.append("- Maintenance")
+        lines.append("- Improvements and fixes")
     return "\n".join(lines) + "\n"
 
 

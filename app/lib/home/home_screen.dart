@@ -220,10 +220,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         note: notes
             ? 'Only on this device'
             : group
-                ? (c.active ? 'Group · ${c.members + 1} members · no server' : 'You\'re no longer in this group')
+                ? (c.active ? 'Group · ${c.members + 1} members' : 'You\'re no longer in this group')
                 : c.waiting
                     ? 'Request sent · waiting for them to accept'
-                    : 'End-to-end encrypted · over Tor',
+                    : 'Private and end-to-end encrypted',
         updatedAt: DateTime.fromMillisecondsSinceEpoch(c.createdAt * 1000),
       )..pinned = c.pinned;
       await card.refresh();
@@ -600,7 +600,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const Padding(
               padding: EdgeInsets.fromLTRB(32, 0, 32, Space.md),
               child: Text(
-                'Made from your key. When you and a friend add each other, '
+                'Yours alone, made just for you. When you and a friend add each other, '
                 'you both see the same sigil for your chat.',
                 textAlign: TextAlign.center,
                 style: AppText.caption,
@@ -963,7 +963,7 @@ class _NetPill extends StatelessWidget {
       valueListenable: NetBus.instance.status,
       builder: (context, net, _) {
         final (color, label) = switch (net.status) {
-          NetStatus.online => (const Color(0xFF3DDC97), 'Tor'),
+          NetStatus.online => (const Color(0xFF3DDC97), 'Online'),
           NetStatus.connecting => (const Color(0xFFFFC145), 'Connecting ${net.progress}%'),
           NetStatus.failed => (Palette.danger, 'Offline · retry'),
           NetStatus.off => (Palette.textFaint, 'Offline'),
@@ -1004,9 +1004,9 @@ class _NetPill extends StatelessWidget {
     HapticFeedback.selectionClick();
     final failed = net.status == NetStatus.failed;
     final text = switch (net.status) {
-      NetStatus.online => 'Connected through Tor. Friends reach you at your onion address; nobody sees your IP.',
-      NetStatus.connecting => 'Connecting to Tor (${net.progress}%): ${net.detail}. The first start takes longest.',
-      NetStatus.failed => 'Couldn\'t connect: ${net.detail}',
+      NetStatus.online => 'Connected privately: your friends can reach you, and nobody can see where you are.',
+      NetStatus.connecting => 'Connecting privately (${net.progress}%). The first time can take a minute or two.',
+      NetStatus.failed => 'Couldn\'t connect. Check your internet connection; tap Retry to try again.',
       NetStatus.off => 'Not connected.',
     };
     ScaffoldMessenger.of(context)
@@ -1713,7 +1713,7 @@ class _NearbySettingsState extends State<_NearbySettings> {
       if (!mounted) return;
       setState(() {
         _on = false;
-        _error = 'Couldn\'t start nearby: $e';
+        _error = 'Nearby couldn\'t start on this phone. Try turning it off and on again.';
       });
     }
   }
@@ -1737,7 +1737,7 @@ class _NearbySettingsState extends State<_NearbySettings> {
             _error ??
                 'Chat with friends on the same Wi-Fi, a hotspot, or over Bluetooth, even offline. '
                     'Over Wi-Fi they can see your local network address (never your internet one).'
-                    '${on ? (bluetooth ? '\nBluetooth: on' : '\nBluetooth: off (turn Bluetooth on and allow Nearby devices; Android 10+)') : ''}',
+                    '${on ? (bluetooth ? '\nBluetooth: on' : '\nBluetooth: off (turn Bluetooth on and allow Nearby devices; needs Android 10 or newer)') : ''}',
             style: AppText.caption.copyWith(color: _error == null ? null : Palette.danger),
           ),
         ),
@@ -1783,8 +1783,8 @@ class _UpdateBanner extends StatelessWidget {
                           Expanded(
                             child: Text(
                               progress == null
-                                  ? 'Build ${update.build} is available'
-                                  : 'Downloading through Tor… ${(progress * 100).round()}%',
+                                  ? 'A new version of Sanctum is ready'
+                                  : 'Downloading the update… ${(progress * 100).round()}%',
                               style: AppText.bodyStrong,
                             ),
                           ),
@@ -1857,8 +1857,8 @@ class _UpdateSettingsState extends State<_UpdateSettings> {
       ..showSnackBar(SnackBar(
         content: Text(u.error.value ??
             (u.available.value == null
-                ? 'You have the latest build.'
-                : 'Build ${u.available.value!.build} is available: tap Update on the home screen.')),
+                ? 'Sanctum is up to date.'
+                : 'A new version is ready: tap Update on the home screen.')),
       ));
   }
 
@@ -1874,8 +1874,8 @@ class _UpdateSettingsState extends State<_UpdateSettings> {
         children: [
           ListTile(
             leading: const Icon(Icons.system_update_rounded),
-            title: Text(current == 0 ? 'Updates' : 'Build $current'),
-            subtitle: const Text('Checked and downloaded through Tor; Android installs only builds signed with your key.'),
+            title: Text(current == 0 ? 'Updates' : 'Sanctum version $current'),
+            subtitle: const Text('Updates are downloaded privately, and only genuine Sanctum updates can be installed.'),
             trailing: _checking
                 ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : TextButton(onPressed: _check, child: const Text('Check')),

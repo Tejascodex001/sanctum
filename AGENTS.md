@@ -16,9 +16,11 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 - Commit and push straight to `main`. Don't create branches or pull requests unless asked.
 - **No `Co-Authored-By` lines** in commit messages.
 - Author: `Tejascodex001 <158545390+Tejascodex001@users.noreply.github.com>`. Set it in a fresh clone with `git config user.name` and `git config user.email`.
-- **Commit messages become the in-app changelog** (`.github/scripts/changelog.py`). Write them for users:
+- **Commit messages become the in-app changelog** (`.github/scripts/changelog.py`), which **ordinary users** read. Write them for users:
   - A short subject saying what changed.
   - A blank line, then `- ` bullets with details. Bullets can continue on lines indented by two spaces.
+  - Use plain words: no jargon (MLS, Argon2, crate or file names, protocol details).
+  - Start the subject with `Internal:`, `Docs:` or `CI:` for developer-only changes; they're left out of the changelog.
 - Every push to `main` builds and publishes release `build-<run number>`. A red build means no release; fix it before moving on.
 
 ## Layout
@@ -67,6 +69,8 @@ cd app && flutter analyze && flutter test   # analyze must report no issues (CI 
 - `net/src/https.rs` has an ignored live test against GitHub: `cargo test -p sanctum-net live -- --ignored`. Behind a TLS-inspecting proxy, set `EXTRA_CA`.
 
 ## Product notes
+
+- **Everything the app shows is for its users, who are not developers.** Don't mention keys, builds, Tor internals, onion addresses, servers, protocols or Android versions unless the user must act on it, and never show raw error text. Explain in plain words what happens and what to do.
 
 - The owner tests on real phones by installing release APKs, and is not a developer. Explain changes plainly, and say which build to install.
 - **UI:** the custom "Sigil" design system on Material 3. It should look polished but striking, and stay smooth: sigils are cached images, and there are no backdrop blurs.

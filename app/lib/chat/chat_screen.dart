@@ -417,6 +417,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     );
   }
 
+  /// What to tell the user when an attachment can't be sent.
+  String _sendError(Object e) => '$e'.contains('too large')
+      ? 'That\'s too big to send. Photos can be up to 10 MB, videos 20 MB, voice notes 10 MB and files 50 MB.'
+      : 'Couldn\'t send that. Please try again.';
+
   /// Picks a photo, video or file and sends it (with the typed text as
   /// its caption).
   Future<void> _attach() async {
@@ -475,7 +480,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Couldn\'t send: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_sendError(e))));
       }
     } finally {
       // Sanctum keeps its own encrypted copy.
@@ -547,7 +552,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         replyTo: replyTo?.seq,
       );
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Couldn\'t send: $e')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_sendError(e))));
     } finally {
       try {
         File(path).deleteSync();
@@ -854,7 +859,7 @@ class _VerifyButtonState extends State<_VerifyButton> {
                 const SizedBox(height: Space.sm),
                 Text(
                   card.verified
-                      ? 'Their key was confirmed: by scanning their code in person, or by comparing this number.'
+                      ? 'You\'ve confirmed it\'s really them: by scanning their code in person, or by comparing this number.'
                       : 'Call ${card.title} and read this number to each other. If it matches on both phones, '
                           'nobody swapped your codes.',
                   textAlign: TextAlign.center,

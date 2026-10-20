@@ -43,7 +43,7 @@ class Updater {
       _lastCheck = DateTime.now();
       error.value = null;
     } catch (e) {
-      if (force) error.value = 'Couldn\'t check: $e';
+      if (force) error.value = 'Couldn\'t check for updates. Try again in a moment.';
     } finally {
       _checking = false;
     }
@@ -79,7 +79,7 @@ class Updater {
       }
     } catch (e) {
       progress.value = null;
-      error.value = 'Download failed: $e';
+      error.value = 'The download didn\'t finish. Check your connection and tap Update again.';
     }
   }
 }

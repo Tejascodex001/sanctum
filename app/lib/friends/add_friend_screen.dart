@@ -94,8 +94,8 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
     try {
       final text = await scanQr(prompt: "Point at your friend's Sanctum code");
       if (text != null) await _add(text, scanned: true);
-    } on PlatformException catch (e) {
-      _toast('Camera unavailable: ${e.message ?? e.code}');
+    } on PlatformException {
+      _toast('Couldn\'t open the camera.');
     }
   }
 
@@ -332,7 +332,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
         ),
         const SizedBox(height: Space.sm),
         Text(
-          'Your chat\'s sigil is made from both your keys. ${paired.friend} gets a friend request '
+          'Your chat\'s sigil is made from both of you. ${paired.friend} gets a friend request '
           'as soon as their phone can be reached; once they accept, it shows this same sigil and number.'
           '${paired.verified ? '' : ' Call them and compare the number: if it matches, nobody swapped your codes.'}',
           textAlign: TextAlign.center,
