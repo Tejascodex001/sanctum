@@ -30,6 +30,21 @@ pub async fn redirect_of(connect: &Connect, url: &str) -> anyhow::Result<String>
     redirect_trusting(connect, url, mozilla_roots()).await
 }
 
+/// Wraps `connect` so it opens TLS connections (checked against the
+/// Mozilla roots) instead of raw ones.
+pub fn tls(connect: Connect) -> Connect {
+    Arc::new(move |host: String, port: u16| {
+        let connect = connect.clone();
+        Box::pin(async move {
+            crate::tor::install_crypto();
+            let config = ClientConfig::builder().with_root_certificates(mozilla_roots()).with_no_client_auth();
+            let tcp = connect(host.clone(), port).await?;
+            let stream = TlsConnector::from(Arc::new(config)).connect(ServerName::try_from(host)?, tcp).await?;
+            Ok(Box::new(stream) as BoxConn)
+        })
+    })
+}
+
 fn mozilla_roots() -> RootCertStore {
     let mut roots = RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());

@@ -13,6 +13,7 @@ import '../friends/add_friend_screen.dart';
 import '../group/group_sheets.dart';
 import '../background/background.dart';
 import '../identity/secrets.dart';
+import '../explore/explore.dart';
 import '../moments/moments.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
@@ -280,7 +281,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   bool get _onTemp => _page > 0.5 && _page < 1.5;
-  bool get _onFriends => _page >= 1.5;
+  bool get _onFriends => _page >= 1.5 && _page < 2.5;
+  bool get _onExplore => _page >= 2.5;
 
   Future<void> _newTemp() async {
     HapticFeedback.selectionClick();
@@ -701,12 +703,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ('Chats', 0),
                   (_temp.isEmpty ? 'Temp' : 'Temp · ${_temp.length}', 0),
                   ('Friends', _requests.length),
+                  ('Explore', 0),
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
-              child: _SearchField(controller: _search),
+            AnimatedSize(
+              duration: Motion.medium,
+              curve: Motion.decelerate,
+              child: _onExplore
+                  ? const SizedBox(width: double.infinity)
+                  : Padding(
+                      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+                      child: _SearchField(controller: _search),
+                    ),
             ),
             AnimatedSize(
               duration: Motion.medium,
@@ -720,7 +729,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             AnimatedSize(
               duration: Motion.medium,
               curve: Motion.decelerate,
-              child: _requests.isEmpty || _onFriends
+              child: _requests.isEmpty || _onFriends || _onExplore
                   ? const SizedBox(width: double.infinity)
                   : Padding(
                       padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
@@ -775,35 +784,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onRefresh: _refresh,
                     onAdd: _addFriend,
                   ),
+                  ExplorePage(active: _page.round() == 3),
                 ],
               ),
             ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _onTemp
-            ? _newTemp
-            : _onFriends
-                ? _addFriend
-                : _newGroup,
-        icon: Icon(_onFriends
-            ? Icons.person_add_alt_1_rounded
-            : _onTemp
-                ? Icons.add_rounded
-                : Icons.group_add_rounded),
-        label: AnimatedSwitcher(
-          duration: Motion.fast,
-          child: Text(
-            _onFriends
-                ? 'Add a friend'
-                : _onTemp
-                    ? 'New temp chat'
-                    : 'New group',
-            key: ValueKey(_page.round()),
-          ),
-        ),
-      ),
+      floatingActionButton: _onExplore
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _onTemp
+                  ? _newTemp
+                  : _onFriends
+                      ? _addFriend
+                      : _newGroup,
+              icon: Icon(_onFriends
+                  ? Icons.person_add_alt_1_rounded
+                  : _onTemp
+                      ? Icons.add_rounded
+                      : Icons.group_add_rounded),
+              label: AnimatedSwitcher(
+                duration: Motion.fast,
+                child: Text(
+                  _onFriends
+                      ? 'Add a friend'
+                      : _onTemp
+                          ? 'New temp chat'
+                          : 'New group',
+                  key: ValueKey(_page.round()),
+                ),
+              ),
+            ),
     );
   }
 }

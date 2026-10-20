@@ -133,6 +133,13 @@ One photo a day for all your friends, gone 24 hours after it was shared (`core/s
 - **Hidden chats:** a hidden friend's moment isn't shown, so it can't give the chat away.
 - The photo can be taken right then with the camera app (written to Sanctum's cache through a one-off link, then deleted) or picked from the gallery. Either way it's resized and stripped of hidden data such as location.
 
+## Explore (the Fediverse)
+A fourth tab with public posts from PeerTube (videos) and Pixelfed or other Mastodon-compatible servers (photos), Reels-style (`net/src/fedi.rs`, `net/src/relay.rs`).
+- **Anonymous and through Tor:** no account and nothing is posted. Every request (feeds, pictures, videos) goes through Tor with the HTTPS client, so servers see a Tor exit. The list of servers is kept sealed on the phone (`kv` "fedi:sources").
+- **Feeds:** PeerTube's `/api/v1/videos` (trending, local, no sensitive videos, no live streams), and the Mastodon API's local public timeline with media only (sensitive posts left out). Servers that show their feed only to signed-in people get a plain explanation. Feeds from several servers are interleaved.
+- **Videos:** the player only speaks plain HTTP, so it's given `http://127.0.0.1:port/<token>`. A relay on the phone forwards each request, ranges included, to the real `https://` address through Tor, and follows redirects itself, so the player never connects anywhere else. It listens on loopback only and answers only for random tokens it handed out. Android's network security config allows plain HTTP to 127.0.0.1 and nothing else. PeerTube videos play at up to 480p, which streams well over Tor.
+- Sending a post to a chat sends its link as a message. Nothing is fetched from the link for a preview.
+
 ## Deleting
 - **Delete a message:** for me, or (your own messages only) for everyone (`Content::DeleteMessage`, by the shared message id). Works in groups too.
 - **Clear chat:** for me, or (friends' chats) for everyone (`Content::ClearChat`). The friendship stays.
@@ -187,5 +194,5 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 ## Roadmap
 Status per feature is tracked in the README's feature table. In short:
 - **v1, private messaging:** done. Only nearby over Wi-Fi Direct remains, and hotspot mode mostly covers it.
-- **v2:** plans and date polls, shared albums, daily moments (done); a Fediverse tab (Pixelfed, PeerTube, Reels-style), on-device AI (catch-up summaries, transcription, search).
+- **v2:** plans and date polls, shared albums, daily moments, the Explore tab for the Fediverse (done); on-device AI (catch-up summaries, transcription, search).
 - **v3:** voice and video calls, with no IP exposure.

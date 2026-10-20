@@ -3,6 +3,7 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/fedi.dart';
 import 'api/group.dart';
 import 'api/identity.dart';
 import 'api/moment.dart';
@@ -51,6 +52,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AlbumView dco_decode_box_autoadd_album_view(dynamic raw);
 
   @protected
+  FediProblem dco_decode_box_autoadd_fedi_problem(dynamic raw);
+
+  @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
 
   @protected
@@ -81,6 +85,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double dco_decode_f_64(dynamic raw);
 
   @protected
+  FediItem dco_decode_fedi_item(dynamic raw);
+
+  @protected
+  FediKind dco_decode_fedi_kind(dynamic raw);
+
+  @protected
+  FediPage dco_decode_fedi_page(dynamic raw);
+
+  @protected
+  FediPost dco_decode_fedi_post(dynamic raw);
+
+  @protected
+  FediProblem dco_decode_fedi_problem(dynamic raw);
+
+  @protected
+  FediSource dco_decode_fedi_source(dynamic raw);
+
+  @protected
   FriendView dco_decode_friend_view(dynamic raw);
 
   @protected
@@ -100,6 +122,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<FediItem> dco_decode_list_fedi_item(dynamic raw);
+
+  @protected
+  List<FediPost> dco_decode_list_fedi_post(dynamic raw);
+
+  @protected
+  List<FediSource> dco_decode_list_fedi_source(dynamic raw);
 
   @protected
   List<FriendView> dco_decode_list_friend_view(dynamic raw);
@@ -166,6 +197,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   AlbumView? dco_decode_opt_box_autoadd_album_view(dynamic raw);
+
+  @protected
+  FediProblem? dco_decode_opt_box_autoadd_fedi_problem(dynamic raw);
 
   @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
@@ -275,6 +309,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AlbumView sse_decode_box_autoadd_album_view(SseDeserializer deserializer);
 
   @protected
+  FediProblem sse_decode_box_autoadd_fedi_problem(SseDeserializer deserializer);
+
+  @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
@@ -305,6 +342,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
+  FediItem sse_decode_fedi_item(SseDeserializer deserializer);
+
+  @protected
+  FediKind sse_decode_fedi_kind(SseDeserializer deserializer);
+
+  @protected
+  FediPage sse_decode_fedi_page(SseDeserializer deserializer);
+
+  @protected
+  FediPost sse_decode_fedi_post(SseDeserializer deserializer);
+
+  @protected
+  FediProblem sse_decode_fedi_problem(SseDeserializer deserializer);
+
+  @protected
+  FediSource sse_decode_fedi_source(SseDeserializer deserializer);
+
+  @protected
   FriendView sse_decode_friend_view(SseDeserializer deserializer);
 
   @protected
@@ -324,6 +379,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<FediItem> sse_decode_list_fedi_item(SseDeserializer deserializer);
+
+  @protected
+  List<FediPost> sse_decode_list_fedi_post(SseDeserializer deserializer);
+
+  @protected
+  List<FediSource> sse_decode_list_fedi_source(SseDeserializer deserializer);
 
   @protected
   List<FriendView> sse_decode_list_friend_view(SseDeserializer deserializer);
@@ -400,6 +464,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   AlbumView? sse_decode_opt_box_autoadd_album_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FediProblem? sse_decode_opt_box_autoadd_fedi_problem(
     SseDeserializer deserializer,
   );
 
@@ -524,6 +593,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_fedi_problem(
+    FediProblem self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
     SseSerializer serializer,
@@ -572,6 +647,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_fedi_item(FediItem self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_fedi_kind(FediKind self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_fedi_page(FediPage self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_fedi_post(FediPost self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_fedi_problem(FediProblem self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_fedi_source(FediSource self, SseSerializer serializer);
+
+  @protected
   void sse_encode_friend_view(FriendView self, SseSerializer serializer);
 
   @protected
@@ -594,6 +687,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_fedi_item(List<FediItem> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_fedi_post(List<FediPost> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_fedi_source(
+    List<FediSource> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_friend_view(
@@ -697,6 +802,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_album_view(
     AlbumView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_fedi_problem(
+    FediProblem? self,
     SseSerializer serializer,
   );
 
