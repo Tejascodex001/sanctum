@@ -11,6 +11,7 @@ import '../deck/chat_tile.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
 import 'media.dart';
+import 'poll.dart';
 import '../security/screenshots.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
@@ -337,6 +338,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           highlight: m.seq != null && m.seq == _flash,
           onQuoteTap: () => _jumpTo(m.reply?.seq),
           onLongPress: () => _actions(m),
+          onChanged: _reload,
           chatId: widget.card.id,
           accent: accent,
           showTime: !grouped,
@@ -435,7 +437,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
             ListTile(
               leading: const Icon(Icons.photo_library_rounded),
               title: const Text('Photo or video'),
-              subtitle: const Text('Photos up to 10 MB (resized, hidden data like location removed), videos up to 20 MB'),
+              subtitle:
+                  const Text('Photos up to 10 MB (resized, hidden data like location removed), videos up to 20 MB'),
               onTap: () => Navigator.pop(sheet, 'visual'),
             ),
             ListTile(
@@ -444,11 +447,22 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               subtitle: const Text('Up to 50 MB'),
               onTap: () => Navigator.pop(sheet, 'file'),
             ),
+            ListTile(
+              leading: const Icon(Icons.poll_outlined),
+              title: const Text('Poll or plan'),
+              subtitle: const Text('Ask a question, find a date that works, or plan something together'),
+              onTap: () => Navigator.pop(sheet, 'poll'),
+            ),
           ],
         ),
       ),
     );
-    if (kind == null) return;
+    if (kind == null || !mounted) return;
+    if (kind == 'poll') {
+      final sent = await showPollComposer(context, chatId: widget.card.id, accent: widget.card.sigil.accent.color);
+      if (sent) await _reload();
+      return;
+    }
     final picked = await Background.pickMedia(kind);
     if (picked == null || !mounted) return;
     final path = picked['path']! as String;
@@ -950,6 +964,7 @@ class _Bubble extends StatefulWidget {
     this.highlight = false,
     this.onQuoteTap,
     this.onLongPress,
+    this.onChanged,
     required this.chatId,
   });
 
@@ -971,6 +986,9 @@ class _Bubble extends StatefulWidget {
   final bool highlight;
   final VoidCallback? onQuoteTap;
   final VoidCallback? onLongPress;
+
+  /// A poll in it was answered.
+  final VoidCallback? onChanged;
 
   @override
   State<_Bubble> createState() => _BubbleState();
@@ -1043,7 +1061,18 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
               padding: EdgeInsets.only(bottom: m.body.isEmpty ? 0 : Space.xs),
               child: MediaContent(media: m.media!, chatId: widget.chatId, seq: m.seq, fg: fg),
             ),
-          if (m.body.isNotEmpty || m.media == null) Text(m.body, style: AppText.body.copyWith(color: fg)),
+          if (m.poll != null)
+            PollContent(
+              poll: m.poll!,
+              chatId: widget.chatId,
+              seq: m.seq!,
+              fg: fg,
+              accent: accent,
+              mine: mine,
+              onChanged: widget.onChanged,
+            )
+          else if (m.body.isNotEmpty || m.media == null)
+            Text(m.body, style: AppText.body.copyWith(color: fg)),
           if (widget.showTime || (mine && widget.showTicks)) ...[
             const SizedBox(height: 3),
             Row(
@@ -1371,6 +1400,7 @@ class _ThreadSheetState extends State<_ThreadSheet> {
                     key: ValueKey('thread-${m.seq}'),
                     message: m,
                     chatId: widget.card.id,
+                    onChanged: _load,
                     accent: widget.accent,
                     showTime: true,
                     showTicks: widget.card.friend,

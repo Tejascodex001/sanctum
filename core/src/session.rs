@@ -327,6 +327,7 @@ impl Session {
                 reply: quote.clone(),
                 sender: None,
                 media: None,
+                ..Default::default()
             },
         )?;
         let Some(peer) = meta.peers.first().map(|p| p.identity) else {
@@ -807,6 +808,7 @@ impl Session {
                         reply,
                         sender: Some(*peer),
                         media: None,
+                        ..Default::default()
                     },
                 )?;
                 self.events.push(Event::Chat(chat_id));
@@ -865,6 +867,8 @@ impl Session {
                 quote,
                 media,
             } => self.receive_media(chat_id, peer, id, body, sent_at, quote, media)?,
+            Content::Poll { id, sent_at, poll } => self.on_poll(chat_id, peer, id, sent_at, poll)?,
+            Content::Vote { poll, choices, at } => self.on_vote(chat_id, peer, poll, choices, at)?,
             Content::TempWipe { temp } => {
                 if let Some(id) = self.temp.wipe_remote(*peer, temp) {
                     self.forget_temp_outbox(Some(*peer), temp);
@@ -937,7 +941,7 @@ impl Session {
     }
 
     /// Queues `content` for the chat's other phones.
-    fn tell_chat(&mut self, chat_id: i64, content: Content) -> Result<Vec<[u8; 32]>> {
+    pub(crate) fn tell_chat(&mut self, chat_id: i64, content: Content) -> Result<Vec<[u8; 32]>> {
         let meta = self.chat(chat_id)?;
         match meta.kind {
             ChatKind::Group if !meta.group_id.is_empty() => self.broadcast_content(&meta, &content),
@@ -1481,6 +1485,66 @@ mod tests {
         let view = bob.s.group_view(bg).unwrap();
         assert!(!view.active);
         assert!(bob.s.send_to_chat(bg, "hello?", None).is_err());
+    }
+
+    #[test]
+    fn polls_and_plans_count_everyones_answers() {
+        use crate::protocol::{Plan, Poll};
+        let (mut alice, mut bob, mut carol) = (Phone::new(), Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        let ac = alice.s.add_friend(&carol.s.my_code("Carol"), true).unwrap().chat_id;
+        carol.s.add_friend(&alice.s.my_code("Alice"), true).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+
+        // A friends' chat: Bob answers, then changes his mind.
+        let poll = Poll { question: "Dinner?".into(), options: vec!["Pizza".into(), "Sushi".into()], ..Default::default() };
+        assert_eq!(alice.s.send_poll(ab, poll).unwrap(), vec![bob.pk()]);
+        connect(&mut alice, &mut bob);
+        let seq = bob.s.store.messages(ba, None).unwrap().len() as i64 - 1;
+        assert_eq!(bob.s.store.message(ba, seq).unwrap().unwrap().poll.unwrap().question, "Dinner?");
+        bob.s.vote(ba, seq, vec![0]).unwrap();
+        connect(&mut bob, &mut alice);
+        bob.s.vote(ba, seq, vec![1]).unwrap();
+        connect(&mut bob, &mut alice);
+        let mine = alice.s.store.messages(ab, None).unwrap().pop().unwrap();
+        assert!(mine.delivered);
+        assert_eq!(mine.votes.len(), 1);
+        assert_eq!((mine.votes[0].voter, mine.votes[0].choices.clone()), (bob.pk(), vec![1]));
+
+        // A group plan: everyone sees the same answers.
+        let (group, _) = alice.s.create_group("Trip", &[ab, ac]).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        connect(&mut alice, &mut bob);
+        let (bg, cg) = (group_of(&bob, "Trip").unwrap(), group_of(&carol, "Trip").unwrap());
+        let plan = Poll {
+            question: "Beach day".into(),
+            plan: Some(Plan { when: 1_900_000_000, place: "Goa".into() }),
+            ..Default::default()
+        };
+        bob.s.send_poll(bg, plan).unwrap();
+        // Carol hears of it from Alice's answer before Bob's poll reaches her.
+        connect(&mut bob, &mut alice);
+        let aseq = alice.s.store.messages(group, None).unwrap().len() as i64 - 1;
+        alice.s.vote(group, aseq, vec![crate::poll::PLAN_GOING]).unwrap();
+        connect(&mut alice, &mut carol);
+        connect(&mut bob, &mut carol);
+        let cseq = carol.s.store.messages(cg, None).unwrap().len() as i64 - 1;
+        carol.s.vote(cg, cseq, vec![crate::poll::PLAN_MAYBE]).unwrap();
+        connect(&mut carol, &mut bob);
+        connect(&mut carol, &mut alice);
+        connect(&mut alice, &mut bob);
+        for (phone, chat) in [(&alice, group), (&bob, bg), (&carol, cg)] {
+            let m = phone.s.store.messages(chat, None).unwrap().pop().unwrap();
+            let p = m.poll.unwrap();
+            assert_eq!((p.options.len(), p.plan.unwrap().place.as_str()), (3, "Goa"));
+            let mut votes: Vec<_> = m.votes.iter().map(|v| (v.voter, v.choices.clone())).collect();
+            votes.sort();
+            let mut want = vec![(alice.pk(), vec![0]), (carol.pk(), vec![1])];
+            want.sort();
+            assert_eq!(votes, want);
+        }
     }
 
     #[test]

@@ -8,6 +8,7 @@
 
 import 'api/group.dart';
 import 'api/identity.dart';
+import 'api/poll.dart';
 import 'api/session.dart';
 import 'api/sigil.dart';
 import 'api/store.dart';
@@ -49,6 +50,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   MediaView dco_decode_box_autoadd_media_view(dynamic raw);
+
+  @protected
+  PlanView dco_decode_box_autoadd_plan_view(dynamic raw);
+
+  @protected
+  PollView dco_decode_box_autoadd_poll_view(dynamic raw);
 
   @protected
   ReplyView dco_decode_box_autoadd_reply_view(dynamic raw);
@@ -102,6 +109,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MessageView> dco_decode_list_message_view(dynamic raw);
 
   @protected
+  List<PollOptionView> dco_decode_list_poll_option_view(dynamic raw);
+
+  @protected
   Int64List dco_decode_list_prim_i_64_strict(dynamic raw);
 
   @protected
@@ -150,6 +160,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   MediaView? dco_decode_opt_box_autoadd_media_view(dynamic raw);
 
   @protected
+  PlanView? dco_decode_opt_box_autoadd_plan_view(dynamic raw);
+
+  @protected
+  PollView? dco_decode_opt_box_autoadd_poll_view(dynamic raw);
+
+  @protected
   ReplyView? dco_decode_opt_box_autoadd_reply_view(dynamic raw);
 
   @protected
@@ -166,6 +182,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PairedView dco_decode_paired_view(dynamic raw);
+
+  @protected
+  PlanView dco_decode_plan_view(dynamic raw);
+
+  @protected
+  PollOptionView dco_decode_poll_option_view(dynamic raw);
+
+  @protected
+  PollView dco_decode_poll_view(dynamic raw);
 
   @protected
   ReleaseNotes dco_decode_release_notes(dynamic raw);
@@ -236,6 +261,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   MediaView sse_decode_box_autoadd_media_view(SseDeserializer deserializer);
 
   @protected
+  PlanView sse_decode_box_autoadd_plan_view(SseDeserializer deserializer);
+
+  @protected
+  PollView sse_decode_box_autoadd_poll_view(SseDeserializer deserializer);
+
+  @protected
   ReplyView sse_decode_box_autoadd_reply_view(SseDeserializer deserializer);
 
   @protected
@@ -287,6 +318,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<MessageView> sse_decode_list_message_view(SseDeserializer deserializer);
+
+  @protected
+  List<PollOptionView> sse_decode_list_poll_option_view(
+    SseDeserializer deserializer,
+  );
 
   @protected
   Int64List sse_decode_list_prim_i_64_strict(SseDeserializer deserializer);
@@ -345,6 +381,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  PlanView? sse_decode_opt_box_autoadd_plan_view(SseDeserializer deserializer);
+
+  @protected
+  PollView? sse_decode_opt_box_autoadd_poll_view(SseDeserializer deserializer);
+
+  @protected
   ReplyView? sse_decode_opt_box_autoadd_reply_view(
     SseDeserializer deserializer,
   );
@@ -365,6 +407,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PairedView sse_decode_paired_view(SseDeserializer deserializer);
+
+  @protected
+  PlanView sse_decode_plan_view(SseDeserializer deserializer);
+
+  @protected
+  PollOptionView sse_decode_poll_option_view(SseDeserializer deserializer);
+
+  @protected
+  PollView sse_decode_poll_view(SseDeserializer deserializer);
 
   @protected
   ReleaseNotes sse_decode_release_notes(SseDeserializer deserializer);
@@ -445,6 +496,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_plan_view(
+    PlanView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_poll_view(
+    PollView self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_reply_view(
     ReplyView self,
     SseSerializer serializer,
@@ -510,6 +573,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_message_view(
     List<MessageView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_poll_option_view(
+    List<PollOptionView> self,
     SseSerializer serializer,
   );
 
@@ -589,6 +658,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_plan_view(
+    PlanView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_poll_view(
+    PollView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_reply_view(
     ReplyView? self,
     SseSerializer serializer,
@@ -614,6 +695,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_paired_view(PairedView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_plan_view(PlanView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_poll_option_view(
+    PollOptionView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_poll_view(PollView self, SseSerializer serializer);
 
   @protected
   void sse_encode_release_notes(ReleaseNotes self, SseSerializer serializer);

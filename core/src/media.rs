@@ -147,6 +147,7 @@ impl Session {
                 reply: quote.clone(),
                 sender: None,
                 media: Some(media.clone()),
+                ..Default::default()
             },
         )?;
         self.events.push(Event::Chat(chat_id));
@@ -157,29 +158,7 @@ impl Session {
             quote,
             media,
         };
-        let recipients = match meta.kind {
-            ChatKind::Notes => return Ok(Vec::new()),
-            ChatKind::Group => {
-                if meta.group_id.is_empty() {
-                    return Err(SessionError::NotAFriend);
-                }
-                self.broadcast_message(&meta, &content, (chat_id, seq))?
-            }
-            ChatKind::Direct => {
-                let Some(peer) = meta.peers.first().map(|p| p.identity) else {
-                    return Ok(Vec::new());
-                };
-                self.store.outbox_put(
-                    &id,
-                    &OutboxItem {
-                        peer,
-                        state: OutboxState::Plain(content.encode()),
-                        message: Some((chat_id, seq)),
-                    },
-                )?;
-                vec![peer]
-            }
-        };
+        let recipients = self.send_to_members(&meta, id, &content, (chat_id, seq))?;
         // The file itself, to each of them (after the message, in order).
         for peer in &recipients {
             self.store.outbox_put(
@@ -365,6 +344,7 @@ impl Session {
                 reply: quote,
                 sender: Some(*peer),
                 media: Some(media),
+                ..Default::default()
             },
         )?;
         self.events.push(Event::Chat(chat_id));

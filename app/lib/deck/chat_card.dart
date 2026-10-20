@@ -1,4 +1,5 @@
 import '../chat/message_source.dart';
+import '../chat/poll.dart';
 import '../src/rust/api/sigil.dart';
 import '../src/rust/api/store.dart';
 
@@ -70,14 +71,16 @@ class ChatCard {
       return;
     }
     final last = messages.last;
-    preview = last.body.isNotEmpty || last.media == null
-        ? last.body
-        : switch (last.media!.kind) {
-            MediaKindView.image => 'Photo',
-            MediaKindView.video => 'Video',
-            MediaKindView.audio => 'Voice note',
-            MediaKindView.file => last.media!.name,
-          };
+    preview = last.poll != null
+        ? pollPreview(last.poll!)
+        : last.body.isNotEmpty || last.media == null
+            ? last.body
+            : switch (last.media!.kind) {
+                MediaKindView.image => 'Photo',
+                MediaKindView.video => 'Video',
+                MediaKindView.audio => 'Voice note',
+                MediaKindView.file => last.media!.name,
+              };
     updatedAt = messages.last.sentAt;
     nextBurn = messages.first.expiresAt;
   }

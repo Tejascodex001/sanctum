@@ -2,6 +2,7 @@
 
 pub mod group;
 pub mod identity;
+pub mod poll;
 pub mod session;
 pub mod sigil;
 pub mod store;

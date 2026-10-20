@@ -5,6 +5,7 @@
 
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'poll.dart';
 
 // These functions are ignored because they are not marked as `pub`: `media_kind`, `now`, `reach`, `with`
 
@@ -211,6 +212,9 @@ class MessageView {
   /// A photo, video, voice note or file.
   final MediaView? media;
 
+  /// A poll, date poll or plan, with everyone's answers.
+  final PollView? poll;
+
   const MessageView({
     required this.seq,
     required this.fromMe,
@@ -220,6 +224,7 @@ class MessageView {
     this.reply,
     this.senderName,
     this.media,
+    this.poll,
   });
 
   @override
@@ -231,7 +236,8 @@ class MessageView {
       delivered.hashCode ^
       reply.hashCode ^
       senderName.hashCode ^
-      media.hashCode;
+      media.hashCode ^
+      poll.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -245,7 +251,8 @@ class MessageView {
           delivered == other.delivered &&
           reply == other.reply &&
           senderName == other.senderName &&
-          media == other.media;
+          media == other.media &&
+          poll == other.poll;
 }
 
 class ReplyView {

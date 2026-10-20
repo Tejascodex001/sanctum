@@ -45,7 +45,14 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Sanctum PIN & decoy PIN** | An optional PIN of its own (fingerprint still works). A decoy PIN opens an empty-looking Sanctum with its own data, while your real chats stay hidden and silent |
 
 ### Milestone v2: more than messages
-⏳ A Fediverse tab (Pixelfed, PeerTube, Reels-style) · ⏳ plans and date polls · ⏳ shared albums · ⏳ a daily moment · ⏳ on-device AI (catch-up summaries, transcription, search)
+
+| | Feature | Notes |
+|---|---|---|
+| ✅ | **Polls, date polls and plans** | Ask a question, find a day that works for everyone, or plan something (when and where) and see who's going. In friends' chats and groups |
+| ⏳ | Shared albums | |
+| ⏳ | A daily moment | |
+| ⏳ | A Fediverse tab | Pixelfed and PeerTube, Reels-style, through Tor |
+| ⏳ | On-device AI | Catch-up summaries, transcription, search |
 
 ### Milestone v3: calls
 ⏳ Voice and video calls, with no IP exposure

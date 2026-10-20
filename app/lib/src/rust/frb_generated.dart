@@ -5,6 +5,7 @@
 
 import 'api/group.dart';
 import 'api/identity.dart';
+import 'api/poll.dart';
 import 'api/session.dart';
 import 'api/sigil.dart';
 import 'api/store.dart';
@@ -72,7 +73,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -265513567;
+  int get rustContentHash => 1708519797;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -255,6 +256,27 @@ abstract class RustLibApi extends BaseApi {
   Future<Uint8List> crateApiSessionPinHash({
     required String pin,
     required List<int> salt,
+  });
+
+  Future<void> crateApiPollPlanSend({
+    required PlatformInt64 chatId,
+    required String title,
+    required PlatformInt64 when,
+    required String place,
+  });
+
+  Future<void> crateApiPollPollSend({
+    required PlatformInt64 chatId,
+    required String question,
+    required List<String> options,
+    required Int64List dates,
+    required bool multi,
+  });
+
+  Future<void> crateApiPollPollVote({
+    required PlatformInt64 chatId,
+    required PlatformInt64 seq,
+    required List<int> choices,
   });
 
   Future<bool> crateApiSessionProfileIsDecoy();
@@ -1719,6 +1741,120 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "pin_hash", argNames: ["pin", "salt"]);
 
   @override
+  Future<void> crateApiPollPlanSend({
+    required PlatformInt64 chatId,
+    required String title,
+    required PlatformInt64 when,
+    required String place,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(chatId, serializer);
+          sse_encode_String(title, serializer);
+          sse_encode_i_64(when, serializer);
+          sse_encode_String(place, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 44,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPollPlanSendConstMeta,
+        argValues: [chatId, title, when, place],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPollPlanSendConstMeta => const TaskConstMeta(
+    debugName: "plan_send",
+    argNames: ["chatId", "title", "when", "place"],
+  );
+
+  @override
+  Future<void> crateApiPollPollSend({
+    required PlatformInt64 chatId,
+    required String question,
+    required List<String> options,
+    required Int64List dates,
+    required bool multi,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(chatId, serializer);
+          sse_encode_String(question, serializer);
+          sse_encode_list_String(options, serializer);
+          sse_encode_list_prim_i_64_strict(dates, serializer);
+          sse_encode_bool(multi, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 45,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPollPollSendConstMeta,
+        argValues: [chatId, question, options, dates, multi],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPollPollSendConstMeta => const TaskConstMeta(
+    debugName: "poll_send",
+    argNames: ["chatId", "question", "options", "dates", "multi"],
+  );
+
+  @override
+  Future<void> crateApiPollPollVote({
+    required PlatformInt64 chatId,
+    required PlatformInt64 seq,
+    required List<int> choices,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(chatId, serializer);
+          sse_encode_i_64(seq, serializer);
+          sse_encode_list_prim_u_8_loose(choices, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 46,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPollPollVoteConstMeta,
+        argValues: [chatId, seq, choices],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPollPollVoteConstMeta => const TaskConstMeta(
+    debugName: "poll_vote",
+    argNames: ["chatId", "seq", "choices"],
+  );
+
+  @override
   Future<bool> crateApiSessionProfileIsDecoy() {
     return handler.executeNormal(
       NormalTask(
@@ -1727,7 +1863,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 44,
+            funcId: 47,
             port: port_,
           );
         },
@@ -1755,7 +1891,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 48,
             port: port_,
           );
         },
@@ -1783,7 +1919,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 46,
+            funcId: 49,
             port: port_,
           );
         },
@@ -1811,7 +1947,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 47,
+            funcId: 50,
             port: port_,
           );
         },
@@ -1839,7 +1975,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 48,
+            funcId: 51,
             port: port_,
           );
         },
@@ -1866,7 +2002,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 49,
+            funcId: 52,
             port: port_,
           );
         },
@@ -1900,7 +2036,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 50,
+            funcId: 53,
             port: port_,
           );
         },
@@ -1930,7 +2066,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 51,
+            funcId: 54,
             port: port_,
           );
         },
@@ -1962,7 +2098,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 52,
+            funcId: 55,
             port: port_,
           );
         },
@@ -1989,7 +2125,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 53,
+            funcId: 56,
             port: port_,
           );
         },
@@ -2016,7 +2152,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 54,
+            funcId: 57,
             port: port_,
           );
         },
@@ -2043,7 +2179,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 55,
+            funcId: 58,
             port: port_,
           );
         },
@@ -2073,7 +2209,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 56,
+            funcId: 59,
             port: port_,
           );
         },
@@ -2101,7 +2237,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 57,
+            funcId: 60,
             port: port_,
           );
         },
@@ -2133,7 +2269,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 58,
+            funcId: 61,
             port: port_,
           );
         },
@@ -2161,7 +2297,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 59,
+            funcId: 62,
             port: port_,
           );
         },
@@ -2188,7 +2324,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 60,
+            funcId: 63,
             port: port_,
           );
         },
@@ -2218,7 +2354,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 61,
+            funcId: 64,
             port: port_,
           );
         },
@@ -2250,7 +2386,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 62,
+            funcId: 65,
             port: port_,
           );
         },
@@ -2280,7 +2416,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 63,
+            funcId: 66,
             port: port_,
           );
         },
@@ -2308,7 +2444,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 64,
+            funcId: 67,
             port: port_,
           );
         },
@@ -2379,6 +2515,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MediaView dco_decode_box_autoadd_media_view(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_media_view(raw);
+  }
+
+  @protected
+  PlanView dco_decode_box_autoadd_plan_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_plan_view(raw);
+  }
+
+  @protected
+  PollView dco_decode_box_autoadd_poll_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_poll_view(raw);
   }
 
   @protected
@@ -2517,6 +2665,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<PollOptionView> dco_decode_list_poll_option_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_poll_option_view).toList();
+  }
+
+  @protected
   Int64List dco_decode_list_prim_i_64_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dcoDecodeInt64List(raw);
@@ -2593,8 +2747,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MessageView dco_decode_message_view(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return MessageView(
       seq: dco_decode_i_64(arr[0]),
       fromMe: dco_decode_bool(arr[1]),
@@ -2604,6 +2758,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       reply: dco_decode_opt_box_autoadd_reply_view(arr[5]),
       senderName: dco_decode_opt_String(arr[6]),
       media: dco_decode_opt_box_autoadd_media_view(arr[7]),
+      poll: dco_decode_opt_box_autoadd_poll_view(arr[8]),
     );
   }
 
@@ -2642,6 +2797,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MediaView? dco_decode_opt_box_autoadd_media_view(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_media_view(raw);
+  }
+
+  @protected
+  PlanView? dco_decode_opt_box_autoadd_plan_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_plan_view(raw);
+  }
+
+  @protected
+  PollView? dco_decode_opt_box_autoadd_poll_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_poll_view(raw);
   }
 
   @protected
@@ -2687,6 +2854,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       verified: dco_decode_bool(arr[3]),
       sigilKey: dco_decode_list_prim_u_8_strict(arr[4]),
       safetyNumber: dco_decode_String(arr[5]),
+    );
+  }
+
+  @protected
+  PlanView dco_decode_plan_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return PlanView(
+      when: dco_decode_i_64(arr[0]),
+      place: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  PollOptionView dco_decode_poll_option_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return PollOptionView(
+      label: dco_decode_String(arr[0]),
+      date: dco_decode_opt_box_autoadd_i_64(arr[1]),
+      count: dco_decode_u_32(arr[2]),
+      voters: dco_decode_list_String(arr[3]),
+      mine: dco_decode_bool(arr[4]),
+    );
+  }
+
+  @protected
+  PollView dco_decode_poll_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    return PollView(
+      question: dco_decode_String(arr[0]),
+      options: dco_decode_list_poll_option_view(arr[1]),
+      multi: dco_decode_bool(arr[2]),
+      dates: dco_decode_bool(arr[3]),
+      plan: dco_decode_opt_box_autoadd_plan_view(arr[4]),
+      answered: dco_decode_u_32(arr[5]),
     );
   }
 
@@ -2910,6 +3120,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlanView sse_decode_box_autoadd_plan_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_plan_view(deserializer));
+  }
+
+  @protected
+  PollView sse_decode_box_autoadd_poll_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_poll_view(deserializer));
+  }
+
+  @protected
   ReplyView sse_decode_box_autoadd_reply_view(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_reply_view(deserializer));
@@ -3079,6 +3301,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<PollOptionView> sse_decode_list_poll_option_view(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <PollOptionView>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_poll_option_view(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   Int64List sse_decode_list_prim_i_64_strict(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
@@ -3208,6 +3444,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_reply = sse_decode_opt_box_autoadd_reply_view(deserializer);
     var var_senderName = sse_decode_opt_String(deserializer);
     var var_media = sse_decode_opt_box_autoadd_media_view(deserializer);
+    var var_poll = sse_decode_opt_box_autoadd_poll_view(deserializer);
     return MessageView(
       seq: var_seq,
       fromMe: var_fromMe,
@@ -3217,6 +3454,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       reply: var_reply,
       senderName: var_senderName,
       media: var_media,
+      poll: var_poll,
     );
   }
 
@@ -3270,6 +3508,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_media_view(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  PlanView? sse_decode_opt_box_autoadd_plan_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_plan_view(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  PollView? sse_decode_opt_box_autoadd_poll_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_poll_view(deserializer));
     } else {
       return null;
     }
@@ -3350,6 +3610,50 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       verified: var_verified,
       sigilKey: var_sigilKey,
       safetyNumber: var_safetyNumber,
+    );
+  }
+
+  @protected
+  PlanView sse_decode_plan_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_when = sse_decode_i_64(deserializer);
+    var var_place = sse_decode_String(deserializer);
+    return PlanView(when: var_when, place: var_place);
+  }
+
+  @protected
+  PollOptionView sse_decode_poll_option_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_label = sse_decode_String(deserializer);
+    var var_date = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_count = sse_decode_u_32(deserializer);
+    var var_voters = sse_decode_list_String(deserializer);
+    var var_mine = sse_decode_bool(deserializer);
+    return PollOptionView(
+      label: var_label,
+      date: var_date,
+      count: var_count,
+      voters: var_voters,
+      mine: var_mine,
+    );
+  }
+
+  @protected
+  PollView sse_decode_poll_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_question = sse_decode_String(deserializer);
+    var var_options = sse_decode_list_poll_option_view(deserializer);
+    var var_multi = sse_decode_bool(deserializer);
+    var var_dates = sse_decode_bool(deserializer);
+    var var_plan = sse_decode_opt_box_autoadd_plan_view(deserializer);
+    var var_answered = sse_decode_u_32(deserializer);
+    return PollView(
+      question: var_question,
+      options: var_options,
+      multi: var_multi,
+      dates: var_dates,
+      plan: var_plan,
+      answered: var_answered,
     );
   }
 
@@ -3603,6 +3907,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_plan_view(
+    PlanView self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_plan_view(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_poll_view(
+    PollView self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_poll_view(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_reply_view(
     ReplyView self,
     SseSerializer serializer,
@@ -3754,6 +4076,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_poll_option_view(
+    List<PollOptionView> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_poll_option_view(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_prim_i_64_strict(
     Int64List self,
     SseSerializer serializer,
@@ -3879,6 +4213,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_reply_view(self.reply, serializer);
     sse_encode_opt_String(self.senderName, serializer);
     sse_encode_opt_box_autoadd_media_view(self.media, serializer);
+    sse_encode_opt_box_autoadd_poll_view(self.poll, serializer);
   }
 
   @protected
@@ -3928,6 +4263,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_media_view(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_plan_view(
+    PlanView? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_plan_view(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_poll_view(
+    PollView? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_poll_view(self, serializer);
     }
   }
 
@@ -3999,6 +4360,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.verified, serializer);
     sse_encode_list_prim_u_8_strict(self.sigilKey, serializer);
     sse_encode_String(self.safetyNumber, serializer);
+  }
+
+  @protected
+  void sse_encode_plan_view(PlanView self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self.when, serializer);
+    sse_encode_String(self.place, serializer);
+  }
+
+  @protected
+  void sse_encode_poll_option_view(
+    PollOptionView self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.label, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.date, serializer);
+    sse_encode_u_32(self.count, serializer);
+    sse_encode_list_String(self.voters, serializer);
+    sse_encode_bool(self.mine, serializer);
+  }
+
+  @protected
+  void sse_encode_poll_view(PollView self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.question, serializer);
+    sse_encode_list_poll_option_view(self.options, serializer);
+    sse_encode_bool(self.multi, serializer);
+    sse_encode_bool(self.dates, serializer);
+    sse_encode_opt_box_autoadd_plan_view(self.plan, serializer);
+    sse_encode_u_32(self.answered, serializer);
   }
 
   @protected

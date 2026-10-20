@@ -190,6 +190,42 @@ pub enum Content {
         quote: Option<Quote>,
         media: Media,
     },
+    /// A poll, a date poll or a plan, in a friends' chat or a group.
+    Poll {
+        id: MessageId,
+        sent_at: u64,
+        poll: Poll,
+    },
+    /// The sender's answer to a poll, replacing their earlier one. No
+    /// choices: they took their vote back. `at` (milliseconds) orders
+    /// answers that arrive out of order.
+    Vote {
+        poll: MessageId,
+        choices: Vec<u8>,
+        at: u64,
+    },
+}
+
+/// A question with choices. A date poll's choices are times (`dates`); a
+/// plan's are "Going", "Maybe" and "Can't go".
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Poll {
+    pub question: String,
+    /// The choices' labels (for a date poll the app shows `dates` instead).
+    pub options: Vec<String>,
+    /// Date polls: each choice's time, in Unix seconds.
+    pub dates: Vec<u64>,
+    /// More than one choice allowed.
+    pub multi: bool,
+    pub plan: Option<Plan>,
+}
+
+/// Something to do together: when and where.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Plan {
+    /// Unix seconds.
+    pub when: u64,
+    pub place: String,
 }
 
 /// The message a reply answers: enough to show it even if it's gone.

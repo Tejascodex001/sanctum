@@ -109,6 +109,16 @@ Photos, videos and files (`core/src/media.rs`).
 - **Limits:** photos 10 MB, videos 20 MB, voice notes 10 MB (about 25 minutes), files 50 MB. Enforced when sending and when receiving: a bigger attachment is refused. Temp chats have none, because they're memory-only.
 - Deleting a message or chat deletes its files; panic wipe deletes the media folder.
 
+## Polls and plans
+Polls, date polls and plans (`core/src/poll.rs`), in friends' chats and groups.
+- **A poll is a message** (`Content::Poll`): a question and up to 12 choices, optionally several answers each.
+  - A **date poll** carries a time per choice (`dates`), and the app shows those.
+  - A **plan** has a title, a time and an optional place. Its choices are always Going, Maybe and Can't go, one answer each.
+- **Answers** (`Content::Vote`) go to everyone in the chat. Each carries a millisecond time, and a phone keeps only each person's newest answer, so answers that arrive out of order settle the same way everywhere. Sending no choices takes an answer back.
+- Every person's latest answer is stored with the poll's own message (`StoredMessage::votes`), so deleting or clearing removes the answers too.
+- In groups an answer can arrive before its poll. It waits in the sealed key-value table (up to 200 per poll) until the poll comes.
+- Choices are checked on every phone: unknown ones are dropped, and only the first counts when a poll allows one answer.
+
 ## Deleting
 - **Delete a message:** for me, or (your own messages only) for everyone (`Content::DeleteMessage`, by the shared message id). Works in groups too.
 - **Clear chat:** for me, or (friends' chats) for everyone (`Content::ClearChat`). The friendship stays.
@@ -163,5 +173,5 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 ## Roadmap
 Status per feature is tracked in the README's feature table. In short:
 - **v1, private messaging:** done. Only nearby over Wi-Fi Direct remains, and hotspot mode mostly covers it.
-- **v2:** a Fediverse tab (Pixelfed, PeerTube, Reels-style), plans and date polls, shared albums, a daily moment, on-device AI (catch-up summaries, transcription, search).
+- **v2:** plans and date polls (done); a Fediverse tab (Pixelfed, PeerTube, Reels-style), shared albums, a daily moment, on-device AI (catch-up summaries, transcription, search).
 - **v3:** voice and video calls, with no IP exposure.

@@ -7,7 +7,7 @@
 //! between chats. SQLite only ever sees random ids, sequence numbers and
 //! ciphertext; `secure_delete` zeroes deleted pages.
 
-use crate::protocol::{BlobId, Media, MessageId, Quote};
+use crate::protocol::{BlobId, Media, MessageId, Poll, Quote};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -184,6 +184,31 @@ pub struct StoredMessage {
     pub sender: Option<[u8; 32]>,
     /// A photo, video, voice note or file (the file is in the media folder).
     pub media: Option<Media>,
+    /// A poll, date poll or plan.
+    pub poll: Option<Poll>,
+    /// Polls: everyone's latest answer (ours under our own key).
+    pub votes: Vec<Vote>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Vote {
+    pub voter: [u8; 32],
+    pub choices: Vec<u8>,
+    /// When they answered (milliseconds), so a late older answer loses.
+    pub at: u64,
+}
+
+/// The fourth message format, before polls.
+#[derive(Deserialize)]
+struct StoredMessageV3 {
+    from_me: bool,
+    body: String,
+    sent_at: u64,
+    delivered: bool,
+    id: Option<MessageId>,
+    reply: Option<Quote>,
+    sender: Option<[u8; 32]>,
+    media: Option<Media>,
 }
 
 /// The third message format, before attachments.
@@ -467,6 +492,15 @@ impl Store {
         sealed.map(|s| self.decode_message(chat_id, seq, &s)).transpose()
     }
 
+    /// Replaces a message (a poll's answers changed).
+    pub fn update_message(&self, chat_id: i64, seq: i64, msg: &StoredMessage) -> Result<()> {
+        self.db.execute(
+            "UPDATE messages SET sealed = ?3 WHERE chat_id = ?1 AND seq = ?2",
+            params![chat_id, seq, self.seal(&message_aad(chat_id, seq), msg)?],
+        )?;
+        Ok(())
+    }
+
     pub fn set_delivered(&self, chat_id: i64, seq: i64) -> Result<()> {
         let sealed: Option<Vec<u8>> = self
             .db
@@ -584,6 +618,19 @@ impl Store {
         if let Ok(m) = postcard::from_bytes::<StoredMessage>(&plain) {
             return Ok(m);
         }
+        if let Ok(v3) = postcard::from_bytes::<StoredMessageV3>(&plain) {
+            return Ok(StoredMessage {
+                from_me: v3.from_me,
+                body: v3.body,
+                sent_at: v3.sent_at,
+                delivered: v3.delivered,
+                id: v3.id,
+                reply: v3.reply,
+                sender: v3.sender,
+                media: v3.media,
+                ..Default::default()
+            });
+        }
         if let Ok(v2) = postcard::from_bytes::<StoredMessageV2>(&plain) {
             return Ok(StoredMessage {
                 from_me: v2.from_me,
@@ -593,7 +640,7 @@ impl Store {
                 id: v2.id,
                 reply: v2.reply,
                 sender: v2.sender,
-                media: None,
+                ..Default::default()
             });
         }
         if let Ok(v1) = postcard::from_bytes::<StoredMessageV1>(&plain) {
@@ -850,6 +897,51 @@ mod tests {
         hidden.admin = Some([5; 32]);
         s.update_chat(7, &hidden).unwrap();
         assert_eq!(s.chats().unwrap().remove(0).1, hidden);
+    }
+
+    #[test]
+    fn messages_from_before_polls_upgrade() {
+        #[derive(Serialize)]
+        struct V3 {
+            from_me: bool,
+            body: String,
+            sent_at: u64,
+            delivered: bool,
+            id: Option<MessageId>,
+            reply: Option<Quote>,
+            sender: Option<[u8; 32]>,
+            media: Option<Media>,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[6; 32]).unwrap();
+        let chat = s.create_chat(&meta("Bob")).unwrap();
+        let old = V3 {
+            from_me: true,
+            body: "beach".into(),
+            sent_at: 4,
+            delivered: true,
+            id: Some([1; 16]),
+            reply: None,
+            sender: None,
+            media: Some(Media { name: "beach.jpg".into(), size: 7, ..Default::default() }),
+        };
+        s.db.execute(
+            "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, 0, ?2)",
+            params![chat, s.seal(&message_aad(chat, 0), &old).unwrap()],
+        )
+        .unwrap();
+        let m = s.message(chat, 0).unwrap().unwrap();
+        assert_eq!((m.body.as_str(), m.id), ("beach", Some([1; 16])));
+        assert_eq!(m.media.unwrap().name, "beach.jpg");
+        assert!(m.poll.is_none() && m.votes.is_empty());
+        // And a poll round-trips.
+        let poll = StoredMessage {
+            poll: Some(Poll { question: "Where?".into(), options: vec!["Beach".into()], ..Default::default() }),
+            votes: vec![Vote { voter: [2; 32], choices: vec![0], at: 5 }],
+            ..Default::default()
+        };
+        let seq = s.add_message(chat, &poll).unwrap();
+        assert_eq!(s.message(chat, seq).unwrap().unwrap(), poll);
     }
 
     #[test]

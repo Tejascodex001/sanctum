@@ -1,3 +1,4 @@
+import '../src/rust/api/poll.dart';
 import '../src/rust/api/store.dart';
 import '../src/rust/api/temp_chat.dart';
 
@@ -12,6 +13,7 @@ class ChatMessage {
     this.reply,
     this.senderName,
     this.media,
+    this.poll,
   });
 
   final String body;
@@ -33,6 +35,9 @@ class ChatMessage {
 
   /// A photo, video, voice note or file.
   final MediaView? media;
+
+  /// A poll, date poll or plan, with everyone's answers.
+  final PollView? poll;
 }
 
 /// The part of a message a reply shows.
@@ -77,6 +82,7 @@ class StoreSource implements MessageSource {
             seq: m.seq,
             senderName: m.senderName,
             media: m.media,
+            poll: m.poll,
             reply: m.reply == null
                 ? null
                 : ChatQuote(
