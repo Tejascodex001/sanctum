@@ -6,8 +6,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../src/rust/api/identity.dart';
 import '../src/rust/api/store.dart';
 
-/// Device secrets, kept in Keystore-backed storage. They never leave the
-/// device and are lost if the app is uninstalled.
+/// Device secrets and profile, kept in Keystore-backed storage. They never
+/// leave the device and are lost if the app is uninstalled.
 const _storage = FlutterSecureStorage();
 
 Future<Uint8List> _loadOrCreate(String key, Future<Uint8List> Function() create) async {
@@ -18,9 +18,13 @@ Future<Uint8List> _loadOrCreate(String key, Future<Uint8List> Function() create)
   return fresh;
 }
 
-/// This device's identity; returns the public key.
-Future<Uint8List> loadOrCreateIdentity() async =>
-    identityPublicKey(secret: await _loadOrCreate('identity_secret_v1', identityNew));
+/// This device's identity secret.
+Future<Uint8List> loadOrCreateIdentitySecret() => _loadOrCreate('identity_secret_v1', identityNew);
 
 /// The key that encrypts the on-device database.
 Future<Uint8List> loadOrCreateStoreKey() => _loadOrCreate('store_key_v1', storeNewKey);
+
+/// The name friends see when you pair. Empty until set.
+Future<String> loadDisplayName() async => await _storage.read(key: 'display_name') ?? '';
+
+Future<void> saveDisplayName(String name) => _storage.write(key: 'display_name', value: name.trim());

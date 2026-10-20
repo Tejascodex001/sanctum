@@ -1,10 +1,8 @@
 //! Persistent chats, encrypted at rest. See `sanctum_core::store`.
 
+use super::session;
 use sanctum_core::store::{ChatKind, ChatMeta, Store, StoredMessage};
-use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-static STORE: LazyLock<Mutex<Option<Store>>> = LazyLock::new(Default::default);
 
 pub enum ChatKindView {
     Notes,
@@ -30,15 +28,6 @@ pub struct MessageView {
 /// A fresh 32-byte storage key; Dart keeps it in Keystore-backed storage.
 pub fn store_new_key() -> Vec<u8> {
     rand::random::<[u8; 32]>().to_vec()
-}
-
-pub fn store_open(dir: String, key: Vec<u8>) -> anyhow::Result<()> {
-    let key: [u8; 32] = key
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("key must be 32 bytes"))?;
-    let store = Store::open(std::path::Path::new(&dir).join("sanctum.db"), &key)?;
-    *lock() = Some(store);
-    Ok(())
 }
 
 pub fn chat_list() -> anyhow::Result<Vec<StoredChat>> {
@@ -74,6 +63,8 @@ pub fn chat_create(kind: ChatKindView, title: String, sigil_key: Vec<u8>) -> any
             sigil_key,
             pinned: false,
             created_at: now(),
+            group_id: Vec::new(),
+            peers: Vec::new(),
         })?)
     })
 }
@@ -122,16 +113,8 @@ pub fn message_list(chat_id: i64, limit: Option<u32>) -> anyhow::Result<Vec<Mess
     })
 }
 
-fn lock() -> std::sync::MutexGuard<'static, Option<Store>> {
-    STORE.lock().unwrap_or_else(|e| e.into_inner())
-}
-
 fn with<T>(f: impl FnOnce(&Store) -> anyhow::Result<T>) -> anyhow::Result<T> {
-    let guard = lock();
-    let store = guard
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("store is not open"))?;
-    f(store)
+    session::with(|s| f(&s.store))
 }
 
 fn now() -> u64 {

@@ -4,6 +4,7 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api/identity.dart';
+import 'api/session.dart';
 import 'api/sigil.dart';
 import 'api/store.dart';
 import 'api/temp_chat.dart';
@@ -26,6 +27,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String dco_decode_String(dynamic raw);
+
+  @protected
+  AcceptView dco_decode_accept_view(dynamic raw);
 
   @protected
   bool dco_decode_bool(dynamic raw);
@@ -76,6 +80,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
+  PairedView dco_decode_paired_view(dynamic raw);
+
+  @protected
   SigilForm dco_decode_sigil_form(dynamic raw);
 
   @protected
@@ -101,6 +108,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
+
+  @protected
+  AcceptView sse_decode_accept_view(SseDeserializer deserializer);
 
   @protected
   bool sse_decode_bool(SseDeserializer deserializer);
@@ -153,6 +163,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
+  PairedView sse_decode_paired_view(SseDeserializer deserializer);
+
+  @protected
   SigilForm sse_decode_sigil_form(SseDeserializer deserializer);
 
   @protected
@@ -181,6 +194,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_accept_view(AcceptView self, SseSerializer serializer);
 
   @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
@@ -244,6 +260,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_paired_view(PairedView self, SseSerializer serializer);
 
   @protected
   void sse_encode_sigil_form(SigilForm self, SseSerializer serializer);

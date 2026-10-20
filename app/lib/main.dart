@@ -5,8 +5,9 @@ import 'home/home_screen.dart';
 import 'identity/secrets.dart';
 import 'security/app_lock.dart';
 import 'sigil/sigil_painter.dart';
+import 'src/rust/api/identity.dart';
+import 'src/rust/api/session.dart';
 import 'src/rust/api/sigil.dart';
-import 'src/rust/api/store.dart';
 import 'src/rust/frb_generated.dart';
 import 'theme/sigil_theme.dart';
 
@@ -14,11 +15,13 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
   try {
-    final publicKey = await loadOrCreateIdentity();
-    await storeOpen(
+    final secret = await loadOrCreateIdentitySecret();
+    await sessionOpen(
+      identitySecret: secret,
       dir: (await getApplicationSupportDirectory()).path,
-      key: await loadOrCreateStoreKey(),
+      storeKey: await loadOrCreateStoreKey(),
     );
+    final publicKey = await identityPublicKey(secret: secret);
     final mySigil = await sigilForKey(publicKey: publicKey);
     runApp(SanctumApp(
       home: HomeScreen(publicKey: publicKey, mySigil: mySigil),

@@ -7,6 +7,7 @@ import '../chat/chat_screen.dart';
 import '../chat/message_source.dart';
 import '../deck/chat_card.dart';
 import '../deck/chat_stack.dart';
+import '../friends/add_friend_screen.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/sigil.dart';
 import '../src/rust/api/store.dart';
@@ -57,6 +58,9 @@ class _HomeScreenState extends State<HomeScreen> {
         title: c.title,
         sigil: await sigilForKey(publicKey: c.sigilKey),
         source: StoreSource(c.id),
+        note: c.kind == ChatKindView.notes
+            ? 'Only on this device'
+            : 'End-to-end encrypted · delivery arrives with Tor',
         updatedAt: DateTime.fromMillisecondsSinceEpoch(c.createdAt * 1000),
       )..pinned = c.pinned;
       await card.refresh();
@@ -181,6 +185,18 @@ class _HomeScreenState extends State<HomeScreen> {
     _pages.animateToPage(page, duration: const Duration(milliseconds: 380), curve: Curves.easeOutCubic);
   }
 
+  Future<void> _addFriend() async {
+    HapticFeedback.selectionClick();
+    final added = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => AddFriendScreen(mySigil: widget.mySigil)),
+    );
+    if (added == true) {
+      await _loadChats();
+      _goTo(0);
+    }
+  }
+
   void _showMe() {
     showModalBottomSheet<void>(
       context: context,
@@ -238,6 +254,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             icon: const Icon(Icons.local_fire_department_rounded, color: Colors.redAccent),
                           )
                         : const SizedBox(key: ValueKey('none'), width: 48),
+                  ),
+                  IconButton(
+                    tooltip: 'Add a friend',
+                    onPressed: _addFriend,
+                    icon: const Icon(Icons.person_add_alt_1_rounded),
                   ),
                   const SizedBox(width: 4),
                   GestureDetector(

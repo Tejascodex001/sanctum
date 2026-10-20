@@ -242,7 +242,7 @@ class _Header extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
                 Text(
-                  card.temp ? 'Temp · burns after 24h' : 'Only on this device',
+                  card.temp ? 'Temp · burns after 24h' : card.note ?? 'Only on this device',
                   style: const TextStyle(fontSize: 12, color: Colors.white54),
                 ),
               ],

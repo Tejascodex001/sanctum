@@ -46,6 +46,42 @@ pub struct ChatMeta {
     pub pinned: bool,
     /// Unix seconds.
     pub created_at: u64,
+    /// The MLS group carrying this chat; empty for notes.
+    pub group_id: Vec<u8>,
+    /// Everyone in the chat except us.
+    pub peers: Vec<Peer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Peer {
+    pub identity: [u8; 32],
+    pub name: String,
+    /// Where to reach them over Tor, once known.
+    pub onion: Option<String>,
+}
+
+/// The first on-disk format, before chats carried groups and peers.
+#[derive(Deserialize)]
+struct ChatMetaV0 {
+    kind: ChatKind,
+    title: String,
+    sigil_key: Vec<u8>,
+    pinned: bool,
+    created_at: u64,
+}
+
+impl From<ChatMetaV0> for ChatMeta {
+    fn from(v: ChatMetaV0) -> Self {
+        Self {
+            kind: v.kind,
+            title: v.title,
+            sigil_key: v.sigil_key,
+            pinned: v.pinned,
+            created_at: v.created_at,
+            group_id: Vec::new(),
+            peers: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -99,7 +135,7 @@ impl Store {
             })
             .optional()?
         {
-            store.open_sealed::<ChatMeta>(&chat_aad(id), &sealed)?;
+            store.decode_chat(id, &sealed)?;
         }
         Ok(store)
     }
@@ -135,7 +171,7 @@ impl Store {
         let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
         rows.map(|row| {
             let (id, sealed) = row?;
-            Ok((id, self.open_sealed(&chat_aad(id), &sealed)?))
+            Ok((id, self.decode_chat(id, &sealed)?))
         })
         .collect()
     }
@@ -236,15 +272,26 @@ impl Store {
     }
 
     fn open_sealed<T: DeserializeOwned>(&self, aad: &[u8], sealed: &[u8]) -> Result<T> {
+        Ok(postcard::from_bytes(&self.open_bytes(aad, sealed)?)?)
+    }
+
+    fn open_bytes(&self, aad: &[u8], sealed: &[u8]) -> Result<Vec<u8>> {
         if sealed.len() < NONCE_LEN {
             return Err(StoreError::Decrypt);
         }
         let (nonce, ct) = sealed.split_at(NONCE_LEN);
-        let plain = self
-            .cipher
+        self.cipher
             .decrypt(XNonce::from_slice(nonce), Payload { msg: ct, aad })
-            .map_err(|_| StoreError::Decrypt)?;
-        Ok(postcard::from_bytes(&plain)?)
+            .map_err(|_| StoreError::Decrypt)
+    }
+
+    /// Reads a chat in the current format, upgrading older records.
+    fn decode_chat(&self, id: i64, sealed: &[u8]) -> Result<ChatMeta> {
+        let plain = self.open_bytes(&chat_aad(id), sealed)?;
+        match postcard::from_bytes::<ChatMeta>(&plain) {
+            Ok(meta) => Ok(meta),
+            Err(_) => Ok(postcard::from_bytes::<ChatMetaV0>(&plain)?.into()),
+        }
     }
 }
 
@@ -276,7 +323,45 @@ mod tests {
             sigil_key: vec![7; 32],
             pinned: false,
             created_at: 1,
+            group_id: Vec::new(),
+            peers: Vec::new(),
         }
+    }
+
+    #[test]
+    fn old_chat_records_upgrade() {
+        #[derive(Serialize)]
+        struct V0 {
+            kind: ChatKind,
+            title: String,
+            sigil_key: Vec<u8>,
+            pinned: bool,
+            created_at: u64,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.db");
+        let key = [9u8; 32];
+        {
+            let s = Store::open(&path, &key).unwrap();
+            let id = 42;
+            let old = V0 {
+                kind: ChatKind::Notes,
+                title: "Notes to self".into(),
+                sigil_key: vec![1; 32],
+                pinned: true,
+                created_at: 5,
+            };
+            s.db.execute(
+                "INSERT INTO chats (id, sealed) VALUES (?1, ?2)",
+                params![id, s.seal(&chat_aad(id), &old).unwrap()],
+            )
+            .unwrap();
+        }
+        let s = Store::open(&path, &key).unwrap();
+        let (id, meta) = s.chats().unwrap().remove(0);
+        assert_eq!(id, 42);
+        assert_eq!(meta.title, "Notes to self");
+        assert!(meta.pinned && meta.peers.is_empty() && meta.group_id.is_empty());
     }
 
     fn msg(body: &str, sent_at: u64) -> StoredMessage {

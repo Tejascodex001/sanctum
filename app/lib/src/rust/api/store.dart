@@ -6,14 +6,11 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `lock`, `now`, `with`
+// These functions are ignored because they are not marked as `pub`: `now`, `with`
 
 /// A fresh 32-byte storage key; Dart keeps it in Keystore-backed storage.
 Future<Uint8List> storeNewKey() =>
     RustLib.instance.api.crateApiStoreStoreNewKey();
-
-Future<void> storeOpen({required String dir, required List<int> key}) =>
-    RustLib.instance.api.crateApiStoreStoreOpen(dir: dir, key: key);
 
 Future<List<StoredChat>> chatList() =>
     RustLib.instance.api.crateApiStoreChatList();

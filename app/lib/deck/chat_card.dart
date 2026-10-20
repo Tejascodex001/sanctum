@@ -9,6 +9,7 @@ class ChatCard {
     required this.sigil,
     required this.source,
     this.temp = false,
+    this.note,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
 
@@ -17,6 +18,9 @@ class ChatCard {
   final SigilSpec sigil;
   final MessageSource source;
   final bool temp;
+
+  /// Shown under the title inside the chat.
+  final String? note;
 
   bool pinned = false;
   String? preview;

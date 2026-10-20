@@ -5,10 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanctum/home/home_screen.dart';
 import 'package:sanctum/src/rust/api/identity.dart';
 import 'package:sanctum/src/rust/api/sigil.dart';
+import 'package:sanctum/src/rust/api/session.dart';
 import 'package:sanctum/src/rust/api/store.dart';
 import 'package:sanctum/src/rust/frb_generated.dart';
 import 'package:sanctum/sigil/sigil_painter.dart';
@@ -59,8 +61,9 @@ void main() {
       externalLibrary: ExternalLibrary.open('../target/debug/librust_lib_sanctum.so'),
     );
     await loadFonts();
+    FlutterSecureStorage.setMockInitialValues({});
     final dir = Directory.systemTemp.createTempSync('sanctum_test');
-    await storeOpen(dir: dir.path, key: await storeNewKey());
+    await sessionOpen(identitySecret: await identityNew(), dir: dir.path, storeKey: await storeNewKey());
   });
 
   testWidgets('notes, temp chats, pinning and wipe work end to end', (tester) async {
@@ -147,6 +150,18 @@ void main() {
     await tester.tap(find.text('Chats'));
     await settle(tester);
     await shot(tester, '1-chats');
+
+    // Add a friend: name, then show my code.
+    await tester.tap(find.byTooltip('Add a friend'));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField).first, 'Tejas');
+    await settle(tester, 3);
+    await tester.tap(find.text('Show my code'));
+    await settle(tester, 12);
+    expect(find.text('Let your friend scan this'), findsOneWidget);
+    await shot(tester, '4-add-friend');
+    await tester.tap(find.byTooltip('Back'));
+    await settle(tester);
 
     // A fresh home screen (as after a restart) reads notes back from the
     // encrypted store; temp chats are gone because they never touch disk.

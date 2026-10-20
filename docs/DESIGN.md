@@ -34,6 +34,12 @@ Rust core (sanctum-core)
 - **At rest:** every chat, message and MLS secret is sealed before SQLite sees it, with the row's identity bound as associated data so rows can't be swapped. Lookup keys for MLS state are keyed hashes, so group ids never appear on disk. `secure_delete` zeroes deleted data. Temp chats never touch disk.
 - MLS state is persisted after every operation; a crash before persisting just rolls back to the last saved state.
 
+## Pairing (in person, no network)
+1. Bob shows a QR **offer**: identity key, name, a one-time MLS key package, signed.
+2. Alice scans it, creates the chat's MLS group with Bob in it, and shows a QR **reply**: her identity, name and the MLS welcome, signed and bound to Bob's offer.
+3. Bob scans the reply and joins. Both phones derive the same **pair sigil**; if they match on screen, no code was swapped.
+Codes are about 560 and 1,300 characters. QR scanning uses ZXing on-device (no Google ML Kit, which reports usage to Google).
+
 ## Security features
 - App lock with biometric or PIN; locks again when the app goes to the background.
 - Screenshots blocked by default (`FLAG_SECURE`); can be allowed per chat after a biometric check.
