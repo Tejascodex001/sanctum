@@ -572,12 +572,12 @@ impl SseDecode for crate::api::sigil::SigilForm {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
-            0 => crate::api::sigil::SigilForm::Rings,
-            1 => crate::api::sigil::SigilForm::Petals,
+            0 => crate::api::sigil::SigilForm::Rosette,
+            1 => crate::api::sigil::SigilForm::Constellation,
             2 => crate::api::sigil::SigilForm::Shards,
-            3 => crate::api::sigil::SigilForm::Waves,
+            3 => crate::api::sigil::SigilForm::Orbits,
             4 => crate::api::sigil::SigilForm::Lattice,
-            5 => crate::api::sigil::SigilForm::Spiral,
+            5 => crate::api::sigil::SigilForm::Glyph,
             _ => unreachable!("Invalid variant for SigilForm: {}", inner),
         };
     }
@@ -588,18 +588,24 @@ impl SseDecode for crate::api::sigil::SigilSpec {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_accent = <crate::api::sigil::HslColor>::sse_decode(deserializer);
         let mut var_palette = <Vec<crate::api::sigil::HslColor>>::sse_decode(deserializer);
+        let mut var_background = <crate::api::sigil::HslColor>::sse_decode(deserializer);
         let mut var_form = <crate::api::sigil::SigilForm>::sse_decode(deserializer);
         let mut var_symmetry = <u8>::sse_decode(deserializer);
         let mut var_layers = <u8>::sse_decode(deserializer);
         let mut var_rotation = <f64>::sse_decode(deserializer);
+        let mut var_density = <f64>::sse_decode(deserializer);
+        let mut var_weight = <f64>::sse_decode(deserializer);
         let mut var_seed = <u32>::sse_decode(deserializer);
         return crate::api::sigil::SigilSpec {
             accent: var_accent,
             palette: var_palette,
+            background: var_background,
             form: var_form,
             symmetry: var_symmetry,
             layers: var_layers,
             rotation: var_rotation,
+            density: var_density,
+            weight: var_weight,
             seed: var_seed,
         };
     }
@@ -704,12 +710,12 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::sigil::HslColor>
 impl flutter_rust_bridge::IntoDart for crate::api::sigil::SigilForm {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
-            Self::Rings => 0.into_dart(),
-            Self::Petals => 1.into_dart(),
+            Self::Rosette => 0.into_dart(),
+            Self::Constellation => 1.into_dart(),
             Self::Shards => 2.into_dart(),
-            Self::Waves => 3.into_dart(),
+            Self::Orbits => 3.into_dart(),
             Self::Lattice => 4.into_dart(),
-            Self::Spiral => 5.into_dart(),
+            Self::Glyph => 5.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -728,10 +734,13 @@ impl flutter_rust_bridge::IntoDart for crate::api::sigil::SigilSpec {
         [
             self.accent.into_into_dart().into_dart(),
             self.palette.into_into_dart().into_dart(),
+            self.background.into_into_dart().into_dart(),
             self.form.into_into_dart().into_dart(),
             self.symmetry.into_into_dart().into_dart(),
             self.layers.into_into_dart().into_dart(),
             self.rotation.into_into_dart().into_dart(),
+            self.density.into_into_dart().into_dart(),
+            self.weight.into_into_dart().into_dart(),
             self.seed.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -865,12 +874,12 @@ impl SseEncode for crate::api::sigil::SigilForm {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <i32>::sse_encode(
             match self {
-                crate::api::sigil::SigilForm::Rings => 0,
-                crate::api::sigil::SigilForm::Petals => 1,
+                crate::api::sigil::SigilForm::Rosette => 0,
+                crate::api::sigil::SigilForm::Constellation => 1,
                 crate::api::sigil::SigilForm::Shards => 2,
-                crate::api::sigil::SigilForm::Waves => 3,
+                crate::api::sigil::SigilForm::Orbits => 3,
                 crate::api::sigil::SigilForm::Lattice => 4,
-                crate::api::sigil::SigilForm::Spiral => 5,
+                crate::api::sigil::SigilForm::Glyph => 5,
                 _ => {
                     unimplemented!("");
                 }
@@ -885,10 +894,13 @@ impl SseEncode for crate::api::sigil::SigilSpec {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <crate::api::sigil::HslColor>::sse_encode(self.accent, serializer);
         <Vec<crate::api::sigil::HslColor>>::sse_encode(self.palette, serializer);
+        <crate::api::sigil::HslColor>::sse_encode(self.background, serializer);
         <crate::api::sigil::SigilForm>::sse_encode(self.form, serializer);
         <u8>::sse_encode(self.symmetry, serializer);
         <u8>::sse_encode(self.layers, serializer);
         <f64>::sse_encode(self.rotation, serializer);
+        <f64>::sse_encode(self.density, serializer);
+        <f64>::sse_encode(self.weight, serializer);
         <u32>::sse_encode(self.seed, serializer);
     }
 }

@@ -36,10 +36,10 @@ Rust core (sanctum-core)
 - Verification: both people see the same sigil for their chat. If the sigils match, the chat is secure.
 
 ## UI: Sigil + Deck
-- **Sigil:** each chat's art is generated from its keys and supplies the chat's wallpaper, accent color, icon and deck card face.
-- **Deck:** chats are cards in a stack. Swipe up to open, sideways to switch, pinch to see the whole deck. Long-press a card for actions. Few buttons.
-- **Temp deck:** a separate deck for temp chats. Each card visibly burns down as its 24 hours run out; swipe it into the fire to wipe it now.
-- Dark base, haptics on every gesture, motion-led transitions.
+- **Sigil:** each chat's emblem is generated in Rust from its key fingerprint and drawn as crisp vector art (no blur). Six families (rosette, constellation, shards, orbits, lattice, rune), four colour harmonies, 3–12-fold symmetry and varying density and stroke weight, so two keys almost never look alike. The sigil supplies the chat's colours, card face, header emblem and slowly turning chat backdrop.
+- **Deck:** chats are a stack of overlapping cards (lazy list, sigils painted once and cached), pinned first, then most recent. Search filters by name and last message. Swipe between Chats and Temp; the tab pill follows the swipe.
+- **Card:** emblem, name, last message, time, and the sigil as a large cropped watermark. Temp cards show a ring counting down to the next burn. Long-press to pin or wipe; swipe a temp card left to wipe it.
+- **Motion:** cards open with a container transform, enter with a staggered slide, messages spring in, the send button wakes as you type, a wiped chat blurs and dissolves, and unlocking zooms through your sigil.
 
 ## Roadmap
 - **v1:** identity, QR invites, encrypted 1:1 and group chat over Tor, media, voice notes, threads, temp chats (internet/Wi-Fi Direct/Bluetooth), app lock, screenshot control, hidden chats.

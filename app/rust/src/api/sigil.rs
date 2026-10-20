@@ -8,21 +8,25 @@ pub struct HslColor {
 }
 
 pub enum SigilForm {
-    Rings,
-    Petals,
+    Rosette,
+    Constellation,
     Shards,
-    Waves,
+    Orbits,
     Lattice,
-    Spiral,
+    Glyph,
 }
 
 pub struct SigilSpec {
     pub accent: HslColor,
+    /// Always three colours.
     pub palette: Vec<HslColor>,
+    pub background: HslColor,
     pub form: SigilForm,
     pub symmetry: u8,
     pub layers: u8,
     pub rotation: f64,
+    pub density: f64,
+    pub weight: f64,
     /// Truncated to 32 bits so it fits Dart's `Random` seed.
     pub seed: u32,
 }
@@ -63,17 +67,20 @@ impl From<Sigil> for SigilSpec {
         Self {
             accent: s.accent.into(),
             palette: s.palette.into_iter().map(Into::into).collect(),
+            background: s.background.into(),
             form: match s.form {
-                Form::Rings => SigilForm::Rings,
-                Form::Petals => SigilForm::Petals,
+                Form::Rosette => SigilForm::Rosette,
+                Form::Constellation => SigilForm::Constellation,
                 Form::Shards => SigilForm::Shards,
-                Form::Waves => SigilForm::Waves,
+                Form::Orbits => SigilForm::Orbits,
                 Form::Lattice => SigilForm::Lattice,
-                Form::Spiral => SigilForm::Spiral,
+                Form::Glyph => SigilForm::Glyph,
             },
             symmetry: s.symmetry,
             layers: s.layers,
             rotation: s.rotation.into(),
+            density: s.density.into(),
+            weight: s.weight.into(),
             seed: s.seed as u32,
         }
     }

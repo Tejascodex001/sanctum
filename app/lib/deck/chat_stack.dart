@@ -1,0 +1,226 @@
+import 'package:animations/animations.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../sigil/sigil_painter.dart';
+import 'chat_card.dart';
+import 'chat_tile.dart';
+
+/// Chats as a stack of overlapping cards. Scales to any number of chats:
+/// the list is lazy, sigils are painted once and cached, and pinned chats
+/// sort first, then the most recent.
+class ChatStack extends StatefulWidget {
+  const ChatStack({
+    super.key,
+    required this.cards,
+    required this.openBuilder,
+    required this.onClosed,
+    this.onLongPress,
+    this.onDismiss,
+    this.query = '',
+    required this.empty,
+  });
+
+  final List<ChatCard> cards;
+  final Widget Function(ChatCard card, VoidCallback close) openBuilder;
+  final ValueChanged<ChatCard> onClosed;
+  final ValueChanged<ChatCard>? onLongPress;
+
+  /// When set, cards can be swiped left to wipe them.
+  final ValueChanged<ChatCard>? onDismiss;
+  final String query;
+  final Widget empty;
+
+  @override
+  State<ChatStack> createState() => _ChatStackState();
+}
+
+class _ChatStackState extends State<ChatStack> {
+  /// Cards that already played their entrance, so scrolling never replays it.
+  final _seen = <int>{};
+
+  List<ChatCard> get _visible {
+    final q = widget.query.trim().toLowerCase();
+    final list = [
+      for (final c in widget.cards)
+        if (q.isEmpty ||
+            c.title.toLowerCase().contains(q) ||
+            (c.preview?.toLowerCase().contains(q) ?? false))
+          c,
+    ];
+    list.sort((a, b) {
+      if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+      return b.updatedAt.compareTo(a.updatedAt);
+    });
+    return list;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = _visible;
+    if (cards.isEmpty) {
+      return widget.query.isEmpty
+          ? widget.empty
+          : const Center(
+              child: Text('No matches', style: TextStyle(color: Colors.white38)),
+            );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
+      itemCount: cards.length,
+      itemBuilder: (context, i) {
+        final card = cards[i];
+        final animate = _seen.add(card.id);
+        Widget item = _StackedCard(
+          card: card,
+          openBuilder: widget.openBuilder,
+          onClosed: () => widget.onClosed(card),
+          onLongPress: widget.onLongPress == null ? null : () => widget.onLongPress!(card),
+        );
+        if (widget.onDismiss != null) {
+          item = Dismissible(
+            key: ValueKey('dismiss-${card.id}'),
+            direction: DismissDirection.endToStart,
+            onDismissed: (_) {
+              HapticFeedback.heavyImpact();
+              widget.onDismiss!(card);
+            },
+            background: const _WipeBackground(),
+            child: item,
+          );
+        }
+        // Each card tucks under the next, like a fanned deck.
+        item = Align(
+          alignment: Alignment.topCenter,
+          heightFactor: i == cards.length - 1 ? 1 : 0.9,
+          child: item,
+        );
+        return animate
+            ? _Entrance(key: ValueKey('in-${card.id}'), delay: i.clamp(0, 10) * 45, child: item)
+            : item;
+      },
+    );
+  }
+}
+
+class _StackedCard extends StatelessWidget {
+  const _StackedCard({
+    required this.card,
+    required this.openBuilder,
+    required this.onClosed,
+    this.onLongPress,
+  });
+
+  final ChatCard card;
+  final Widget Function(ChatCard card, VoidCallback close) openBuilder;
+  final VoidCallback onClosed;
+  final VoidCallback? onLongPress;
+
+  static const _shape = RoundedRectangleBorder(
+    borderRadius: BorderRadius.all(Radius.circular(26)),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        borderRadius: BorderRadius.all(Radius.circular(26)),
+        boxShadow: [
+          BoxShadow(color: Colors.black54, blurRadius: 24, offset: Offset(0, -4)),
+        ],
+      ),
+      child: OpenContainer(
+        transitionDuration: const Duration(milliseconds: 480),
+        transitionType: ContainerTransitionType.fadeThrough,
+        closedShape: _shape,
+        closedElevation: 0,
+        openElevation: 0,
+        closedColor: card.sigil.background.color,
+        openColor: card.sigil.background.color,
+        middleColor: card.sigil.background.color,
+        onClosed: (_) => onClosed(),
+        closedBuilder: (context, open) => GestureDetector(
+          onLongPress: onLongPress == null
+              ? null
+              : () {
+                  HapticFeedback.mediumImpact();
+                  onLongPress!();
+                },
+          child: ChatTile(card: card),
+        ),
+        openBuilder: (context, close) => openBuilder(card, close),
+      ),
+    );
+  }
+}
+
+class _WipeBackground extends StatelessWidget {
+  const _WipeBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      alignment: Alignment.centerRight,
+      padding: const EdgeInsets.only(right: 28),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(26),
+        gradient: LinearGradient(
+          colors: [Colors.transparent, Colors.redAccent.withValues(alpha: 0.6)],
+        ),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.local_fire_department_rounded),
+          SizedBox(width: 6),
+          Text('Wipe', style: TextStyle(fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Slides and fades a card in once, after [delay] milliseconds.
+class _Entrance extends StatefulWidget {
+  const _Entrance({super.key, required this.delay, required this.child});
+
+  final int delay;
+  final Widget child;
+
+  @override
+  State<_Entrance> createState() => _EntranceState();
+}
+
+class _EntranceState extends State<_Entrance> with SingleTickerProviderStateMixin {
+  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 520));
+  late final _curve = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration(milliseconds: widget.delay), () {
+      if (mounted) _c.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _curve,
+      child: widget.child,
+      builder: (_, child) => Opacity(
+        opacity: _curve.value,
+        child: Transform.translate(
+          offset: Offset(0, 40 * (1 - _curve.value)),
+          child: Transform.scale(scale: 0.96 + 0.04 * _curve.value, child: child),
+        ),
+      ),
+    );
+  }
+}

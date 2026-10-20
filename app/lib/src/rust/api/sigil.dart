@@ -26,11 +26,7 @@ class HslColor {
   final double s;
   final double l;
 
-  const HslColor({
-    required this.h,
-    required this.s,
-    required this.l,
-  });
+  const HslColor({required this.h, required this.s, required this.l});
 
   @override
   int get hashCode => h.hashCode ^ s.hashCode ^ l.hashCode;
@@ -45,23 +41,20 @@ class HslColor {
           l == other.l;
 }
 
-enum SigilForm {
-  rings,
-  petals,
-  shards,
-  waves,
-  lattice,
-  spiral,
-  ;
-}
+enum SigilForm { rosette, constellation, shards, orbits, lattice, glyph }
 
 class SigilSpec {
   final HslColor accent;
+
+  /// Always three colours.
   final List<HslColor> palette;
+  final HslColor background;
   final SigilForm form;
   final int symmetry;
   final int layers;
   final double rotation;
+  final double density;
+  final double weight;
 
   /// Truncated to 32 bits so it fits Dart's `Random` seed.
   final int seed;
@@ -69,10 +62,13 @@ class SigilSpec {
   const SigilSpec({
     required this.accent,
     required this.palette,
+    required this.background,
     required this.form,
     required this.symmetry,
     required this.layers,
     required this.rotation,
+    required this.density,
+    required this.weight,
     required this.seed,
   });
 
@@ -80,10 +76,13 @@ class SigilSpec {
   int get hashCode =>
       accent.hashCode ^
       palette.hashCode ^
+      background.hashCode ^
       form.hashCode ^
       symmetry.hashCode ^
       layers.hashCode ^
       rotation.hashCode ^
+      density.hashCode ^
+      weight.hashCode ^
       seed.hashCode;
 
   @override
@@ -93,9 +92,12 @@ class SigilSpec {
           runtimeType == other.runtimeType &&
           accent == other.accent &&
           palette == other.palette &&
+          background == other.background &&
           form == other.form &&
           symmetry == other.symmetry &&
           layers == other.layers &&
           rotation == other.rotation &&
+          density == other.density &&
+          weight == other.weight &&
           seed == other.seed;
 }

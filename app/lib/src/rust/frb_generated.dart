@@ -37,12 +37,8 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 
   /// Initialize flutter_rust_bridge in mock mode.
   /// No libraries for FFI are loaded.
-  static void initMock({
-    required RustLibApi api,
-  }) {
-    instance.initMockImpl(
-      api: api,
-    );
+  static void initMock({required RustLibApi api}) {
+    instance.initMockImpl(api: api);
   }
 
   /// Dispose flutter_rust_bridge
@@ -76,37 +72,43 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
-    stem: 'rust_lib_sanctum',
-    ioDirectory: 'rust/target/release/',
-    webPrefix: 'pkg/',
-    wasmBindgenName: 'wasm_bindgen',
-  );
+        stem: 'rust_lib_sanctum',
+        ioDirectory: 'rust/target/release/',
+        webPrefix: 'pkg/',
+        wasmBindgenName: 'wasm_bindgen',
+      );
 }
 
 abstract class RustLibApi extends BaseApi {
   Future<Uint8List> crateApiIdentityIdentityNew();
 
-  Future<Uint8List> crateApiIdentityIdentityPublicKey(
-      {required List<int> secret});
+  Future<Uint8List> crateApiIdentityIdentityPublicKey({
+    required List<int> secret,
+  });
 
   Future<void> crateApiIdentityInitApp();
 
   Future<SigilSpec> crateApiSigilSigilForKey({required List<int> publicKey});
 
-  Future<SigilSpec> crateApiSigilSigilForPair(
-      {required List<int> a, required List<int> b});
+  Future<SigilSpec> crateApiSigilSigilForPair({
+    required List<int> a,
+    required List<int> b,
+  });
 
   Future<SigilSpec> crateApiSigilSigilRandom();
 
   Future<Int64List> crateApiTempChatTempChatIds();
 
-  Future<List<TempMessageView>> crateApiTempChatTempMessages(
-      {required PlatformInt64 id});
+  Future<List<TempMessageView>> crateApiTempChatTempMessages({
+    required PlatformInt64 id,
+  });
 
   Future<void> crateApiTempChatTempOpen({required PlatformInt64 id});
 
-  Future<void> crateApiTempChatTempSend(
-      {required PlatformInt64 id, required String body});
+  Future<void> crateApiTempChatTempSend({
+    required PlatformInt64 id,
+    required String body,
+  });
 
   Future<void> crateApiTempChatTempWipe({required PlatformInt64 id});
 
@@ -123,46 +125,56 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<Uint8List> crateApiIdentityIdentityNew() {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 1, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_prim_u_8_strict,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 1,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiIdentityIdentityNewConstMeta,
+        argValues: [],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiIdentityIdentityNewConstMeta,
-      argValues: [],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiIdentityIdentityNewConstMeta =>
-      const TaskConstMeta(
-        debugName: "identity_new",
-        argNames: [],
-      );
+      const TaskConstMeta(debugName: "identity_new", argNames: []);
 
   @override
-  Future<Uint8List> crateApiIdentityIdentityPublicKey(
-      {required List<int> secret}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_list_prim_u_8_loose(secret, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 2, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_prim_u_8_strict,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<Uint8List> crateApiIdentityIdentityPublicKey({
+    required List<int> secret,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(secret, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiIdentityIdentityPublicKeyConstMeta,
+        argValues: [secret],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiIdentityIdentityPublicKeyConstMeta,
-      argValues: [secret],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiIdentityIdentityPublicKeyConstMeta =>
@@ -173,247 +185,289 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<void> crateApiIdentityInitApp() {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 3, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 3,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiIdentityInitAppConstMeta,
+        argValues: [],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiIdentityInitAppConstMeta,
-      argValues: [],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiIdentityInitAppConstMeta => const TaskConstMeta(
-        debugName: "init_app",
-        argNames: [],
-      );
+  TaskConstMeta get kCrateApiIdentityInitAppConstMeta =>
+      const TaskConstMeta(debugName: "init_app", argNames: []);
 
   @override
   Future<SigilSpec> crateApiSigilSigilForKey({required List<int> publicKey}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_list_prim_u_8_loose(publicKey, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 4, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_sigil_spec,
-        decodeErrorData: sse_decode_AnyhowException,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(publicKey, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_sigil_spec,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiSigilSigilForKeyConstMeta,
+        argValues: [publicKey],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiSigilSigilForKeyConstMeta,
-      argValues: [publicKey],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiSigilSigilForKeyConstMeta => const TaskConstMeta(
-        debugName: "sigil_for_key",
-        argNames: ["publicKey"],
-      );
+  TaskConstMeta get kCrateApiSigilSigilForKeyConstMeta =>
+      const TaskConstMeta(debugName: "sigil_for_key", argNames: ["publicKey"]);
 
   @override
-  Future<SigilSpec> crateApiSigilSigilForPair(
-      {required List<int> a, required List<int> b}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_list_prim_u_8_loose(a, serializer);
-        sse_encode_list_prim_u_8_loose(b, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 5, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_sigil_spec,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<SigilSpec> crateApiSigilSigilForPair({
+    required List<int> a,
+    required List<int> b,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(a, serializer);
+          sse_encode_list_prim_u_8_loose(b, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 5,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_sigil_spec,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiSigilSigilForPairConstMeta,
+        argValues: [a, b],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiSigilSigilForPairConstMeta,
-      argValues: [a, b],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiSigilSigilForPairConstMeta => const TaskConstMeta(
-        debugName: "sigil_for_pair",
-        argNames: ["a", "b"],
-      );
+  TaskConstMeta get kCrateApiSigilSigilForPairConstMeta =>
+      const TaskConstMeta(debugName: "sigil_for_pair", argNames: ["a", "b"]);
 
   @override
   Future<SigilSpec> crateApiSigilSigilRandom() {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 6, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_sigil_spec,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_sigil_spec,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSigilSigilRandomConstMeta,
+        argValues: [],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiSigilSigilRandomConstMeta,
-      argValues: [],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiSigilSigilRandomConstMeta => const TaskConstMeta(
-        debugName: "sigil_random",
-        argNames: [],
-      );
+  TaskConstMeta get kCrateApiSigilSigilRandomConstMeta =>
+      const TaskConstMeta(debugName: "sigil_random", argNames: []);
 
   @override
   Future<Int64List> crateApiTempChatTempChatIds() {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 7, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_prim_i_64_strict,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_i_64_strict,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiTempChatTempChatIdsConstMeta,
+        argValues: [],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiTempChatTempChatIdsConstMeta,
-      argValues: [],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiTempChatTempChatIdsConstMeta =>
-      const TaskConstMeta(
-        debugName: "temp_chat_ids",
-        argNames: [],
-      );
+      const TaskConstMeta(debugName: "temp_chat_ids", argNames: []);
 
   @override
-  Future<List<TempMessageView>> crateApiTempChatTempMessages(
-      {required PlatformInt64 id}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_i_64(id, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 8, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_temp_message_view,
-        decodeErrorData: null,
+  Future<List<TempMessageView>> crateApiTempChatTempMessages({
+    required PlatformInt64 id,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(id, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 8,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_temp_message_view,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiTempChatTempMessagesConstMeta,
+        argValues: [id],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiTempChatTempMessagesConstMeta,
-      argValues: [id],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiTempChatTempMessagesConstMeta =>
-      const TaskConstMeta(
-        debugName: "temp_messages",
-        argNames: ["id"],
-      );
+      const TaskConstMeta(debugName: "temp_messages", argNames: ["id"]);
 
   @override
   Future<void> crateApiTempChatTempOpen({required PlatformInt64 id}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_i_64(id, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 9, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(id, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 9,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiTempChatTempOpenConstMeta,
+        argValues: [id],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiTempChatTempOpenConstMeta,
-      argValues: [id],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiTempChatTempOpenConstMeta => const TaskConstMeta(
-        debugName: "temp_open",
-        argNames: ["id"],
-      );
+  TaskConstMeta get kCrateApiTempChatTempOpenConstMeta =>
+      const TaskConstMeta(debugName: "temp_open", argNames: ["id"]);
 
   @override
-  Future<void> crateApiTempChatTempSend(
-      {required PlatformInt64 id, required String body}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_i_64(id, serializer);
-        sse_encode_String(body, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 10, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+  Future<void> crateApiTempChatTempSend({
+    required PlatformInt64 id,
+    required String body,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(id, serializer);
+          sse_encode_String(body, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 10,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiTempChatTempSendConstMeta,
+        argValues: [id, body],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiTempChatTempSendConstMeta,
-      argValues: [id, body],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiTempChatTempSendConstMeta => const TaskConstMeta(
-        debugName: "temp_send",
-        argNames: ["id", "body"],
-      );
+  TaskConstMeta get kCrateApiTempChatTempSendConstMeta =>
+      const TaskConstMeta(debugName: "temp_send", argNames: ["id", "body"]);
 
   @override
   Future<void> crateApiTempChatTempWipe({required PlatformInt64 id}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_i_64(id, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 11, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(id, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 11,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiTempChatTempWipeConstMeta,
+        argValues: [id],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiTempChatTempWipeConstMeta,
-      argValues: [id],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiTempChatTempWipeConstMeta => const TaskConstMeta(
-        debugName: "temp_wipe",
-        argNames: ["id"],
-      );
+  TaskConstMeta get kCrateApiTempChatTempWipeConstMeta =>
+      const TaskConstMeta(debugName: "temp_wipe", argNames: ["id"]);
 
   @override
   Future<void> crateApiTempChatTempWipeAll() {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 12, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 12,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiTempChatTempWipeAllConstMeta,
+        argValues: [],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiTempChatTempWipeAllConstMeta,
-      argValues: [],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiTempChatTempWipeAllConstMeta =>
-      const TaskConstMeta(
-        debugName: "temp_wipe_all",
-        argNames: [],
-      );
+      const TaskConstMeta(debugName: "temp_wipe_all", argNames: []);
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
@@ -504,16 +558,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   SigilSpec dco_decode_sigil_spec(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return SigilSpec(
       accent: dco_decode_hsl_color(arr[0]),
       palette: dco_decode_list_hsl_color(arr[1]),
-      form: dco_decode_sigil_form(arr[2]),
-      symmetry: dco_decode_u_8(arr[3]),
-      layers: dco_decode_u_8(arr[4]),
-      rotation: dco_decode_f_64(arr[5]),
-      seed: dco_decode_u_32(arr[6]),
+      background: dco_decode_hsl_color(arr[2]),
+      form: dco_decode_sigil_form(arr[3]),
+      symmetry: dco_decode_u_8(arr[4]),
+      layers: dco_decode_u_8(arr[5]),
+      rotation: dco_decode_f_64(arr[6]),
+      density: dco_decode_f_64(arr[7]),
+      weight: dco_decode_f_64(arr[8]),
+      seed: dco_decode_u_32(arr[9]),
     );
   }
 
@@ -631,7 +688,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   List<TempMessageView> sse_decode_list_temp_message_view(
-      SseDeserializer deserializer) {
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     var len_ = sse_decode_i_32(deserializer);
@@ -654,19 +712,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_accent = sse_decode_hsl_color(deserializer);
     var var_palette = sse_decode_list_hsl_color(deserializer);
+    var var_background = sse_decode_hsl_color(deserializer);
     var var_form = sse_decode_sigil_form(deserializer);
     var var_symmetry = sse_decode_u_8(deserializer);
     var var_layers = sse_decode_u_8(deserializer);
     var var_rotation = sse_decode_f_64(deserializer);
+    var var_density = sse_decode_f_64(deserializer);
+    var var_weight = sse_decode_f_64(deserializer);
     var var_seed = sse_decode_u_32(deserializer);
     return SigilSpec(
-        accent: var_accent,
-        palette: var_palette,
-        form: var_form,
-        symmetry: var_symmetry,
-        layers: var_layers,
-        rotation: var_rotation,
-        seed: var_seed);
+      accent: var_accent,
+      palette: var_palette,
+      background: var_background,
+      form: var_form,
+      symmetry: var_symmetry,
+      layers: var_layers,
+      rotation: var_rotation,
+      density: var_density,
+      weight: var_weight,
+      seed: var_seed,
+    );
   }
 
   @protected
@@ -677,10 +742,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_sentAt = sse_decode_i_64(deserializer);
     var var_expiresAt = sse_decode_i_64(deserializer);
     return TempMessageView(
-        fromMe: var_fromMe,
-        body: var_body,
-        sentAt: var_sentAt,
-        expiresAt: var_expiresAt);
+      fromMe: var_fromMe,
+      body: var_body,
+      sentAt: var_sentAt,
+      expiresAt: var_expiresAt,
+    );
   }
 
   @protected
@@ -702,7 +768,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_AnyhowException(
-      AnyhowException self, SseSerializer serializer) {
+    AnyhowException self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.message, serializer);
   }
@@ -747,7 +815,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_list_hsl_color(
-      List<HslColor> self, SseSerializer serializer) {
+    List<HslColor> self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
@@ -757,7 +827,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_list_prim_i_64_strict(
-      Int64List self, SseSerializer serializer) {
+    Int64List self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putInt64List(self);
@@ -765,16 +837,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_list_prim_u_8_loose(
-      List<int> self, SseSerializer serializer) {
+    List<int> self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
-    serializer.buffer
-        .putUint8List(self is Uint8List ? self : Uint8List.fromList(self));
+    serializer.buffer.putUint8List(
+      self is Uint8List ? self : Uint8List.fromList(self),
+    );
   }
 
   @protected
   void sse_encode_list_prim_u_8_strict(
-      Uint8List self, SseSerializer serializer) {
+    Uint8List self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);
@@ -782,7 +859,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_list_temp_message_view(
-      List<TempMessageView> self, SseSerializer serializer) {
+    List<TempMessageView> self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
@@ -801,16 +880,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_hsl_color(self.accent, serializer);
     sse_encode_list_hsl_color(self.palette, serializer);
+    sse_encode_hsl_color(self.background, serializer);
     sse_encode_sigil_form(self.form, serializer);
     sse_encode_u_8(self.symmetry, serializer);
     sse_encode_u_8(self.layers, serializer);
     sse_encode_f_64(self.rotation, serializer);
+    sse_encode_f_64(self.density, serializer);
+    sse_encode_f_64(self.weight, serializer);
     sse_encode_u_32(self.seed, serializer);
   }
 
   @protected
   void sse_encode_temp_message_view(
-      TempMessageView self, SseSerializer serializer) {
+    TempMessageView self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bool(self.fromMe, serializer);
     sse_encode_String(self.body, serializer);

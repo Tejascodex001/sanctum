@@ -6,10 +6,12 @@ import 'package:flutter/services.dart';
 import '../chat/chat_screen.dart';
 import '../chat/message_source.dart';
 import '../deck/chat_card.dart';
-import '../deck/deck_view.dart';
+import '../deck/chat_stack.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/sigil.dart';
 import '../src/rust/api/temp_chat.dart';
+
+const _tempNames = ['Ember', 'Spark', 'Flare', 'Cinder', 'Ash', 'Blaze', 'Flicker', 'Glow'];
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.publicKey, required this.mySigil});
@@ -22,33 +24,40 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late final _deck = [
-    ChatCard(
-      id: 0,
-      title: 'Notes to self',
-      sigil: widget.mySigil,
-      source: MemorySource(),
-    ),
+  late final _chats = [
+    ChatCard(id: 0, title: 'Notes to self', sigil: widget.mySigil, source: MemorySource()),
   ];
   final _temp = <ChatCard>[];
-  bool _showTemp = false;
+  final _pages = PageController();
+  final _search = TextEditingController();
+  double _page = 0;
+  int _tempCount = 0;
   Timer? _purge;
 
   @override
   void initState() {
     super.initState();
+    _pages.addListener(() => setState(() => _page = _pages.page ?? 0));
+    _search.addListener(() => setState(() {}));
     _purge = Timer.periodic(const Duration(minutes: 1), (_) => _syncTemp());
   }
 
   @override
   void dispose() {
     _purge?.cancel();
+    _pages.dispose();
+    _search.dispose();
     super.dispose();
   }
 
-  /// Drops cards whose temp chat Rust has burned.
+  bool get _onTemp => _page > 0.5;
+
+  /// Drops cards whose temp chat Rust has burned and refreshes countdowns.
   Future<void> _syncTemp() async {
     final live = {for (final id in await tempChatIds()) id.toInt()};
+    for (final c in _temp) {
+      if (live.contains(c.id)) await c.refresh();
+    }
     if (!mounted) return;
     setState(() => _temp.removeWhere((c) => !live.contains(c.id)));
   }
@@ -59,18 +68,18 @@ class _HomeScreenState extends State<HomeScreen> {
     await tempOpen(id: id);
     final card = ChatCard(
       id: id,
-      title: 'Temp ${_temp.length + 1}',
+      title: '${_tempNames[_tempCount % _tempNames.length]} ${_tempCount ~/ _tempNames.length + 1}',
       sigil: await sigilRandom(),
       source: TempSource(id),
       temp: true,
     );
-    setState(() => _temp.insert(0, card));
-    _open(card);
+    _tempCount++;
+    setState(() => _temp.add(card));
   }
 
   Future<void> _wipe(ChatCard card) async {
     await tempWipe(id: card.id);
-    setState(() => _temp.remove(card));
+    if (mounted) setState(() => _temp.remove(card));
   }
 
   Future<void> _wipeAll() async {
@@ -94,43 +103,84 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(_temp.clear);
   }
 
-  void _open(ChatCard card) {
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 450),
-        reverseTransitionDuration: const Duration(milliseconds: 350),
-        pageBuilder: (_, _, _) => ChatScreen(
-          card: card,
-          onWipe: card.temp ? () => _wipe(card) : null,
+  void _actions(ChatCard card) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: card.sigil.background.color,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(card.pinned ? Icons.push_pin_outlined : Icons.push_pin_rounded),
+              title: Text(card.pinned ? 'Unpin' : 'Pin to top'),
+              onTap: () {
+                Navigator.pop(context);
+                setState(() => card.pinned = !card.pinned);
+              },
+            ),
+            if (card.temp)
+              ListTile(
+                leading: const Icon(Icons.local_fire_department_rounded, color: Colors.redAccent),
+                title: const Text('Wipe now', style: TextStyle(color: Colors.redAccent)),
+                onTap: () {
+                  Navigator.pop(context);
+                  HapticFeedback.heavyImpact();
+                  _wipe(card);
+                },
+              ),
+          ],
         ),
-        transitionsBuilder: (_, anim, _, child) =>
-            FadeTransition(opacity: anim, child: child),
       ),
     );
   }
 
+  Widget _openChat(ChatCard card, VoidCallback close) => ChatScreen(
+        card: card,
+        close: close,
+        onWipe: card.temp ? () => tempWipe(id: card.id) : null,
+      );
+
+  Future<void> _closed(ChatCard card) async {
+    if (card.temp && !(await tempChatIds()).map((id) => id.toInt()).contains(card.id)) {
+      // Wiped from inside the chat.
+      if (mounted) setState(() => _temp.remove(card));
+      return;
+    }
+    await card.refresh();
+    if (mounted) setState(() {});
+  }
+
+  void _goTo(int page) {
+    HapticFeedback.selectionClick();
+    _pages.animateToPage(page, duration: const Duration(milliseconds: 380), curve: Curves.easeOutCubic);
+  }
+
   void _showMe() {
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
-      backgroundColor: const Color(0xFF0B0B10),
+      backgroundColor: widget.mySigil.background.color,
+      showDragHandle: true,
       builder: (_) => SizedBox(
-        height: 420,
+        height: 440,
         child: Column(
           children: [
-            const SizedBox(height: 24),
-            const Text('Your sigil',
-                style: TextStyle(letterSpacing: 3, color: Colors.white70)),
+            const Text('YOUR SIGIL', style: TextStyle(letterSpacing: 4, color: Colors.white70)),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(24),
-                child: ClipOval(child: LivingSigil(spec: widget.mySigil)),
+                child: AspectRatio(
+                  aspectRatio: 1,
+                  child: ClipOval(child: LivingSigil(spec: widget.mySigil, period: 60)),
+                ),
               ),
             ),
             const Padding(
               padding: EdgeInsets.fromLTRB(32, 0, 32, 32),
               child: Text(
-                'Made from your key. Friends will add you by scanning your QR in person.',
+                'Made from your key. Friends will add you by scanning your QR in person, '
+                'and you will both see the same sigil for your chat.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white54),
               ),
@@ -145,91 +195,212 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
+        bottom: false,
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 16, 0),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Row(
                 children: [
-                  _Tab(label: 'DECK', active: !_showTemp, onTap: () => setState(() => _showTemp = false)),
-                  const SizedBox(width: 20),
-                  _Tab(label: 'TEMP', active: _showTemp, onTap: () => setState(() => _showTemp = true)),
+                  _Tabs(page: _page, onTap: _goTo, tempCount: _temp.length),
                   const Spacer(),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    child: _onTemp && _temp.isNotEmpty
+                        ? IconButton(
+                            key: const ValueKey('wipe-all'),
+                            tooltip: 'Wipe all',
+                            onPressed: _wipeAll,
+                            icon: const Icon(Icons.local_fire_department_rounded, color: Colors.redAccent),
+                          )
+                        : const SizedBox(key: ValueKey('none'), width: 48),
+                  ),
+                  const SizedBox(width: 4),
                   GestureDetector(
                     onTap: _showMe,
-                    child: SizedBox.square(
-                      dimension: 40,
-                      child: ClipOval(child: LivingSigil(spec: widget.mySigil)),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      padding: const EdgeInsets.all(1.5),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: widget.mySigil.accent.color.withValues(alpha: 0.6)),
+                      ),
+                      child: ClipOval(child: SigilView(spec: widget.mySigil)),
                     ),
                   ),
                 ],
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: _SearchField(controller: _search),
+            ),
             Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                child: _showTemp
-                    ? DeckView(
-                        key: const ValueKey('temp'),
-                        cards: _temp,
-                        onOpen: _open,
-                        onLongPress: _wipe,
-                        subtitle: (_) => 'Messages burn 24h after sending · hold to wipe',
-                        emptyLabel: 'NO TEMP CHATS',
-                      )
-                    : DeckView(
-                        key: const ValueKey('deck'),
-                        cards: _deck,
-                        onOpen: _open,
-                        subtitle: (_) => 'Swipe up to open',
-                      ),
+              child: PageView(
+                controller: _pages,
+                onPageChanged: (_) => HapticFeedback.selectionClick(),
+                children: [
+                  ChatStack(
+                    cards: _chats,
+                    query: _search.text,
+                    openBuilder: _openChat,
+                    onClosed: _closed,
+                    onLongPress: _actions,
+                    empty: const _Empty(text: 'No chats yet'),
+                  ),
+                  ChatStack(
+                    cards: _temp,
+                    query: _search.text,
+                    openBuilder: _openChat,
+                    onClosed: _closed,
+                    onLongPress: _actions,
+                    onDismiss: _wipe,
+                    empty: const _Empty(
+                      text: 'No temp chats',
+                      detail: 'Temp chats live only in memory. Every message burns 24 hours '
+                          'after it is sent, and you can wipe them any time.',
+                    ),
+                  ),
+                ],
               ),
             ),
-            if (_showTemp)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-                child: Row(
-                  children: [
-                    if (_temp.isNotEmpty)
-                      TextButton(
-                        onPressed: _wipeAll,
-                        child: const Text('Wipe all', style: TextStyle(color: Colors.redAccent)),
-                      ),
-                    const Spacer(),
-                    FilledButton.tonal(onPressed: _newTemp, child: const Text('New temp chat')),
-                  ],
-                ),
-              ),
           ],
+        ),
+      ),
+      floatingActionButton: AnimatedScale(
+        scale: _onTemp ? 1 : 0,
+        duration: const Duration(milliseconds: 280),
+        curve: _onTemp ? Curves.easeOutBack : Curves.easeIn,
+        child: FloatingActionButton.extended(
+          onPressed: _onTemp ? _newTemp : null,
+          icon: const Icon(Icons.add_rounded),
+          label: const Text('New temp chat'),
         ),
       ),
     );
   }
 }
 
-class _Tab extends StatelessWidget {
-  const _Tab({required this.label, required this.active, required this.onTap});
+/// Two labels with a pill that slides between them, tracking the page swipe.
+class _Tabs extends StatelessWidget {
+  const _Tabs({required this.page, required this.onTap, required this.tempCount});
 
-  final String label;
-  final bool active;
-  final VoidCallback onTap;
+  final double page;
+  final ValueChanged<int> onTap;
+  final int tempCount;
+
+  static const _width = 96.0;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      child: AnimatedDefaultTextStyle(
-        duration: const Duration(milliseconds: 200),
-        style: TextStyle(
-          fontSize: 15,
-          letterSpacing: 4,
-          fontWeight: FontWeight.w600,
-          color: active ? Colors.white : Colors.white30,
+    final accent = Theme.of(context).colorScheme.primary;
+    return Container(
+      height: 40,
+      width: _width * 2 + 8,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            left: page.clamp(0.0, 1.0) * _width,
+            width: _width,
+            top: 0,
+            bottom: 0,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.22),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: accent.withValues(alpha: 0.5)),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              for (final (i, label) in [(0, 'Chats'), (1, tempCount > 0 ? 'Temp · $tempCount' : 'Temp')])
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => onTap(i),
+                  child: SizedBox(
+                    width: _width,
+                    child: Center(
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Color.lerp(Colors.white, Colors.white38, (page - i).abs().clamp(0.0, 1.0)),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchField extends StatelessWidget {
+  const _SearchField({required this.controller});
+
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 42,
+      child: TextField(
+        controller: controller,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: 'Search',
+          prefixIcon: const Icon(Icons.search_rounded, size: 20),
+          suffixIcon: controller.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Clear',
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  onPressed: controller.clear,
+                ),
+          filled: true,
+          fillColor: Colors.white.withValues(alpha: 0.05),
+          contentPadding: EdgeInsets.zero,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(21),
+            borderSide: BorderSide.none,
+          ),
         ),
-        child: Text(label),
+      ),
+    );
+  }
+}
+
+class _Empty extends StatelessWidget {
+  const _Empty({required this.text, this.detail});
+
+  final String text;
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(text, style: const TextStyle(fontSize: 17, color: Colors.white70)),
+            if (detail != null) ...[
+              const SizedBox(height: 10),
+              Text(detail!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white38)),
+            ],
+          ],
+        ),
       ),
     );
   }

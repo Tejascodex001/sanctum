@@ -31,10 +31,7 @@ class SanctumApp extends StatelessWidget {
       title: 'Sanctum',
       debugShowCheckedModeBanner: false,
       theme: sanctumTheme(accent: mySigil.accent.color),
-      builder: (context, child) => AppLock(
-        background: LivingSigil(spec: mySigil),
-        child: child!,
-      ),
+      builder: (context, child) => AppLock(sigil: mySigil, child: child!),
       home: home,
     );
   }
