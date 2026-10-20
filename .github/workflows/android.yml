@@ -8,6 +8,12 @@ on:
 permissions:
   contents: write
 
+# One release at a time, in order: each build's changelog starts from the
+# previous build's tag, so that tag must exist first.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -63,7 +69,10 @@ jobs:
         run: rm -f app/android/release.jks app/android/key.properties
 
       - name: Changelog
-        run: python3 .github/scripts/changelog.py ${{ github.run_number }} changelog.md release-notes.md
+        run: |
+          # Tags made by releases since this run checked out.
+          git fetch --tags --force --quiet
+          python3 .github/scripts/changelog.py ${{ github.run_number }} changelog.md release-notes.md
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
