@@ -39,6 +39,13 @@ Future<void> netStart({
   identitySecret: identitySecret,
 );
 
+/// Pull to refresh: reconnects to every friend not connected, now.
+Future<void> netRefresh() => RustLib.instance.api.crateApiSessionNetRefresh();
+
+/// Friends' chats whose friend is connected right now.
+Future<Int64List> onlineChats() =>
+    RustLib.instance.api.crateApiSessionOnlineChats();
+
 /// Your friend code, to show as a QR or share.
 Future<String> myCode({required String myName}) =>
     RustLib.instance.api.crateApiSessionMyCode(myName: myName);
@@ -115,6 +122,9 @@ enum AppEventKind {
 
   /// A friend request arrived.
   request,
+
+  /// A friend came online or went offline (`id`: their chat).
+  presence,
 }
 
 class FriendView {

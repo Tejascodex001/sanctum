@@ -19,6 +19,7 @@ class ChatStack extends StatefulWidget {
     this.onDismiss,
     this.query = '',
     required this.empty,
+    this.onRefresh,
   });
 
   final List<ChatCard> cards;
@@ -30,6 +31,9 @@ class ChatStack extends StatefulWidget {
   final ValueChanged<ChatCard>? onDismiss;
   final String query;
   final Widget empty;
+
+  /// Pull down to refresh, as in Slack or Instagram.
+  final Future<void> Function()? onRefresh;
 
   @override
   State<ChatStack> createState() => _ChatStackState();
@@ -57,15 +61,36 @@ class _ChatStackState extends State<ChatStack> {
 
   @override
   Widget build(BuildContext context) {
+    final list = _list();
+    if (widget.onRefresh == null) return list;
+    return RefreshIndicator(
+      onRefresh: widget.onRefresh!,
+      color: Theme.of(context).colorScheme.primary,
+      backgroundColor: Palette.surfaceHigh,
+      child: list,
+    );
+  }
+
+  static const _physics = AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics());
+
+  Widget _list() {
     final cards = _visible;
     if (cards.isEmpty) {
-      return widget.query.isEmpty
+      final empty = widget.query.isEmpty
           ? widget.empty
           : const Center(
               child: Text('No matches', style: TextStyle(color: Colors.white38)),
             );
+      // Still scrollable, so an empty list can be pulled to refresh too.
+      return LayoutBuilder(
+        builder: (context, box) => ListView(
+          physics: _physics,
+          children: [SizedBox(height: box.maxHeight, child: empty)],
+        ),
+      );
     }
     return ListView.builder(
+      physics: _physics,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
       itemCount: cards.length,
       itemBuilder: (context, i) {

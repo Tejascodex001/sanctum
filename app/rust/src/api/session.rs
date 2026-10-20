@@ -65,6 +65,8 @@ pub enum AppEventKind {
     Status,
     /// A friend request arrived.
     Request,
+    /// A friend came online or went offline (`id`: their chat).
+    Presence,
 }
 
 /// Where the connection to Tor stands.
@@ -162,8 +164,9 @@ pub fn net_start(
                 // Keep Tor running for the life of the app.
                 std::mem::forget(tor);
                 forward_events(&node);
-                node.spawn_retry_loop(Duration::from_secs(30));
-                node.poke_pending();
+                // Keeps a live link to every friend, reconnecting quickly.
+                node.spawn_retry_loop(Duration::from_secs(3));
+                node.maintain();
                 *NODE.lock().unwrap() = Some(node);
                 set_status(NetStatus::Online, 100, "Connected");
             }
@@ -187,15 +190,48 @@ fn panic_text(join: tokio::task::JoinError) -> String {
 fn forward_events(node: &Arc<Node>) {
     let mut rx = node.subscribe();
     RUNTIME.spawn(async move {
-        while let Ok(event) = rx.recv().await {
+        loop {
+            let event = match rx.recv().await {
+                Ok(event) => event,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            };
             match event {
                 NetEvent::Session(e) => emit_session(e),
-                NetEvent::Online(_)
-                | NetEvent::PeerConnected(_)
-                | NetEvent::PeerDisconnected(_) => {}
+                NetEvent::PeerConnected(peer) | NetEvent::PeerDisconnected(peer) => {
+                    if let Ok(Some(chat)) = with(|s| Ok(s.chat_id_for(&peer)?)) {
+                        emit(AppEventKind::Presence, chat);
+                    }
+                }
+                NetEvent::Online(_) => {}
             }
         }
     });
+}
+
+/// Pull to refresh: reconnects to every friend not connected, now.
+pub fn net_refresh() {
+    if let Some(node) = NODE.lock().unwrap().clone() {
+        let _guard = RUNTIME.enter();
+        node.reconnect_now();
+    }
+}
+
+/// Friends' chats whose friend is connected right now.
+pub fn online_chats() -> anyhow::Result<Vec<i64>> {
+    let Some(node) = NODE.lock().unwrap().clone() else {
+        return Ok(Vec::new());
+    };
+    let peers = node.connected();
+    with(|s| {
+        let mut chats = Vec::new();
+        for peer in &peers {
+            if let Some(id) = s.chat_id_for(peer)? {
+                chats.push(id);
+            }
+        }
+        Ok(chats)
+    })
 }
 
 fn emit_session(e: Event) {
@@ -359,7 +395,12 @@ pub(crate) fn with<T>(f: impl FnOnce(&mut Session) -> anyhow::Result<T>) -> anyh
     let session = session()?;
     let mut guard = session.lock().unwrap();
     let out = f(&mut guard);
-    // UI-initiated changes are refreshed by the UI itself.
-    guard.take_events();
+    // Pass events on, never drop them: some may be the network's (a message
+    // that arrived a moment ago and wasn't announced yet).
+    let events = guard.take_events();
+    drop(guard);
+    for e in events {
+        emit_session(e);
+    }
     out
 }

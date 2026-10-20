@@ -7,7 +7,7 @@ use sanctum_core::protocol::{encode_frame, take_frame, Frame};
 use sanctum_core::session::{Event, Session};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::timeout;
@@ -34,11 +34,36 @@ pub enum NetEvent {
 /// Handshakes must finish quickly; Tor circuits can be slow to build, so
 /// this is generous.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
-/// Idle connections are closed; a new one is made when there is news.
-const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+/// Links to friends stay open while the app runs, so messages arrive in
+/// about a second instead of waiting for a new Tor circuit. A ping keeps
+/// each one alive and shows when it has died.
+const KEEPALIVE: Duration = Duration::from_secs(40);
+/// Nothing heard for this long (two missed pings): the link is dead.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+/// Reconnecting to a friend who can't be reached backs off from this...
+const BACKOFF_MIN: Duration = Duration::from_secs(4);
+/// ...up to this, or this while messages are waiting for them.
+const BACKOFF_MAX: Duration = Duration::from_secs(120);
+const BACKOFF_MAX_PENDING: Duration = Duration::from_secs(20);
+/// Tor circuits are expensive; don't build too many at once.
+const MAX_DIALS: usize = 6;
 
-/// A live connection: its id, and a channel asking it to send news.
-type Link = (u64, mpsc::UnboundedSender<()>);
+enum Cmd {
+    /// There's news to send.
+    News,
+    /// A better link to the same friend replaced this one.
+    Close,
+}
+
+/// A live connection.
+struct Link {
+    id: u64,
+    tx: mpsc::UnboundedSender<Cmd>,
+    /// Dialed by the friend with the smaller key. When both phones dial at
+    /// once, both keep this one, so they never close each other's.
+    preferred: bool,
+}
+
 
 pub struct Node {
     session: Arc<Mutex<Session>>,
@@ -47,6 +72,8 @@ pub struct Node {
     /// Live connections, each with a channel to ask it to send news.
     links: Mutex<HashMap<[u8; 32], Link>>,
     dialing: Mutex<HashSet<[u8; 32]>>,
+    /// When to next try a friend we couldn't reach, and the current delay.
+    backoff: Mutex<HashMap<[u8; 32], (Instant, Duration)>>,
     next_link: Mutex<u64>,
 }
 
@@ -63,6 +90,7 @@ impl Node {
             events: broadcast::channel(256).0,
             links: Mutex::default(),
             dialing: Mutex::default(),
+            backoff: Mutex::default(),
             next_link: Mutex::new(0),
         })
     }
@@ -90,11 +118,54 @@ impl Node {
     /// Gets anything waiting for `peer` delivered: over the live connection
     /// if there is one, else by connecting.
     pub fn poke(self: &Arc<Self>, peer: [u8; 32]) {
-        if let Some((_, tx)) = self.links.lock().unwrap().get(&peer) {
-            let _ = tx.send(());
+        if let Some(link) = self.links.lock().unwrap().get(&peer) {
+            let _ = link.tx.send(Cmd::News);
             return;
         }
         self.dial(peer);
+    }
+
+    /// Keeps a link open to every friend: reconnects dropped ones, and
+    /// retries unreachable ones with backoff (sooner when messages wait).
+    pub fn maintain(self: &Arc<Self>) {
+        let (pending, friends) = {
+            let s = self.session.lock().unwrap();
+            (s.pending_peers().unwrap_or_default(), s.friend_keys().unwrap_or_default())
+        };
+        let now = Instant::now();
+        for peer in pending.iter().chain(friends.iter().filter(|f| !pending.contains(f))) {
+            if self.dialing.lock().unwrap().len() >= MAX_DIALS {
+                break;
+            }
+            if self.links.lock().unwrap().contains_key(peer) {
+                continue;
+            }
+            let due = self.backoff.lock().unwrap().get(peer).is_none_or(|(at, _)| *at <= now);
+            if due {
+                self.dial(*peer);
+            }
+        }
+    }
+
+    /// Pull to refresh: try every friend not connected now, skipping backoff.
+    pub fn reconnect_now(self: &Arc<Self>) {
+        self.backoff.lock().unwrap().clear();
+        self.maintain();
+    }
+
+    /// Until a link comes up, assume this attempt fails and schedule the next.
+    fn back_off(&self, peer: &[u8; 32]) {
+        let pending = self
+            .session
+            .lock()
+            .unwrap()
+            .pending_peers()
+            .unwrap_or_default()
+            .contains(peer);
+        let cap = if pending { BACKOFF_MAX_PENDING } else { BACKOFF_MAX };
+        let mut backoff = self.backoff.lock().unwrap();
+        let delay = backoff.get(peer).map_or(BACKOFF_MIN, |(_, d)| (*d * 2).min(cap));
+        backoff.insert(*peer, (Instant::now() + delay, delay));
     }
 
     /// Pokes every friend with something waiting.
@@ -110,8 +181,15 @@ impl Node {
         }
     }
 
-    /// Retries undelivered messages every `every`, for as long as the node
-    /// lives.
+    /// Closes every link (the app going offline; also used in tests).
+    pub fn shutdown_links(&self) {
+        for link in self.links.lock().unwrap().values() {
+            let _ = link.tx.send(Cmd::Close);
+        }
+    }
+
+    /// Every `every`, for as long as the node lives: burns expired temp
+    /// messages and keeps links to friends up ([`Node::maintain`]).
     pub fn spawn_retry_loop(self: &Arc<Self>, every: Duration) {
         let node = Arc::downgrade(self);
         tokio::spawn(async move {
@@ -120,7 +198,7 @@ impl Node {
                 let Some(node) = node.upgrade() else { break };
                 node.session.lock().unwrap().purge();
                 node.emit_session_events();
-                node.poke_pending();
+                node.maintain();
             }
         });
     }
@@ -129,6 +207,7 @@ impl Node {
         if !self.dialing.lock().unwrap().insert(peer) {
             return;
         }
+        self.back_off(&peer);
         let node = Arc::clone(self);
         tokio::spawn(async move {
             let conn = timeout(HANDSHAKE_TIMEOUT, node.transport.dial(peer)).await;
@@ -181,14 +260,30 @@ impl Node {
             *next += 1;
             *next
         };
+        let me = self.session.lock().unwrap().public_key();
+        let preferred = match role {
+            Role::Dialed(_) => me < peer,
+            Role::Reached => peer < me,
+        };
         let (tx, mut news) = mpsc::unbounded_channel();
-        self.links.lock().unwrap().insert(peer, (link, tx));
+        {
+            let mut links = self.links.lock().unwrap();
+            if let Some(old) = links.get(&peer) {
+                if old.preferred && !preferred {
+                    // Keep the link both phones agree on.
+                    return Ok(());
+                }
+                let _ = old.tx.send(Cmd::Close);
+            }
+            links.insert(peer, Link { id: link, tx, preferred });
+        }
+        self.backoff.lock().unwrap().remove(&peer);
         let _ = self.events.send(NetEvent::PeerConnected(peer));
 
         let result = self.serve(&mut conn, &mut buf, &peer, &mut news).await;
 
         let mut links = self.links.lock().unwrap();
-        if links.get(&peer).is_some_and(|(id, _)| *id == link) {
+        if links.get(&peer).is_some_and(|l| l.id == link) {
             links.remove(&peer);
             drop(links);
             let _ = self.events.send(NetEvent::PeerDisconnected(peer));
@@ -201,7 +296,7 @@ impl Node {
         conn: &mut BoxConn,
         buf: &mut Vec<u8>,
         peer: &[u8; 32],
-        news: &mut mpsc::UnboundedReceiver<()>,
+        news: &mut mpsc::UnboundedReceiver<Cmd>,
     ) -> anyhow::Result<()> {
         let first = self.session.lock().unwrap().on_link_up(peer)?;
         write_frames(conn, &first).await?;
@@ -209,6 +304,7 @@ impl Node {
         // Frames may have arrived together with the handshake.
         self.handle_buffered(conn, buf, peer).await?;
         let mut chunk = [0u8; 16 * 1024];
+        let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + KEEPALIVE, KEEPALIVE);
         loop {
             tokio::select! {
                 read = timeout(IDLE_TIMEOUT, conn.read(&mut chunk)) => {
@@ -219,11 +315,15 @@ impl Node {
                     buf.extend_from_slice(&chunk[..n]);
                     self.handle_buffered(conn, buf, peer).await?;
                 }
-                Some(()) = news.recv() => {
-                    let out = self.session.lock().unwrap().on_link_up(peer)?;
-                    write_frames(conn, &out).await?;
-                    self.emit_session_events();
-                }
+                cmd = news.recv() => match cmd {
+                    Some(Cmd::News) => {
+                        let out = self.session.lock().unwrap().on_link_up(peer)?;
+                        write_frames(conn, &out).await?;
+                        self.emit_session_events();
+                    }
+                    Some(Cmd::Close) | None => return Ok(()),
+                },
+                _ = ping.tick() => write_frames(conn, &[Frame::Ping]).await?,
             }
         }
     }
@@ -393,35 +493,61 @@ mod tests {
             .unwrap();
         alice.node.poke(peer);
 
-        expect(&mut bob.events, |e| {
-            *e == NetEvent::Session(Event::Chat(ba))
+        let session = bob.session.clone();
+        until(move || {
+            let got = session.lock().unwrap().store.messages(ba, None).unwrap();
+            got.first().is_some_and(|m| m.body == "hello over the wire")
         })
         .await;
-        let got = bob
-            .session
-            .lock()
-            .unwrap()
-            .store
-            .messages(ba, None)
-            .unwrap();
-        assert_eq!(got[0].body, "hello over the wire");
+        let session = alice.session.clone();
+        until(move || session.lock().unwrap().store.messages(ab, None).unwrap()[0].delivered).await;
+        let _ = (&mut alice.events, &mut bob.events);
+    }
 
-        expect(&mut alice.events, |e| {
-            *e == NetEvent::Session(Event::Chat(ab))
+    #[tokio::test]
+    async fn both_dialing_at_once_settle_on_one_link() {
+        let book = Arc::default();
+        let (mut alice, bob) = (phone(&book).await, phone(&book).await);
+        befriend(&alice, &bob).await;
+        // Nothing to send, yet both connect, each dialing the other.
+        alice.node.spawn_retry_loop(Duration::from_millis(50));
+        bob.node.spawn_retry_loop(Duration::from_millis(50));
+        expect(&mut alice.events, |e| *e == NetEvent::PeerConnected(bob.pk)).await;
+        let (a, b) = (alice.node.clone(), bob.node.clone());
+        until(move || a.connected() == [bob.pk] && b.connected() == [alice.pk]).await;
+        // Count connects from here: a stable link means none.
+        let mut events = alice.node.subscribe();
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        while let Ok(e) = events.try_recv() {
+            assert!(!matches!(e, NetEvent::PeerDisconnected(_)), "links keep flapping");
+        }
+        assert_eq!(alice.node.connected(), [bob.pk]);
+    }
+
+    #[tokio::test]
+    async fn dropped_links_reconnect_on_their_own() {
+        let book = Arc::default();
+        let (mut alice, bob) = (phone(&book).await, phone(&book).await);
+        let (ab, ba) = befriend(&alice, &bob).await;
+        alice.node.spawn_retry_loop(Duration::from_millis(50));
+        let b = bob.node.clone();
+        until(move || b.connected() == [alice.pk]).await;
+
+        // Bob drops off the network.
+        let addr = book.lock().unwrap().remove(&bob.pk).unwrap();
+        bob.node.shutdown_links();
+        expect(&mut alice.events, |e| *e == NetEvent::PeerDisconnected(bob.pk)).await;
+        alice.session.lock().unwrap().send_text(ab, "back?").unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(alice.node.connected().is_empty());
+
+        // He's back: Alice reconnects without being told and delivers.
+        book.lock().unwrap().insert(bob.pk, addr);
+        let session = bob.session.clone();
+        until(move || {
+            session.lock().unwrap().store.messages(ba, None).unwrap().iter().any(|m| m.body == "back?")
         })
         .await;
-        // The ack may land just after the event; give it a moment.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(
-            alice
-                .session
-                .lock()
-                .unwrap()
-                .store
-                .messages(ab, None)
-                .unwrap()[0]
-                .delivered
-        );
     }
 
     #[tokio::test]

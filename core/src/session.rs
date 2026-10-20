@@ -462,6 +462,16 @@ impl Session {
         Ok(self.direct_chat(peer)?.is_some())
     }
 
+    /// The chat with this friend.
+    pub fn chat_id_for(&self, peer: &[u8; 32]) -> Result<Option<i64>> {
+        Ok(self.direct_chat(peer)?.map(|(id, _)| id))
+    }
+
+    /// Every friend's key: the network keeps a link open to each.
+    pub fn friend_keys(&self) -> Result<Vec<[u8; 32]>> {
+        Ok(self.friends()?.into_iter().map(|(_, p)| p.identity).collect())
+    }
+
     /// The one frame a stranger may send: a friend request.
     pub fn on_stranger_frame(&mut self, peer: &[u8; 32], frame: Frame) -> Result<()> {
         let Frame::FriendRequest { name } = frame else {
@@ -526,7 +536,7 @@ impl Session {
         let initiator = self.public_key() < *peer;
         match frame {
             // Already friends.
-            Frame::FriendRequest { .. } => Ok(Vec::new()),
+            Frame::FriendRequest { .. } | Frame::Ping => Ok(Vec::new()),
             Frame::KeyPackageRequest if initiator => {
                 if meta.group_id.is_empty() {
                     // First contact: our own request is already on its way.
@@ -558,6 +568,8 @@ impl Session {
                 }
                 meta.group_id = group;
                 self.store.update_chat(chat_id, &meta)?;
+                // No longer "waiting for them to accept".
+                self.events.push(Event::Chat(chat_id));
                 let mut out = vec![Frame::Welcome(invite.welcome)];
                 out.extend(self.flush(peer)?);
                 Ok(out)
@@ -573,6 +585,7 @@ impl Session {
                 }
                 meta.group_id = group;
                 self.store.update_chat(chat_id, &meta)?;
+                self.events.push(Event::Chat(chat_id));
                 self.flush(peer)
             }
             Frame::Mls { id, bytes } => {
@@ -681,14 +694,25 @@ impl Session {
         Ok(())
     }
 
-    /// Forgets messages to `peer` already encrypted for a group that's being
-    /// replaced: the friend can't read them any more. They stay in the chat,
-    /// undelivered.
+    /// The pair's group is being replaced: messages already encrypted for
+    /// the old one go back to plaintext, to be encrypted again for the new
+    /// group. (Ciphertext from older builds can't be; it's dropped, and the
+    /// message stays undelivered.)
     fn drop_stale_ciphers(&mut self, peer: &[u8; 32]) -> Result<()> {
-        for (id, item) in self.store.outbox_for(peer)? {
-            if matches!(item.state, OutboxState::Cipher(_)) {
-                self.store.outbox_remove(&id)?;
+        for (id, mut item) in self.store.outbox_for(peer)? {
+            match item.state {
+                OutboxState::Plain(_) => {}
+                OutboxState::Sealed { plain, .. } => {
+                    item.state = OutboxState::Plain(plain);
+                    self.store.outbox_put(&id, &item)?;
+                }
+                OutboxState::Cipher(_) => {
+                    self.store.outbox_remove(&id)?;
+                }
             }
+        }
+        for out in self.temp_out.iter_mut().filter(|o| &o.peer == peer) {
+            out.cipher = None;
         }
         Ok(())
     }
@@ -704,12 +728,16 @@ impl Session {
         let mut frames = Vec::new();
         for (id, mut item) in self.store.outbox_for(peer)? {
             if let OutboxState::Plain(plain) = &item.state {
-                item.state = OutboxState::Cipher(self.mls.encrypt(&meta.group_id, plain)?);
+                let cipher = self.mls.encrypt(&meta.group_id, plain)?;
+                item.state = OutboxState::Sealed { plain: plain.clone(), cipher };
                 self.mls.persist(&self.store)?;
                 self.store.outbox_put(&id, &item)?;
             }
-            if let OutboxState::Cipher(bytes) = item.state {
-                frames.push(Frame::Mls { id, bytes });
+            match item.state {
+                OutboxState::Cipher(bytes) | OutboxState::Sealed { cipher: bytes, .. } => {
+                    frames.push(Frame::Mls { id, bytes });
+                }
+                OutboxState::Plain(_) => {}
             }
         }
         for out in self.temp_out.iter_mut().filter(|o| &o.peer == peer) {
@@ -931,10 +959,14 @@ mod tests {
             assert_eq!(keeps.texts(keeps_chat).last().unwrap(), &(false, "back".into(), true));
             assert_eq!(
                 forgets.texts(forgets_chat),
-                [(true, "back".into(), true), (false, "welcome back".into(), true)]
+                [
+                    (false, "lost".into(), true),
+                    (true, "back".into(), true),
+                    (false, "welcome back".into(), true)
+                ]
             );
-            // The unreadable one is not falsely ticked.
-            assert!(keeps.texts(keeps_chat).contains(&(true, "lost".into(), false)));
+            // Encrypted for the old group, re-encrypted for the new one.
+            assert!(keeps.texts(keeps_chat).contains(&(true, "lost".into(), true)));
         }
     }
 

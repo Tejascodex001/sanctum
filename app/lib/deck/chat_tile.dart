@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../net/net_bus.dart';
 import '../sigil/sigil_painter.dart';
 import '../theme/tokens.dart';
 import 'chat_card.dart';
@@ -42,7 +43,14 @@ class ChatTile extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: Space.lg),
             child: Row(
               children: [
-                Hero(tag: 'emblem-${card.id}', child: _Emblem(card: card)),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Hero(tag: 'emblem-${card.id}', child: _Emblem(card: card)),
+                    if (card.friendChatId != null)
+                      Positioned(right: 0, bottom: 0, child: OnlineDot(chatId: card.friendChatId!)),
+                  ],
+                ),
                 const SizedBox(width: Space.md),
                 Expanded(child: _Text(card: card)),
                 const SizedBox(width: Space.sm),
@@ -169,6 +177,37 @@ class _BurnRing extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Green while the friend is connected; nothing otherwise.
+class OnlineDot extends StatelessWidget {
+  const OnlineDot({super.key, required this.chatId, this.size = 12});
+
+  final int chatId;
+  final double size;
+
+  static const color = Color(0xFF3DDC97);
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<Set<int>>(
+      valueListenable: NetBus.instance.online,
+      builder: (context, online, _) => AnimatedScale(
+        scale: online.contains(chatId) ? 1 : 0,
+        duration: Motion.medium,
+        curve: Motion.emphasized,
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Palette.bg, width: 2),
+          ),
+        ),
+      ),
     );
   }
 }

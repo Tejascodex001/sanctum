@@ -11,6 +11,7 @@ class ChatCard {
     this.temp = false,
     this.friend = false,
     this.verified = false,
+    this.friendChatId,
     this.note,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
@@ -26,6 +27,10 @@ class ChatCard {
 
   /// Friends' chats: their key is confirmed. Can change in the chat.
   bool verified;
+
+  /// The friend's chat (itself, or the one a temp chat is with): whether
+  /// they're online is looked up by it.
+  final int? friendChatId;
 
   /// Shown under the title inside the chat.
   final String? note;

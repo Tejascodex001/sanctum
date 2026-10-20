@@ -162,6 +162,13 @@ void main() {
     await tester.tap(find.byTooltip('Back'));
     await settle(tester);
 
+    // The Friends tab: empty for now, with a way to add one.
+    await tester.tap(find.text('Friends'));
+    await settle(tester);
+    expect(find.text('No friends yet'), findsOneWidget);
+    expect(find.text('Add a friend'), findsOneWidget);
+    await shot(tester, '5-friends');
+
     // A fresh home screen reads notes back from the encrypted store. (Temp
     // chats end with the process; the Rust tests cover that.)
     await tester.pumpWidget(const SizedBox());

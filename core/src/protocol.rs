@@ -50,6 +50,8 @@ pub enum Frame {
     FriendRequest {
         name: String,
     },
+    /// Keeps a link alive.
+    Ping,
 }
 
 /// What is inside an MLS application message.

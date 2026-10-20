@@ -161,8 +161,12 @@ pub struct OutboxItem {
 pub enum OutboxState {
     /// Waiting for the chat's encrypted session to exist.
     Plain(Vec<u8>),
-    /// Encrypted, sent until acknowledged.
+    /// Encrypted, sent until acknowledged. (Older builds; no plaintext.)
     Cipher(Vec<u8>),
+    /// Encrypted, sent until acknowledged. The plaintext stays (sealed like
+    /// everything here) so it can be re-encrypted if the pair's group has
+    /// to be rebuilt before the friend could read it.
+    Sealed { plain: Vec<u8>, cipher: Vec<u8> },
 }
 
 pub struct Store {

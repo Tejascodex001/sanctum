@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../deck/chat_card.dart';
+import '../deck/chat_tile.dart';
 import '../net/net_bus.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
@@ -80,6 +81,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     if (body.isEmpty) return;
     HapticFeedback.lightImpact();
     _input.clear();
+    // Shown at once; the reload swaps in the stored copy.
+    final now = DateTime.fromMillisecondsSinceEpoch(DateTime.now().millisecondsSinceEpoch ~/ 1000 * 1000);
+    setState(() => _messages = [..._messages, ChatMessage(body: body, fromMe: true, sentAt: now)]);
     await widget.card.source.send(body);
     await _reload();
   }
@@ -144,6 +148,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   }
 
   Widget _list(Color accent) {
+    final friendChat = widget.card.friendChatId;
+    if (friendChat == null || !widget.card.friend) return _messageList(accent, online: true);
+    return ValueListenableBuilder<Set<int>>(
+      valueListenable: NetBus.instance.online,
+      builder: (context, online, _) => _messageList(accent, online: online.contains(friendChat)),
+    );
+  }
+
+  Widget _messageList(Color accent, {required bool online}) {
     return ListView.builder(
       reverse: true,
       padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, Space.sm),
@@ -155,11 +168,14 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         // Messages from the same side within two minutes are grouped.
         final grouped = next != null && next.fromMe == m.fromMe && next.sentAt.difference(m.sentAt).inMinutes < 2;
         return _Bubble(
-          key: ValueKey('${m.sentAt.microsecondsSinceEpoch}-$index'),
+          // By position: messages only append (temp ones also burn from
+          // the front), so a reload never replays an entrance.
+          key: ValueKey(index),
           message: m,
           accent: accent,
           showTime: !grouped,
           showTicks: widget.card.friend,
+          friendOnline: online,
           animate: index >= _initialCount,
         );
       },
@@ -306,11 +322,39 @@ class _Header extends StatelessWidget {
               children: [
                 Text(card.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.heading),
                 const SizedBox(height: 2),
-                Text(
-                  card.temp ? 'Temp · burns after 24h' : card.note ?? 'Only on this device',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.micro,
+                ValueListenableBuilder<Set<int>>(
+                  valueListenable: NetBus.instance.online,
+                  builder: (context, online, _) {
+                    final isOnline = card.friend && online.contains(card.friendChatId);
+                    return AnimatedSwitcher(
+                      duration: Motion.fast,
+                      child: Row(
+                        key: ValueKey(isOnline),
+                        children: [
+                          if (isOnline) ...[
+                            Container(
+                              width: 7,
+                              height: 7,
+                              decoration: const BoxDecoration(color: OnlineDot.color, shape: BoxShape.circle),
+                            ),
+                            const SizedBox(width: 5),
+                          ],
+                          Flexible(
+                            child: Text(
+                              isOnline
+                                  ? (card.temp ? 'Online · burns after 24h' : 'Online')
+                                  : card.temp
+                                      ? 'Temp · burns after 24h'
+                                      : card.note ?? 'Only on this device',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.micro.copyWith(color: isOnline ? OnlineDot.color : null),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
@@ -447,6 +491,7 @@ class _Bubble extends StatefulWidget {
     required this.accent,
     required this.showTime,
     required this.showTicks,
+    this.friendOnline = true,
     required this.animate,
   });
 
@@ -456,6 +501,9 @@ class _Bubble extends StatefulWidget {
 
   /// Sent / delivered marks on our messages to friends.
   final bool showTicks;
+
+  /// Not delivered and they're offline: it waits on this phone.
+  final bool friendOnline;
   final bool animate;
 
   @override
@@ -524,11 +572,19 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
                     duration: Motion.medium,
                     transitionBuilder: (child, a) => ScaleTransition(scale: a, child: child),
                     child: Icon(
-                      m.delivered ? Icons.done_all_rounded : Icons.done_rounded,
-                      key: ValueKey(m.delivered),
+                      m.delivered
+                          ? Icons.done_all_rounded
+                          : widget.friendOnline
+                              ? Icons.done_rounded
+                              : Icons.schedule_rounded,
+                      key: ValueKey((m.delivered, widget.friendOnline)),
                       size: 14,
                       color: fg.withValues(alpha: m.delivered ? 0.9 : 0.5),
-                      semanticLabel: m.delivered ? 'Delivered' : 'Sent',
+                      semanticLabel: m.delivered
+                          ? 'Delivered'
+                          : widget.friendOnline
+                              ? 'Sending'
+                              : 'Waiting until they are online',
                     ),
                   ),
                 ],
