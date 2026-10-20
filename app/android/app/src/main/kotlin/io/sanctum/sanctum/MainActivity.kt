@@ -156,7 +156,7 @@ class MainActivity : FlutterFragmentActivity() {
                         // Another app opens a decrypted copy, through a
                         // read-only link granted just for this.
                         val file = File(call.argument<String>("path")!!)
-                        val uri = FileProvider.getUriForFile(this, "$packageName.updates", file)
+                        val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.updates", file)
                         val view = Intent(Intent.ACTION_VIEW)
                             .setDataAndType(uri, call.argument<String>("mime") ?: "*/*")
                             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
