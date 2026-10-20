@@ -122,6 +122,7 @@ Photos, videos and files (`core/src/media.rs`).
 - Every message has an id that is the same on both phones (the network message id).
 - A reply (`Content::Reply`) carries a quote: the original's id, its author's key and its first 140 characters. It can be shown even if the original is gone, and tapping it scrolls to the original when it's nearby.
 - Swipe a message right, or long-press it and choose Reply.
+- **Threads:** a message with replies shows "↳ N replies". Tapping it opens the thread: the message plus every reply to it, and replies to those, with a composer that answers in the thread.
 - Message and chat records upgrade in place: each on-disk format is tried newest first, and an older record fails to decode as a newer one because it ends before the new fields.
 
 ## Adding friends
@@ -161,6 +162,6 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 
 ## Roadmap
 Status per feature is tracked in the README's feature table. In short:
-- **v1, private messaging:** done, apart from media, voice notes, the decoy PIN, nearby over Bluetooth / Wi-Fi Direct, and a thread view.
+- **v1, private messaging:** done. Only nearby over Wi-Fi Direct remains, and hotspot mode mostly covers it.
 - **v2:** a Fediverse tab (Pixelfed, PeerTube, Reels-style), plans and date polls, shared albums, a daily moment, on-device AI (catch-up summaries, transcription, search).
 - **v3:** voice and video calls, with no IP exposure.

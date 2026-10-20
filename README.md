@@ -30,7 +30,7 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Nearby over Bluetooth** | For friends who've connected once before. Android 10+. Part of the same Nearby switch |
 | ⏳ | Nearby over Wi-Fi Direct | Mostly covered by hotspot mode |
 | ✅ | **Replies** | Swipe a message right; tap the quote to jump to the original |
-| ⏳ | Thread view | A dedicated view for long reply chains |
+| ✅ | **Threads** | Messages with replies show "↳ N replies"; tap to see the whole thread and answer in it |
 | ✅ | **Delete & clear** | Delete a message (for me / for everyone), clear a chat (for me / for everyone), remove a friend (it's removed on both phones) |
 | ✅ | **Background delivery** | A foreground service keeps you reachable while the app is closed. A one-tap shortcut opens your phone maker's battery page |
 | ✅ | **Notifications** | Posted on the phone itself, never through Google. They say who wrote, never what. On the lock screen they say only "New message" |

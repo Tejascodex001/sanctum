@@ -313,6 +313,12 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   }
 
   Widget _messageList(Color accent, {required bool online}) {
+    // Replies per message, for the thread chips.
+    final replies = <int, int>{};
+    for (final m in _messages) {
+      final to = m.reply?.seq;
+      if (to != null) replies[to] = (replies[to] ?? 0) + 1;
+    }
     return ListView.builder(
       reverse: true,
       padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, Space.sm),
@@ -340,11 +346,35 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         );
         final keyed =
             m.seq == null ? bubble : KeyedSubtree(key: _bubbleKeys.putIfAbsent(m.seq!, GlobalKey.new), child: bubble);
-        return widget.card.source.replies && m.seq != null
+        final item = widget.card.source.replies && m.seq != null
             ? _SwipeToReply(onReply: () => _startReply(m), fromMe: m.fromMe, child: keyed)
             : keyed;
+        final count = m.seq == null ? 0 : replies[m.seq] ?? 0;
+        if (count == 0) return item;
+        return Column(
+          crossAxisAlignment: m.fromMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            item,
+            _ThreadChip(count: count, accent: accent, onTap: () => _openThread(m, accent, online)),
+          ],
+        );
       },
     );
+  }
+
+  /// A message and every reply to it (and to those), with a composer that
+  /// answers in the thread.
+  Future<void> _openThread(ChatMessage root, Color accent, bool online) async {
+    HapticFeedback.selectionClick();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: Palette.bg,
+      builder: (_) => _ThreadSheet(root: root, card: widget.card, accent: accent, online: online),
+    );
+    await _reload();
   }
 
   Widget _composer(Color accent) {
@@ -1223,6 +1253,158 @@ class _ShotsButtonState extends State<_ShotsButton> {
           size: 20,
           color: _allowed ? const Color(0xFFFFC145) : Palette.textFaint,
         ),
+      ),
+    );
+  }
+}
+
+/// "↳ 3 replies" under a message: opens its thread.
+class _ThreadChip extends StatelessWidget {
+  const _ThreadChip({required this.count, required this.accent, required this.onTap});
+
+  final int count;
+  final Color accent;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.sm),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(Radii.sm),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: Space.xs),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.subdirectory_arrow_right_rounded, size: 16, color: accent),
+              const SizedBox(width: Space.xs),
+              Text(
+                count == 1 ? '1 reply' : '$count replies',
+                style: AppText.micro.copyWith(color: accent, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThreadSheet extends StatefulWidget {
+  const _ThreadSheet({required this.root, required this.card, required this.accent, required this.online});
+
+  final ChatMessage root;
+  final ChatCard card;
+  final Color accent;
+  final bool online;
+
+  @override
+  State<_ThreadSheet> createState() => _ThreadSheetState();
+}
+
+class _ThreadSheetState extends State<_ThreadSheet> {
+  final _input = TextEditingController();
+  List<ChatMessage> _thread = const [];
+  StreamSubscription<AppEvent>? _events;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    _events = NetBus.instance.events.listen((e) {
+      if (e.kind == AppEventKind.chat && e.id.toInt() == widget.card.id) _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    _events?.cancel();
+    _input.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final all = await widget.card.source.load();
+    // The root, then (in order) anything answering a message in the thread.
+    final inThread = <int>{widget.root.seq!};
+    final thread = <ChatMessage>[];
+    for (final m in all) {
+      if (m.seq == widget.root.seq) {
+        thread.add(m);
+      } else if (m.reply?.seq != null && inThread.contains(m.reply!.seq)) {
+        inThread.add(m.seq!);
+        thread.add(m);
+      }
+    }
+    if (mounted) setState(() => _thread = thread);
+  }
+
+  Future<void> _send() async {
+    final body = _input.text.trim();
+    if (body.isEmpty) return;
+    HapticFeedback.lightImpact();
+    _input.clear();
+    await widget.card.source.send(body, replyTo: widget.root.seq);
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: MediaQuery.sizeOf(context).height * 0.8,
+      child: Column(
+        children: [
+          const Text('THREAD', style: AppText.overline),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.all(Space.md),
+              children: [
+                for (final (i, m) in _thread.indexed) ...[
+                  _Bubble(
+                    key: ValueKey('thread-${m.seq}'),
+                    message: m,
+                    chatId: widget.card.id,
+                    accent: widget.accent,
+                    showTime: true,
+                    showTicks: widget.card.friend,
+                    friendOnline: widget.online,
+                    animate: false,
+                  ),
+                  if (i == 0 && _thread.length > 1) const Divider(height: Space.xl),
+                ],
+              ],
+            ),
+          ),
+          Padding(
+            padding:
+                EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, Space.md + MediaQuery.viewInsetsOf(context).bottom),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _input,
+                    minLines: 1,
+                    maxLines: 4,
+                    textCapitalization: TextCapitalization.sentences,
+                    onSubmitted: (_) => _send(),
+                    decoration: InputDecoration(
+                      hintText: 'Reply in thread',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.xl)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: Space.sm),
+                IconButton.filled(
+                  tooltip: 'Send',
+                  onPressed: _send,
+                  icon: const Icon(Icons.arrow_upward_rounded),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
