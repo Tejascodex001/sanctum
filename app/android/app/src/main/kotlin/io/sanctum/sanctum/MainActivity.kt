@@ -46,6 +46,45 @@ class MainActivity : FlutterFragmentActivity() {
     private val pickVisual = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { finishPick(it) }
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { finishPick(it) }
 
+    /**
+     * A photo taken now with the camera app (daily moments). It's written
+     * to Sanctum's cache through a link granted just for this, prepared
+     * like a picked photo, then deleted.
+     */
+    private var pendingCapture: MethodChannel.Result? = null
+    private var captureFile: File? = null
+    private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        val result = pendingCapture ?: return@registerForActivityResult
+        pendingCapture = null
+        val file = captureFile
+        captureFile = null
+        if (!ok || file == null || file.length() == 0L) {
+            file?.delete()
+            return@registerForActivityResult result.success(null)
+        }
+        val main = Handler(Looper.getMainLooper())
+        thread(isDaemon = true) {
+            val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.updates", file)
+            val prepared = runCatching { MediaPrep.prepare(applicationContext, uri) }.getOrNull()
+            file.delete()
+            main.post { result.success(prepared) }
+        }
+    }
+
+    private fun capturePhoto(result: MethodChannel.Result) {
+        pendingCapture?.success(null)
+        pendingCapture = result
+        val dir = File(cacheDir, "open").apply { mkdirs() }
+        val file = File(dir, "moment-${System.nanoTime()}.jpg")
+        captureFile = file
+        val uri = FileProvider.getUriForFile(this, "$packageName.updates", file)
+        if (runCatching { takePicture.launch(uri) }.isFailure) {
+            captureFile = null
+            pendingCapture = null
+            result.success(null)
+        }
+    }
+
     /** Several photos and videos at once (for albums), prepared in order. */
     private var pendingPickMany: MethodChannel.Result? = null
     private val pickVisualMany =
@@ -159,11 +198,21 @@ class MainActivity : FlutterFragmentActivity() {
                     "pickMedia" -> {
                         pendingPick?.success(null)
                         pendingPick = result
-                        if (call.argument<String>("kind") == "file") {
-                            pickFile.launch(arrayOf("*/*"))
-                        } else {
-                            pickVisual.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                        when (call.argument<String>("kind")) {
+                            "file" -> pickFile.launch(arrayOf("*/*"))
+                            "image" -> pickVisual.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                            )
+                            else -> pickVisual.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
+                            )
                         }
+                    }
+                    "capturePhoto" -> capturePhoto(result)
+                    "requestCamera" -> {
+                        pendingPermissions?.success(false)
+                        pendingPermissions = result
+                        permissionsLauncher.launch(arrayOf(Manifest.permission.CAMERA))
                     }
                     "pickMediaMany" -> {
                         pendingPickMany?.success(emptyList<Any>())

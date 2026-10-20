@@ -5,6 +5,7 @@
 
 import 'api/group.dart';
 import 'api/identity.dart';
+import 'api/moment.dart';
 import 'api/poll.dart';
 import 'api/session.dart';
 import 'api/sigil.dart';
@@ -113,6 +114,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MessageView> dco_decode_list_message_view(dynamic raw);
 
   @protected
+  List<MomentView> dco_decode_list_moment_view(dynamic raw);
+
+  @protected
   List<PollOptionView> dco_decode_list_poll_option_view(dynamic raw);
 
   @protected
@@ -147,6 +151,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   MessageView dco_decode_message_view(dynamic raw);
+
+  @protected
+  MomentView dco_decode_moment_view(dynamic raw);
 
   @protected
   NetInfo dco_decode_net_info(dynamic raw);
@@ -333,6 +340,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MessageView> sse_decode_list_message_view(SseDeserializer deserializer);
 
   @protected
+  List<MomentView> sse_decode_list_moment_view(SseDeserializer deserializer);
+
+  @protected
   List<PollOptionView> sse_decode_list_poll_option_view(
     SseDeserializer deserializer,
   );
@@ -375,6 +385,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   MessageView sse_decode_message_view(SseDeserializer deserializer);
+
+  @protected
+  MomentView sse_decode_moment_view(SseDeserializer deserializer);
 
   @protected
   NetInfo sse_decode_net_info(SseDeserializer deserializer);
@@ -604,6 +617,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_moment_view(
+    List<MomentView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_poll_option_view(
     List<PollOptionView> self,
     SseSerializer serializer,
@@ -662,6 +681,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_message_view(MessageView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_moment_view(MomentView self, SseSerializer serializer);
 
   @protected
   void sse_encode_net_info(NetInfo self, SseSerializer serializer);

@@ -194,6 +194,9 @@ enum AppEventKind {
 
   /// A friend's message arrived in a temp chat. Also sent as `Temp`.
   tempMessage,
+
+  /// Today's moments changed.
+  moments,
 }
 
 class FriendView {

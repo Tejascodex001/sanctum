@@ -13,6 +13,7 @@ import '../friends/add_friend_screen.dart';
 import '../group/group_sheets.dart';
 import '../background/background.dart';
 import '../identity/secrets.dart';
+import '../moments/moments.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
 import '../security/app_lock.dart';
@@ -189,7 +190,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         HapticFeedback.mediumImpact();
         _loadRequests();
       // Dots, badges and notifications update themselves (NetBus, Notifier).
-      case AppEventKind.presence || AppEventKind.message || AppEventKind.tempMessage:
+      // So do moments (MomentsStrip).
+      case AppEventKind.presence || AppEventKind.message || AppEventKind.tempMessage || AppEventKind.moments:
         break;
     }
   }
@@ -705,6 +707,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Padding(
               padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
               child: _SearchField(controller: _search),
+            ),
+            AnimatedSize(
+              duration: Motion.medium,
+              curve: Motion.decelerate,
+              child: _page.round() == 0 && _search.text.isEmpty
+                  ? MomentsStrip(mySigil: widget.mySigil, sigil: _sigil)
+                  : const SizedBox(width: double.infinity),
             ),
             const _UpdateBanner(),
             const _ReliabilityBanner(),
@@ -1875,7 +1884,8 @@ class _UpdateSettingsState extends State<_UpdateSettings> {
           ListTile(
             leading: const Icon(Icons.system_update_rounded),
             title: Text(current == 0 ? 'Updates' : 'Sanctum version $current'),
-            subtitle: const Text('Updates are downloaded privately, and only genuine Sanctum updates can be installed.'),
+            subtitle:
+                const Text('Updates are downloaded privately, and only genuine Sanctum updates can be installed.'),
             trailing: _checking
                 ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : TextButton(onPressed: _check, child: const Text('Check')),

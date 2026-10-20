@@ -77,6 +77,8 @@ pub enum Event {
     Message(i64),
     /// A friend's message arrived in this temp chat.
     TempMessage(u64),
+    /// Today's moments changed.
+    Moments,
 }
 
 /// Someone who added your code and wants you to add them back. Held in
@@ -490,6 +492,7 @@ impl Session {
         for id in self.temp.purge_expired(now()) {
             self.events.push(Event::TempGone(id));
         }
+        let _ = self.purge_moments();
     }
 
     fn queue_temp(&mut self, peer: [u8; 32], content: Content) {
@@ -876,6 +879,13 @@ impl Session {
             } => self.receive_media(chat_id, peer, id, body, sent_at, None, media, Some(album))?,
             Content::Poll { id, sent_at, poll } => self.on_poll(chat_id, peer, id, sent_at, poll)?,
             Content::Vote { poll, choices, at } => self.on_vote(chat_id, peer, poll, choices, at)?,
+            Content::Moment {
+                id,
+                sent_at,
+                caption,
+                media,
+            } => self.on_moment(peer, id, sent_at, caption, media)?,
+            Content::MomentGone { id } => self.on_moment_gone(peer, id)?,
             Content::TempWipe { temp } => {
                 if let Some(id) = self.temp.wipe_remote(*peer, temp) {
                     self.forget_temp_outbox(Some(*peer), temp);
@@ -1693,6 +1703,44 @@ mod tests {
             duration_ms: 0,
             album: None,
         }
+    }
+
+    #[test]
+    fn daily_moments_reach_friends_and_go_away() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        befriend(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        let (path, bytes) = photo(&alice, 90_000);
+        assert_eq!(alice.s.share_moment(outgoing(&path)).unwrap(), vec![bob.pk()]);
+        connect(&mut alice, &mut bob);
+        let seen = bob.s.moments().unwrap();
+        assert_eq!(seen.len(), 1);
+        let first = seen[0].clone();
+        assert_eq!((first.from, first.caption.as_str(), first.seen), (Some(alice.pk()), "sunset", false));
+        assert_eq!(bob.s.moment_bytes(&first.id).unwrap(), Some(bytes));
+        assert!(bob.s.take_events().contains(&Event::Moments));
+        bob.s.moment_seen(&first.id).unwrap();
+        assert!(bob.s.moments().unwrap()[0].seen);
+
+        // A second one replaces the first, on both phones.
+        let (path, _) = photo(&alice, 500);
+        alice.s.share_moment(outgoing(&path)).unwrap();
+        connect(&mut alice, &mut bob);
+        let now_seen = bob.s.moments().unwrap();
+        assert_eq!(now_seen.len(), 1);
+        assert_ne!(now_seen[0].id, first.id);
+        assert_eq!(bob.s.moment_bytes(&first.id).unwrap(), None);
+        assert_eq!(alice.s.moments().unwrap().len(), 1);
+
+        // Taken down.
+        alice.s.delete_my_moment().unwrap();
+        connect(&mut alice, &mut bob);
+        assert!(bob.s.moments().unwrap().is_empty() && alice.s.moments().unwrap().is_empty());
+
+        // One from yesterday, arriving late, is ignored.
+        let media = crate::protocol::Media { kind: crate::protocol::MediaKind::Image, ..Default::default() };
+        bob.s.on_moment(&alice.pk(), [1; 16], now() - crate::moment::LIFETIME - 5, String::new(), media).unwrap();
+        assert!(bob.s.moments().unwrap().is_empty());
     }
 
     #[test]

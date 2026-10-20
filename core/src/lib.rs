@@ -7,6 +7,7 @@ pub mod identity;
 pub mod invite;
 pub mod media;
 pub mod mls;
+pub mod moment;
 pub mod nearby;
 pub mod pin;
 pub mod poll;

@@ -114,6 +114,13 @@ abstract final class Background {
   static Future<Map<Object?, Object?>?> pickMedia(String kind) =>
       AppLock.whileAway(() => _call<Map<Object?, Object?>>(_app, 'pickMedia', {'kind': kind}));
 
+  /// A photo taken now with the camera, prepared like [pickMedia] (null if
+  /// cancelled). Asks for the camera first.
+  static Future<Map<Object?, Object?>?> capturePhoto() => AppLock.whileAway(() async {
+        if (!(await _call<bool>(_app, 'requestCamera') ?? false)) return null;
+        return _call<Map<Object?, Object?>>(_app, 'capturePhoto');
+      });
+
   /// Several photos and videos (up to 30), each prepared like [pickMedia].
   static Future<List<Map<Object?, Object?>>> pickMediaMany() => AppLock.whileAway(() async {
         final picked = await _call<List<Object?>>(_app, 'pickMediaMany') ?? const [];

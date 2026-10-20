@@ -13,6 +13,9 @@
     <!-- Updates: installing a newer release (Android checks it's signed
          with the same key). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Scanning friends' QR codes, and taking a daily moment's photo. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- Voice notes, recorded only while the mic button is held. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Nearby over Bluetooth (Android 10+): advertising a rotating ID only

@@ -125,6 +125,14 @@ Polls, date polls and plans (`core/src/poll.rs`), in friends' chats and groups.
 - The app builds the album list from the chat's messages. Up to 30 photos and videos can be picked at once.
 - Deleting a photo removes it from the album; clearing the chat clears its albums.
 
+## Daily moments
+One photo a day for all your friends, gone 24 hours after it was shared (`core/src/moment.rs`).
+- **Sending:** the photo is encrypted like any attachment. `Content::Moment` goes inside each friend's own MLS group, and the chunks follow. Only friends get it, never group members who aren't friends.
+- **Not a message:** moments live in a sealed list of their own (in the key-value table), not in any chat. Sharing a new one replaces the old one everywhere: each phone keeps only a friend's newest.
+- **Expiry:** once a moment's 24 hours are over, it's deleted with its file, on every phone. A moment that arrives after its day is over is ignored. Deleting your own moment also deletes it on friends' phones (`Content::MomentGone`).
+- **Hidden chats:** a hidden friend's moment isn't shown, so it can't give the chat away.
+- The photo can be taken right then with the camera app (written to Sanctum's cache through a one-off link, then deleted) or picked from the gallery. Either way it's resized and stripped of hidden data such as location.
+
 ## Deleting
 - **Delete a message:** for me, or (your own messages only) for everyone (`Content::DeleteMessage`, by the shared message id). Works in groups too.
 - **Clear chat:** for me, or (friends' chats) for everyone (`Content::ClearChat`). The friendship stays.
@@ -179,5 +187,5 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 ## Roadmap
 Status per feature is tracked in the README's feature table. In short:
 - **v1, private messaging:** done. Only nearby over Wi-Fi Direct remains, and hotspot mode mostly covers it.
-- **v2:** plans and date polls, shared albums (done); a Fediverse tab (Pixelfed, PeerTube, Reels-style), a daily moment, on-device AI (catch-up summaries, transcription, search).
+- **v2:** plans and date polls, shared albums, daily moments (done); a Fediverse tab (Pixelfed, PeerTube, Reels-style), on-device AI (catch-up summaries, transcription, search).
 - **v3:** voice and video calls, with no IP exposure.

@@ -99,11 +99,9 @@ impl Session {
         self.media_dir.join(blob.iter().map(|b| format!("{b:02x}")).collect::<String>())
     }
 
-    /// Encrypts `out.path` into the media folder, saves the message and
-    /// queues it (and the file) for the chat's other phones. Returns who
-    /// to reach.
-    pub fn send_media(&mut self, chat_id: i64, out: Outgoing<'_>, reply_to: Option<i64>) -> Result<Vec<[u8; 32]>> {
-        let meta = self.chat(chat_id)?;
+    /// Encrypts `out.path` into the media folder: its description and how
+    /// many chunks it has.
+    pub(crate) fn seal_file(&self, out: &Outgoing<'_>) -> Result<(Media, u32)> {
         let plain = fs::read(out.path).map_err(io)?;
         if plain.len() as u64 > max_size(out.kind) {
             return Err(SessionError::TooLarge(max_size(out.kind) / MB));
@@ -130,8 +128,18 @@ impl Session {
             width: out.width,
             height: out.height,
             duration_ms: out.duration_ms,
-            thumb: out.thumb,
+            thumb: out.thumb.clone(),
         };
+        Ok((media, total))
+    }
+
+    /// Encrypts `out.path` into the media folder, saves the message and
+    /// queues it (and the file) for the chat's other phones. Returns who
+    /// to reach.
+    pub fn send_media(&mut self, chat_id: i64, out: Outgoing<'_>, reply_to: Option<i64>) -> Result<Vec<[u8; 32]>> {
+        let meta = self.chat(chat_id)?;
+        let (media, total) = self.seal_file(&out)?;
+        let blob = media.blob;
         let id: MessageId = rand::random();
         let sent_at = now();
         let album = out.album.map(tidy_album);
@@ -192,6 +200,11 @@ impl Session {
         let Some(media) = self.store.message(chat_id, seq)?.and_then(|m| m.media) else {
             return Ok(None);
         };
+        self.open_file(&media)
+    }
+
+    /// An attachment's file, decrypted, if it has arrived.
+    pub(crate) fn open_file(&self, media: &Media) -> Result<Option<Vec<u8>>> {
         let path = self.blob_path(&media.blob);
         if !path.exists() {
             return Ok(None);
@@ -325,7 +338,10 @@ impl Session {
         file.sync_all().map_err(io)?;
         fs::rename(&part, &done).map_err(io)?;
         self.store.kv_delete(&kv_name(&blob))?;
-        self.events.push(Event::Chat(expected.chat_id));
+        self.events.push(match expected.chat_id {
+            crate::moment::MOMENT_CHAT => Event::Moments,
+            chat => Event::Chat(chat),
+        });
         Ok(vec![Frame::Ack { id }])
     }
 

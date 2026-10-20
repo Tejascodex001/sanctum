@@ -212,6 +212,15 @@ pub enum Content {
         media: Media,
         album: Album,
     },
+    /// The sender's photo of the day (see `moment`); the file follows.
+    Moment {
+        id: MessageId,
+        sent_at: u64,
+        caption: String,
+        media: Media,
+    },
+    /// The sender took their moment down.
+    MomentGone { id: MessageId },
 }
 
 /// A shared album: the photos and videos in a chat that carry its id.

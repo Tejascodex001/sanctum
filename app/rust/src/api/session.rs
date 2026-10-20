@@ -78,6 +78,8 @@ pub enum AppEventKind {
     Message,
     /// A friend's message arrived in a temp chat. Also sent as `Temp`.
     TempMessage,
+    /// Today's moments changed.
+    Moments,
 }
 
 /// Where the connection to Tor stands.
@@ -393,6 +395,7 @@ fn emit_session(e: Event) {
         Event::Request => emit(AppEventKind::Request, 0),
         Event::Message(id) => emit(AppEventKind::Message, id),
         Event::TempMessage(id) => emit(AppEventKind::TempMessage, id as i64),
+        Event::Moments => emit(AppEventKind::Moments, 0),
     }
 }
 
