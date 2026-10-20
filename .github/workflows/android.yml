@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # History and tags, for the changelog.
+          fetch-depth: 0
 
       - name: Rust tests
         run: |
@@ -59,10 +62,19 @@ jobs:
         if: always()
         run: rm -f app/android/release.jks app/android/key.properties
 
+      - name: Changelog
+        run: python3 .github/scripts/changelog.py ${{ github.run_number }} changelog.md release-notes.md
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
           name: Sanctum build ${{ github.run_number }}
+          # Tag the commit that was built, not whatever main is by now.
+          target_commitish: ${{ github.sha }}
           make_latest: true
-          files: app/build/app/outputs/flutter-apk/app-release.apk
+          body_path: release-notes.md
+          # The app reads changelog.md to show what's new before updating.
+          files: |
+            app/build/app/outputs/flutter-apk/app-release.apk
+            changelog.md

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../background/background.dart';
+import '../update/updater.dart';
 import '../src/rust/api/session.dart';
 
 /// Live updates from Rust: new messages, delivery receipts, temp chats
@@ -32,6 +33,7 @@ class NetBus {
       if (e.kind == AppEventKind.status) {
         status.value = e.net;
         refreshOnline();
+        if (e.net.status == NetStatus.online) Updater.instance.check();
       }
       if (e.kind == AppEventKind.presence) refreshOnline();
       _events.add(e);

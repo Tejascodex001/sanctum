@@ -176,6 +176,7 @@ pub fn net_start(
         };
         match started {
             Ok((tor, _)) => {
+                *super::update::CONNECT.lock().unwrap() = Some(tor.connector());
                 // Keep Tor running for the life of the app.
                 std::mem::forget(tor);
                 node.reconnect_now();
@@ -487,6 +488,10 @@ pub fn friend_list() -> anyhow::Result<Vec<FriendView>> {
             })
             .collect()
     })
+}
+
+pub(crate) fn runtime() -> &'static Runtime {
+    &RUNTIME
 }
 
 pub(crate) fn session() -> anyhow::Result<Arc<Mutex<Session>>> {

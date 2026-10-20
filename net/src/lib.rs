@@ -5,6 +5,7 @@
 //! whose key is its identity key.
 
 pub mod engine;
+pub mod https;
 pub mod nearby;
 pub mod tor;
 

@@ -77,6 +77,15 @@ abstract final class Background {
 
   static Future<void> nearbyLock(bool on) => _call(_bg, 'nearbyLock', {'on': on});
 
+  /// This app's build number (its Android version code).
+  static Future<int> buildNumber() async => await _call<int>(_bg, 'buildNumber') ?? 0;
+
+  /// Opens Android's installer for a downloaded update: "started",
+  /// "permission" (the user must first allow Sanctum to install apps; the
+  /// settings page was opened), or "failed".
+  static Future<String> installApk(String path) async =>
+      await _call<String>(_app, 'installApk', {'path': path}) ?? 'failed';
+
   /// Blocks (or allows) screenshots and the recents preview.
   static Future<void> setSecure(bool secure) => _call(_app, 'setSecure', {'secure': secure});
 

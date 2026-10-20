@@ -17,6 +17,8 @@ import '../net/net_bus.dart';
 import '../notify/notifier.dart';
 import '../security/app_lock.dart';
 import '../security/panic.dart';
+import '../update/release_notes.dart';
+import '../update/updater.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
@@ -557,6 +559,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
               child: _NearbySettings(),
             ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
+              child: _UpdateSettings(),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
               child: ListTile(
@@ -641,6 +647,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
               child: _SearchField(controller: _search),
             ),
+            const _UpdateBanner(),
             const _ReliabilityBanner(),
             AnimatedSize(
               duration: Motion.medium,
@@ -1013,8 +1020,9 @@ class _TempPicker extends StatelessWidget {
           shrinkWrap: true,
           padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
           children: [
+            // Lined up with the rows' contents below.
             const Padding(
-              padding: EdgeInsets.fromLTRB(Space.sm, 0, Space.sm, Space.md),
+              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
               child: Text('New temp chat', style: AppText.title),
             ),
             for (final f in friends)
@@ -1039,7 +1047,7 @@ class _TempPicker extends StatelessWidget {
               ),
             if (friends.isEmpty)
               const Padding(
-                padding: EdgeInsets.all(Space.sm),
+                padding: EdgeInsets.all(Space.lg),
                 child: Text('Add a friend to start temp chats with them.', style: AppText.caption),
               ),
             const Divider(height: Space.xl),
@@ -1674,6 +1682,153 @@ class _NearbySettingsState extends State<_NearbySettings> {
           style: AppText.caption.copyWith(color: _error == null ? null : Palette.danger),
         ),
         onChanged: _set,
+      ),
+    );
+  }
+}
+
+/// "Build 27 is available": one tap downloads it through Tor and opens
+/// Android's installer.
+class _UpdateBanner extends StatelessWidget {
+  const _UpdateBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final u = Updater.instance;
+    return ListenableBuilder(
+      listenable: Listenable.merge([u.available, u.progress, u.error]),
+      builder: (context, _) {
+        final update = u.available.value;
+        final progress = u.progress.value;
+        return AnimatedSize(
+          duration: Motion.medium,
+          curve: Motion.decelerate,
+          child: update == null
+              ? const SizedBox(width: double.infinity)
+              : Container(
+                  margin: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+                  padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.xs, Space.sm),
+                  decoration: BoxDecoration(
+                    color: Palette.surface,
+                    borderRadius: BorderRadius.circular(Radii.md),
+                    border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.4)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.system_update_rounded, color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: Space.md),
+                          Expanded(
+                            child: Text(
+                              progress == null
+                                  ? 'Build ${update.build} is available'
+                                  : 'Downloading through Tor… ${(progress * 100).round()}%',
+                              style: AppText.bodyStrong,
+                            ),
+                          ),
+                          if (progress == null) ...[
+                            TextButton(
+                              onPressed: () => showReleaseNotes(context, update),
+                              child: const Text('What\'s new'),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                HapticFeedback.selectionClick();
+                                u.install();
+                              },
+                              child: const Text('Update'),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (progress != null)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(0, Space.sm, Space.md, Space.xs),
+                          child: LinearProgressIndicator(value: progress == 0 ? null : progress),
+                        ),
+                      if (u.error.value != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: Space.xs, right: Space.md),
+                          child: Text(u.error.value!, style: AppText.caption.copyWith(color: Palette.danger)),
+                        ),
+                    ],
+                  ),
+                ),
+        );
+      },
+    );
+  }
+}
+
+/// This build, and checking for a newer one.
+class _UpdateSettings extends StatefulWidget {
+  const _UpdateSettings();
+
+  @override
+  State<_UpdateSettings> createState() => _UpdateSettingsState();
+}
+
+class _UpdateSettingsState extends State<_UpdateSettings> {
+  bool _checking = false;
+  bool _auto = true;
+
+  @override
+  void initState() {
+    super.initState();
+    loadFlag('auto_update_check', fallback: true).then((v) {
+      if (mounted) setState(() => _auto = v);
+    });
+    Background.buildNumber().then((b) {
+      if (mounted) setState(() => Updater.instance.current = b);
+    });
+  }
+
+  Future<void> _check() async {
+    HapticFeedback.selectionClick();
+    setState(() => _checking = true);
+    await Updater.instance.check(force: true);
+    if (!mounted) return;
+    setState(() => _checking = false);
+    final u = Updater.instance;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(u.error.value ??
+            (u.available.value == null
+                ? 'You have the latest build.'
+                : 'Build ${u.available.value!.build} is available: tap Update on the home screen.')),
+      ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final current = Updater.instance.current;
+    return Container(
+      decoration: BoxDecoration(
+        color: Palette.bg.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(Radii.md),
+      ),
+      child: Column(
+        children: [
+          ListTile(
+            leading: const Icon(Icons.system_update_rounded),
+            title: Text(current == 0 ? 'Updates' : 'Build $current'),
+            subtitle: const Text('Checked and downloaded through Tor; Android installs only builds signed with your key.'),
+            trailing: _checking
+                ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                : TextButton(onPressed: _check, child: const Text('Check')),
+          ),
+          SwitchListTile(
+            value: _auto,
+            title: const Text('Check automatically'),
+            onChanged: (v) {
+              setState(() => _auto = v);
+              saveFlag('auto_update_check', v);
+            },
+          ),
+        ],
       ),
     );
   }

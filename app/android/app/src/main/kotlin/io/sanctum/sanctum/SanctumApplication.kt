@@ -10,6 +10,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.engine.FlutterEngine
@@ -62,6 +63,9 @@ class SanctumApplication : Application() {
                         )
                         result.success(null)
                     }
+                    "buildNumber" -> result.success(
+                        PackageInfoCompat.getLongVersionCode(packageManager.getPackageInfo(packageName, 0)),
+                    )
                     "nearbyLock" -> {
                         // Some phones drop local broadcasts (the nearby
                         // beacons) unless an app asks to hear them.

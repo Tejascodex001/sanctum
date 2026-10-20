@@ -8,6 +8,8 @@ import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import java.io.File
 import com.google.zxing.client.android.Intents
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -110,6 +112,7 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                         result.success(null)
                     }
+                    "installApk" -> result.success(installApk(call.argument<String>("path")!!))
                     "backgroundBrand" -> result.success(
                         mapOf("brand" to BackgroundSettings.brand(), "aggressive" to BackgroundSettings.aggressive()),
                     )
@@ -127,6 +130,24 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Hands a downloaded update to Android's installer, which asks the user
+     * and refuses it unless it's signed with this app's key. The first time,
+     * the user must allow Sanctum to install apps; returns "permission" then.
+     */
+    private fun installApk(path: String): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+            val settings = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))
+            runCatching { startActivity(settings) }
+            return "permission"
+        }
+        val uri = FileProvider.getUriForFile(this, "$packageName.updates", File(path))
+        val install = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        return if (runCatching { startActivity(install) }.isSuccess) "started" else "failed"
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {

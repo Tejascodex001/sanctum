@@ -12,6 +12,7 @@ import 'api/session.dart';
 import 'api/sigil.dart';
 import 'api/store.dart';
 import 'api/temp_chat.dart';
+import 'api/update.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'frb_generated.dart';
@@ -51,6 +52,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  UpdateInfo dco_decode_box_autoadd_update_info(dynamic raw);
 
   @protected
   ChatKindView dco_decode_chat_kind_view(dynamic raw);
@@ -101,6 +105,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  List<ReleaseNotes> dco_decode_list_release_notes(dynamic raw);
+
+  @protected
   List<RequestView> dco_decode_list_request_view(dynamic raw);
 
   @protected
@@ -134,7 +141,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
+  UpdateInfo? dco_decode_opt_box_autoadd_update_info(dynamic raw);
+
+  @protected
   PairedView dco_decode_paired_view(dynamic raw);
+
+  @protected
+  ReleaseNotes dco_decode_release_notes(dynamic raw);
 
   @protected
   ReplyView dco_decode_reply_view(dynamic raw);
@@ -167,6 +180,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  UpdateInfo dco_decode_update_info(dynamic raw);
+
+  @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
 
   @protected
@@ -194,6 +210,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  UpdateInfo sse_decode_box_autoadd_update_info(SseDeserializer deserializer);
 
   @protected
   ChatKindView sse_decode_chat_kind_view(SseDeserializer deserializer);
@@ -246,6 +265,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  List<ReleaseNotes> sse_decode_list_release_notes(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<RequestView> sse_decode_list_request_view(SseDeserializer deserializer);
 
   @protected
@@ -285,7 +309,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
+  UpdateInfo? sse_decode_opt_box_autoadd_update_info(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   PairedView sse_decode_paired_view(SseDeserializer deserializer);
+
+  @protected
+  ReleaseNotes sse_decode_release_notes(SseDeserializer deserializer);
 
   @protected
   ReplyView sse_decode_reply_view(SseDeserializer deserializer);
@@ -316,6 +348,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_decode_unit(SseDeserializer deserializer);
+
+  @protected
+  UpdateInfo sse_decode_update_info(SseDeserializer deserializer);
 
   @protected
   void sse_encode_AnyhowException(
@@ -355,6 +390,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_update_info(
+    UpdateInfo self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_chat_kind_view(ChatKindView self, SseSerializer serializer);
@@ -423,6 +464,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_release_notes(
+    List<ReleaseNotes> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_request_view(
     List<RequestView> self,
     SseSerializer serializer,
@@ -474,7 +521,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_update_info(
+    UpdateInfo? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_paired_view(PairedView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_release_notes(ReleaseNotes self, SseSerializer serializer);
 
   @protected
   void sse_encode_reply_view(ReplyView self, SseSerializer serializer);
@@ -508,6 +564,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_update_info(UpdateInfo self, SseSerializer serializer);
 }
 
 // Section: wire_class

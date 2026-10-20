@@ -99,6 +99,9 @@ ThemeData sanctumTheme({Color accent = const Color(0xFF8B7CFF)}) {
       titleTextStyle: AppText.title,
     ),
     dividerTheme: const DividerThemeData(color: Palette.outline, thickness: 1, space: 1),
+    // Material 3 pads list rows 16 left, 24 right, which looks off-centre
+    // inside a row's highlight; even padding keeps rows centred.
+    listTileTheme: const ListTileThemeData(contentPadding: EdgeInsets.symmetric(horizontal: Space.lg)),
     progressIndicatorTheme: ProgressIndicatorThemeData(color: accent),
     pageTransitionsTheme: const PageTransitionsTheme(
       builders: {TargetPlatform.android: FadeForwardsPageTransitionsBuilder()},

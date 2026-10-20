@@ -127,6 +127,19 @@ impl Tor {
 
     /// Our onion address, as Arti sees it (should equal
     /// `onion_address(our key)`).
+    /// Opens connections to ordinary websites through Tor (for update
+    /// checks), on circuits kept apart from everything else.
+    pub fn connector(&self) -> crate::https::Connect {
+        let client = Arc::new(self.client.isolated_client());
+        Arc::new(move |host: String, port: u16| {
+            let client = client.clone();
+            Box::pin(async move {
+                let stream = client.connect((host.as_str(), port)).await?;
+                Ok(Box::new(stream) as BoxConn)
+            })
+        })
+    }
+
     pub fn client(&self) -> &Arc<TorClient<Runtime>> {
         &self.client
     }

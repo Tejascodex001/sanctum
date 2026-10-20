@@ -66,6 +66,13 @@ An opt-in feature in the sigil sheet (`net/src/nearby.rs`).
 - **Android:** the app takes a multicast lock while nearby is on, because some phones drop broadcasts otherwise.
 - **Later:** Bluetooth and Wi-Fi Direct need Android radio code, so they're a separate step.
 
+## Updates over the air
+- **Checking:** the newest release is found through Tor, by following `github.com/<repo>/releases/latest`, which redirects to the newest `build-N` tag. That uses no API, so shared Tor exits don't hit rate limits.
+- **Downloading:** the APK and `changelog.md` come from the release, also through Tor, on circuits kept apart from chat traffic.
+- **Installing:** Android's installer takes it from there and refuses any APK not signed with the app's own key. The first time, the user allows Sanctum to install apps.
+- **Changelog:** CI writes it from commit messages (`.github/scripts/changelog.py`), as `## Build N` sections. The app shows those newer than the installed build. Release tags point at the commit that was built.
+- **When:** the app checks when Tor connects, at most every 6 hours (this can be turned off), or on demand from the sigil sheet.
+
 ## Groups
 Peer to peer, with no server (`core/src/group.rs`).
 - **Encryption:** each group is an MLS group. A message is encrypted once, and the same bytes go to every member over their own Tor link (`Frame::GroupMls`).

@@ -4066,6 +4066,7 @@ dependencies = [
  "rand 0.8.8",
  "sanctum-core",
  "sanctum-net",
+ "serde_json",
  "tokio",
 ]
 
@@ -4214,11 +4215,13 @@ dependencies = [
  "serde",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tor-cell",
  "tor-hscrypto",
  "tor-hsservice",
  "tor-llcrypto",
  "tor-rtcompat",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -4984,6 +4987,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.9",
+]
+
+[[package]]
+name = "tokio-rustls"
+version = "0.26.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9cc2678c2cdd569ef8215e2afd7954ada2ae20b4fdd2c5fe6139a3b02d105db"
+dependencies = [
+ "rustls",
+ "tokio",
 ]
 
 [[package]]
@@ -6552,6 +6565,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1c38a07cb4a2705c91feaedc9013a65481ec1b38d818b885d642b9f06ec6edd"
 dependencies = [
  "web-time",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]
