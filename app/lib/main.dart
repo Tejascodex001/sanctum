@@ -23,8 +23,7 @@ Future<void> main() async {
       storeKey: await loadOrCreateStoreKey(),
     );
     NetBus.instance.start();
-    // Tor starts in the background; chats work offline meanwhile.
-    await netStart(
+    await NetBus.instance.connect(
       stateDir: '${(await getApplicationSupportDirectory()).path}/tor-state',
       cacheDir: '${(await getApplicationCacheDirectory()).path}/tor-cache',
       identitySecret: secret,

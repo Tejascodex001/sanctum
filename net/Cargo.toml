@@ -10,6 +10,8 @@ anyhow = "1"
 arti-client = { version = "0.47", default-features = false, features = ["tokio", "rustls", "compression", "onion-service-service", "onion-service-client", "experimental-api", "static-sqlite"] }
 async-trait = "0.1"
 futures = "0.3"
+# Tor's TLS needs a crypto backend; ring builds cleanly for Android.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 sanctum-core = { path = "../core" }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
 tor-hscrypto = "0.47"

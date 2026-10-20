@@ -6,8 +6,8 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `forward_events`, `poke`, `session`, `set_status`, `with`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`
+// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `forward_events`, `panic_text`, `poke`, `session`, `set_status`, `with`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Opens the encrypted store at `dir` and restores MLS state. Call once at
 /// startup, before anything else that touches chats.
@@ -24,11 +24,11 @@ Future<void> sessionOpen({
 /// Streams [`AppEvent`]s to the UI for as long as the app runs.
 Stream<AppEvent> appEvents() => RustLib.instance.api.crateApiSessionAppEvents();
 
-Future<NetStatus> netStatus() =>
-    RustLib.instance.api.crateApiSessionNetStatus();
+Future<NetInfo> netStatus() => RustLib.instance.api.crateApiSessionNetStatus();
 
 /// Connects to Tor and starts this phone's onion service, in the
-/// background. Progress arrives as `Status` events.
+/// background. Progress arrives as `Status` events. Call again after a
+/// failure to retry.
 Future<void> netStart({
   required String stateDir,
   required String cacheDir,
@@ -69,12 +69,12 @@ class AppEvent {
 
   /// The chat or temp chat concerned.
   final PlatformInt64 id;
-  final NetStatus status;
+  final NetInfo net;
 
-  const AppEvent({required this.kind, required this.id, required this.status});
+  const AppEvent({required this.kind, required this.id, required this.net});
 
   @override
-  int get hashCode => kind.hashCode ^ id.hashCode ^ status.hashCode;
+  int get hashCode => kind.hashCode ^ id.hashCode ^ net.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -83,7 +83,7 @@ class AppEvent {
           runtimeType == other.runtimeType &&
           kind == other.kind &&
           id == other.id &&
-          status == other.status;
+          net == other.net;
 }
 
 enum AppEventKind {
@@ -122,6 +122,35 @@ class FriendView {
           chatId == other.chatId &&
           name == other.name &&
           sigilKey == other.sigilKey;
+}
+
+/// Where the connection to Tor stands.
+class NetInfo {
+  final NetStatus status;
+
+  /// 0–100 while connecting.
+  final int progress;
+
+  /// What Tor is doing, or why it failed.
+  final String detail;
+
+  const NetInfo({
+    required this.status,
+    required this.progress,
+    required this.detail,
+  });
+
+  @override
+  int get hashCode => status.hashCode ^ progress.hashCode ^ detail.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is NetInfo &&
+          runtimeType == other.runtimeType &&
+          status == other.status &&
+          progress == other.progress &&
+          detail == other.detail;
 }
 
 enum NetStatus { off, connecting, online, failed }

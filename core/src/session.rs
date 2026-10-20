@@ -157,6 +157,24 @@ impl Session {
         })
     }
 
+    /// Renames a chat; for a friend's chat, also what you call the friend
+    /// (temp chats with them use it too). Only on this phone.
+    pub fn rename_chat(&mut self, chat_id: i64, name: &str) -> Result<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Ok(());
+        }
+        let mut meta = self.chat(chat_id)?;
+        meta.title = name.to_string();
+        if meta.kind == ChatKind::Direct {
+            for p in &mut meta.peers {
+                p.name = name.to_string();
+            }
+        }
+        self.store.update_chat(chat_id, &meta)?;
+        Ok(())
+    }
+
     /// Marks a friend verified after comparing the safety number.
     pub fn set_verified(&mut self, chat_id: i64, verified: bool) -> Result<()> {
         let mut meta = self.chat(chat_id)?;
@@ -402,12 +420,10 @@ impl Session {
     pub fn on_link_up(&mut self, peer: &[u8; 32]) -> Result<Vec<Frame>> {
         let (_, meta) = self.direct_chat(peer)?.ok_or(SessionError::NotAFriend)?;
         if meta.group_id.is_empty() {
-            // The friend with the smaller key sets up the group.
-            return Ok(if self.public_key() < *peer {
-                vec![Frame::KeyPackageRequest]
-            } else {
-                Vec::new()
-            });
+            // The friend with the smaller key sets up the group. The other
+            // asks too: if the friend still has a group from before (we
+            // deleted and re-added them), that tells them to start over.
+            return Ok(vec![Frame::KeyPackageRequest]);
         }
         self.flush(peer)
     }
@@ -417,10 +433,20 @@ impl Session {
         let (chat_id, mut meta) = self.direct_chat(peer)?.ok_or(SessionError::NotAFriend)?;
         let initiator = self.public_key() < *peer;
         match frame {
-            Frame::KeyPackageRequest if !initiator => {
-                if !meta.group_id.is_empty() {
+            Frame::KeyPackageRequest if initiator => {
+                if meta.group_id.is_empty() {
+                    // First contact: our own request is already on its way.
                     return Ok(Vec::new());
                 }
+                // They lost the group (deleted and re-added us): rebuild.
+                meta.group_id = Vec::new();
+                self.store.update_chat(chat_id, &meta)?;
+                self.drop_stale_ciphers(peer)?;
+                Ok(vec![Frame::KeyPackageRequest])
+            }
+            Frame::KeyPackageRequest => {
+                // Answered even if we have a group: theirs is gone, and the
+                // Welcome that follows replaces ours.
                 let kp = self.mls.key_package()?;
                 self.mls.persist(&self.store)?;
                 Ok(vec![Frame::KeyPackage(kp)])
@@ -444,7 +470,7 @@ impl Session {
             }
             Frame::Welcome(welcome) if !initiator => {
                 if !meta.group_id.is_empty() {
-                    return Ok(Vec::new());
+                    self.drop_stale_ciphers(peer)?;
                 }
                 let group = self.mls.join(&welcome)?;
                 self.mls.persist(&self.store)?;
@@ -457,7 +483,9 @@ impl Session {
             }
             Frame::Mls { id, bytes } => {
                 if meta.group_id.is_empty() {
-                    return Err(SessionError::Protocol);
+                    // Sent under a group we no longer have; it's being
+                    // rebuilt. Unacknowledged, so it's not marked delivered.
+                    return Ok(Vec::new());
                 }
                 // A resend after our acknowledgement got lost.
                 if self.store.is_seen(&id)? {
@@ -539,6 +567,33 @@ impl Session {
                     self.forget_temp_outbox(Some(*peer), temp);
                     self.events.push(Event::TempGone(id));
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Deletes a chat, its messages and anything still waiting to be sent
+    /// in it. Deleting a friend's chat removes the friend: they can no
+    /// longer reach this phone until you pair again.
+    pub fn delete_chat(&mut self, chat_id: i64) -> Result<()> {
+        if let Ok(meta) = self.chat(chat_id) {
+            for peer in &meta.peers {
+                for (id, _) in self.store.outbox_for(&peer.identity)? {
+                    self.store.outbox_remove(&id)?;
+                }
+            }
+        }
+        self.store.delete_chat(chat_id)?;
+        Ok(())
+    }
+
+    /// Forgets messages to `peer` already encrypted for a group that's being
+    /// replaced: the friend can't read them any more. They stay in the chat,
+    /// undelivered.
+    fn drop_stale_ciphers(&mut self, peer: &[u8; 32]) -> Result<()> {
+        for (id, item) in self.store.outbox_for(peer)? {
+            if matches!(item.state, OutboxState::Cipher(_)) {
+                self.store.outbox_remove(&id)?;
             }
         }
         Ok(())
@@ -748,6 +803,62 @@ mod tests {
         connect(&mut alice, &mut bob);
         assert_eq!(bob.texts(ba), [(false, "one".into(), true)]);
         assert_eq!(alice.texts(ab), [(true, "one".into(), true)]);
+    }
+
+    #[test]
+    fn deleting_a_friend_and_pairing_again_rebuilds_encryption() {
+        for initiator_forgets in [true, false] {
+            let (mut alice, mut bob) = (Phone::new(), Phone::new());
+            let (ab, ba) = befriend(&mut alice, &mut bob);
+            connect(&mut alice, &mut bob);
+            let swap = (alice.pk() < bob.pk()) != initiator_forgets;
+            let (forgets, keeps, forgets_chat, keeps_chat) = if swap {
+                (&mut bob, &mut alice, ba, ab)
+            } else {
+                (&mut alice, &mut bob, ab, ba)
+            };
+            // Encrypted for the old group but never sent.
+            keeps.s.send_text(keeps_chat, "lost").unwrap();
+            keeps.s.flush(&forgets.pk()).unwrap();
+
+            forgets.s.delete_chat(forgets_chat).unwrap();
+            assert!(forgets.s.friends().unwrap().is_empty());
+            let code = keeps.s.my_code("Them");
+            let forgets_chat = forgets.s.add_friend(&code, true).unwrap().chat_id;
+            connect(forgets, keeps);
+
+            forgets.s.send_text(forgets_chat, "back").unwrap();
+            keeps.s.send_text(keeps_chat, "welcome back").unwrap();
+            connect(keeps, forgets);
+            assert_eq!(keeps.texts(keeps_chat).last().unwrap(), &(false, "back".into(), true));
+            assert_eq!(
+                forgets.texts(forgets_chat),
+                [(true, "back".into(), true), (false, "welcome back".into(), true)]
+            );
+            // The unreadable one is not falsely ticked.
+            assert!(keeps.texts(keeps_chat).contains(&(true, "lost".into(), false)));
+        }
+    }
+
+    #[test]
+    fn renaming_a_friend() {
+        let (mut alice, bob) = (Phone::new(), Phone::new());
+        let ab = alice.s.add_friend(&bob.s.my_code(""), true).unwrap().chat_id;
+        assert_eq!(alice.s.chat(ab).unwrap().title, "Friend");
+        alice.s.rename_chat(ab, "  Bob ").unwrap();
+        alice.s.rename_chat(ab, " ").unwrap();
+        let meta = alice.s.chat(ab).unwrap();
+        assert_eq!((meta.title.as_str(), meta.peers[0].name.as_str()), ("Bob", "Bob"));
+    }
+
+    #[test]
+    fn deleting_a_chat_drops_what_was_waiting_in_it() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, _) = befriend(&mut alice, &mut bob);
+        alice.s.send_text(ab, "never mind").unwrap();
+        alice.s.delete_chat(ab).unwrap();
+        assert!(alice.s.pending_peers().unwrap().is_empty());
+        assert!(alice.s.store.chats().unwrap().iter().all(|(id, _)| *id != ab));
     }
 
     #[test]

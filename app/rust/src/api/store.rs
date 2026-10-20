@@ -87,8 +87,13 @@ pub fn chat_set_pinned(id: i64, pinned: bool) -> anyhow::Result<()> {
     })
 }
 
+/// Renames a chat (for a friend: what you call them, on this phone only).
+pub fn chat_rename(id: i64, name: String) -> anyhow::Result<()> {
+    session::with(|s| Ok(s.rename_chat(id, &name)?))
+}
+
 pub fn chat_delete(id: i64) -> anyhow::Result<()> {
-    with(|s| Ok(s.delete_chat(id)?))
+    session::with(|s| Ok(s.delete_chat(id)?))
 }
 
 /// Saves a message and sends it to the friend (over Tor) if this is a

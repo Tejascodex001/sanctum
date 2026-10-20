@@ -27,6 +27,8 @@ Rust core (sanctum-core)
 - `sanctum-net` runs connections over any transport: **Tor** (Arti) in the app, loopback TCP in tests. Every phone is an onion service whose key is its identity key; `onion_address(key)` is computed locally (checked against Arti).
 - **Handshake:** the reached phone sends a random challenge; the connecting phone signs it together with the reached phone's key. Tor already authenticates the reached side (its address is its key). Strangers are cut off.
 - **First contact** sets up the pair's MLS group automatically (the smaller key sends a key-package request and the welcome). Messages written before that wait in the outbox.
+- **Re-pairing heals itself.** A side with no group always sends a key-package request on connect. If the friend still has a group (one of you deleted the chat and you paired again), it rebuilds the group. Messages already encrypted for the old group are dropped and stay unticked, never falsely marked delivered.
+- **Tor startup** reports bootstrap progress to the UI, gives up after 3 minutes, and turns any crash into a visible failure with a retry. rustls uses the `ring` crypto backend.
 - **Outbox:** sealed on disk, resent on every connection and every 30 s until acknowledged; receivers recognise resends after a lost ack. Acks mark messages delivered (✓ sent, ✓✓ delivered).
 - **Temp chats with friends:** opened, written and wiped through the friend's MLS group; held only in memory on both phones; a wipe wipes both. Both phones derive the temp chat's sigil from its shared id.
 - The session engine is I/O-free and tested by passing frames between two phones; the network engine is tested over real loopback connections.

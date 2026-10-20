@@ -203,10 +203,62 @@ class _HomeScreenState extends State<HomeScreen> {
                   _wipe(card);
                 },
               ),
+            if (card.friend && !card.temp) ...[
+              ListTile(
+                leading: const Icon(Icons.edit_rounded),
+                title: const Text('Rename'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _rename(card);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline_rounded, color: Palette.danger),
+                title: const Text('Delete chat', style: TextStyle(color: Palette.danger)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _delete(card);
+                },
+              ),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _rename(ChatCard card) async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => _RenameDialog(initial: card.title),
+    );
+    if (name == null || name.trim().isEmpty) return;
+    await chatRename(id: card.id, name: name);
+    await _loadChats();
+  }
+
+  Future<void> _delete(ChatCard card) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete chat with ${card.title}?'),
+        content: const Text(
+          'Messages are erased from this phone and unsent ones are dropped. '
+          'They won\'t be able to reach you until you add each other again.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete', style: TextStyle(color: Palette.danger)),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    HapticFeedback.heavyImpact();
+    await chatDelete(id: card.id);
+    await _loadChats();
   }
 
   Widget _openChat(ChatCard card, VoidCallback close) => ChatScreen(
@@ -232,10 +284,9 @@ class _HomeScreenState extends State<HomeScreen> {
       context,
       MaterialPageRoute(builder: (_) => AddFriendScreen(mySigil: widget.mySigil)),
     );
-    if (added == true) {
-      await _loadChats();
-      _goTo(0);
-    }
+    // However the screen was left, a friend may have been added.
+    await _loadChats();
+    if (added == true) _goTo(0);
   }
 
   void _showMe() {
@@ -500,16 +551,19 @@ class _NetPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<NetStatus>(
+    return ValueListenableBuilder<NetInfo>(
       valueListenable: NetBus.instance.status,
-      builder: (context, status, _) {
-        final (color, label) = switch (status) {
+      builder: (context, net, _) {
+        final (color, label) = switch (net.status) {
           NetStatus.online => (const Color(0xFF3DDC97), 'Tor'),
-          NetStatus.connecting => (const Color(0xFFFFC145), 'Connecting'),
-          NetStatus.failed => (Palette.danger, 'Offline'),
+          NetStatus.connecting => (const Color(0xFFFFC145), 'Connecting ${net.progress}%'),
+          NetStatus.failed => (Palette.danger, 'Offline · retry'),
           NetStatus.off => (Palette.textFaint, 'Offline'),
         };
-        return AnimatedContainer(
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => _explain(context, net),
+          child: AnimatedContainer(
           duration: Motion.medium,
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
@@ -525,8 +579,66 @@ class _NetPill extends StatelessWidget {
               Text(label, style: AppText.micro.copyWith(color: color, fontWeight: FontWeight.w600)),
             ],
           ),
+        ),
         );
       },
+    );
+  }
+
+  void _explain(BuildContext context, NetInfo net) {
+    HapticFeedback.selectionClick();
+    final failed = net.status == NetStatus.failed;
+    final text = switch (net.status) {
+      NetStatus.online => 'Connected through Tor. Friends reach you at your onion address; nobody sees your IP.',
+      NetStatus.connecting => 'Connecting to Tor (${net.progress}%): ${net.detail}. The first start takes longest.',
+      NetStatus.failed => 'Couldn\'t connect: ${net.detail}',
+      NetStatus.off => 'Not connected.',
+    };
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(text),
+        action: failed ? SnackBarAction(label: 'Retry', onPressed: NetBus.instance.retry) : null,
+      ));
+    if (failed) NetBus.instance.retry();
+  }
+}
+
+/// Asks what to call a friend.
+class _RenameDialog extends StatefulWidget {
+  const _RenameDialog({required this.initial});
+
+  final String initial;
+
+  @override
+  State<_RenameDialog> createState() => _RenameDialogState();
+}
+
+class _RenameDialogState extends State<_RenameDialog> {
+  late final _name = TextEditingController(text: widget.initial)
+    ..selection = TextSelection(baseOffset: 0, extentOffset: widget.initial.length);
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Rename'),
+      content: TextField(
+        controller: _name,
+        autofocus: true,
+        textCapitalization: TextCapitalization.words,
+        onSubmitted: (v) => Navigator.pop(context, v),
+        decoration: const InputDecoration(helperText: 'Only you see this name'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        TextButton(onPressed: () => Navigator.pop(context, _name.text), child: const Text('Save')),
+      ],
     );
   }
 }

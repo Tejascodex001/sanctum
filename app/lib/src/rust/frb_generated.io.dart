@@ -92,6 +92,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   MessageView dco_decode_message_view(dynamic raw);
 
   @protected
+  NetInfo dco_decode_net_info(dynamic raw);
+
+  @protected
   NetStatus dco_decode_net_status(dynamic raw);
 
   @protected
@@ -204,6 +207,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   MessageView sse_decode_message_view(SseDeserializer deserializer);
+
+  @protected
+  NetInfo sse_decode_net_info(SseDeserializer deserializer);
 
   @protected
   NetStatus sse_decode_net_status(SseDeserializer deserializer);
@@ -339,6 +345,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_message_view(MessageView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_net_info(NetInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_net_status(NetStatus self, SseSerializer serializer);

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -29,6 +31,8 @@ class AddFriendScreen extends StatefulWidget {
 class _AddFriendScreenState extends State<AddFriendScreen> {
   final _name = TextEditingController();
   final _typed = TextEditingController();
+  final _friendName = TextEditingController();
+  Timer? _nameDebounce;
   String? _myCode;
   PairedView? _paired;
   SigilSpec? _pairSigil;
@@ -46,8 +50,10 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
 
   @override
   void dispose() {
+    _nameDebounce?.cancel();
     _name.dispose();
     _typed.dispose();
+    _friendName.dispose();
     super.dispose();
   }
 
@@ -69,6 +75,8 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
       final sigil = await sigilForKey(publicKey: paired.sigilKey);
       _friendSigil = await sigilForKey(publicKey: paired.friendKey);
       HapticFeedback.heavyImpact();
+      // A code made before its owner typed a name carries none.
+      _friendName.text = paired.friend == 'Friend' ? '' : paired.friend;
       setState(() {
         _paired = paired;
         _pairSigil = sigil;
@@ -180,11 +188,13 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
                 controller: _name,
                 textCapitalization: TextCapitalization.words,
                 textInputAction: TextInputAction.done,
-                onSubmitted: _nameChanged,
-                onTapOutside: (_) {
-                  FocusScope.of(context).unfocus();
-                  _nameChanged(_name.text);
+                // The code (and QR) carries the name, so keep it current.
+                onChanged: (v) {
+                  _nameDebounce?.cancel();
+                  _nameDebounce = Timer(const Duration(milliseconds: 300), () => _nameChanged(v));
                 },
+                onSubmitted: _nameChanged,
+                onTapOutside: (_) => FocusScope.of(context).unfocus(),
                 decoration: InputDecoration(
                   labelText: 'Your name',
                   helperText: 'Shown only to friends who read your code',
@@ -327,6 +337,18 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
           textAlign: TextAlign.center,
           style: AppText.caption,
         ),
+        const SizedBox(height: Space.lg),
+        TextField(
+          controller: _friendName,
+          textAlign: TextAlign.center,
+          textCapitalization: TextCapitalization.words,
+          onTapOutside: (_) => FocusScope.of(context).unfocus(),
+          decoration: const InputDecoration(
+            labelText: 'What do you call them?',
+            helperText: 'Only you see this name',
+            isDense: true,
+          ),
+        ),
         const SizedBox(height: Space.xl),
         const Text('SAFETY NUMBER', textAlign: TextAlign.center, style: AppText.overline),
         const SizedBox(height: 6),
@@ -358,9 +380,12 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
     );
   }
 
-  void _done() {
+  Future<void> _done() async {
+    final paired = _paired!;
+    final name = _friendName.text.trim();
+    if (name.isNotEmpty && name != paired.friend) await chatRename(id: paired.chatId, name: name);
     HapticFeedback.heavyImpact();
-    Navigator.pop(context, true);
+    if (mounted) Navigator.pop(context, true);
   }
 }
 

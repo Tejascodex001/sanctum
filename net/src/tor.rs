@@ -8,7 +8,7 @@ use arti_client::{TorClient, TorClientConfig};
 use async_trait::async_trait;
 use futures::StreamExt;
 use sanctum_core::identity::onion_address;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tor_cell::relaycell::msg::Connected;
 use tor_hscrypto::pk::HsIdKeypair;
@@ -42,6 +42,12 @@ impl Transport for Dialer {
     }
 }
 
+/// rustls (used for Tor's TLS links) needs a crypto backend chosen by the
+/// app before any connection; without one Arti panics on first connect.
+pub fn install_crypto() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// The client config: Arti keeps its state and cache in the app's private
 /// directories.
 fn config(state_dir: &Path, cache_dir: &Path) -> anyhow::Result<TorClientConfig> {
@@ -57,12 +63,26 @@ impl Tor {
     /// [`Node`] (via `make_node`) once Tor can dial, and hands it every
     /// incoming connection.
     pub async fn start(
-        state_dir: &Path,
-        cache_dir: &Path,
+        state_dir: PathBuf,
+        cache_dir: PathBuf,
         identity_secret: [u8; 32],
-        make_node: impl FnOnce(Arc<dyn Transport>) -> Arc<Node>,
+        progress: impl Fn(f32, String) + Send + 'static,
+        make_node: impl FnOnce(Arc<dyn Transport>) -> Arc<Node> + Send + 'static,
     ) -> anyhow::Result<(Arc<Self>, Arc<Node>)> {
-        let client = TorClient::create_bootstrapped(config(state_dir, cache_dir)?).await?;
+        install_crypto();
+        let client = TorClient::builder()
+            .config(config(&state_dir, &cache_dir)?)
+            .create_unbootstrapped()?;
+        let mut events = client.bootstrap_events();
+        tokio::spawn(async move {
+            while let Some(status) = events.next().await {
+                progress(status.as_frac(), status.to_string());
+                if status.ready_for_traffic() {
+                    break;
+                }
+            }
+        });
+        client.bootstrap().await?;
         let node = make_node(Arc::new(Dialer {
             client: client.isolated_client(),
         }));
@@ -141,5 +161,25 @@ mod tests {
             onion_address(&id.public_key()),
             hsid.display_unredacted().to_string()
         );
+    }
+}
+
+#[cfg(test)]
+mod bootstrap_tests {
+    use arti_client::TorClient;
+    use std::time::Duration;
+
+    /// Starting Tor must never panic. (It can't reach the network from a
+    /// sandbox, so an error or timeout is fine; a panic is not.)
+    #[tokio::test]
+    async fn bootstrap_does_not_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        super::install_crypto();
+        let config = super::config(&dir.path().join("state"), &dir.path().join("cache")).unwrap();
+        let task = tokio::spawn(async move {
+            let _ = tokio::time::timeout(Duration::from_secs(15), TorClient::create_bootstrapped(config)).await;
+        });
+        let result = task.await;
+        assert!(!result.as_ref().is_err_and(|e| e.is_panic()), "Tor startup panicked: {result:?}");
     }
 }

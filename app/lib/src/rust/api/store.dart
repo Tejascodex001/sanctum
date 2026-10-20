@@ -28,6 +28,10 @@ Future<PlatformInt64> chatCreate({
 Future<void> chatSetPinned({required PlatformInt64 id, required bool pinned}) =>
     RustLib.instance.api.crateApiStoreChatSetPinned(id: id, pinned: pinned);
 
+/// Renames a chat (for a friend: what you call them, on this phone only).
+Future<void> chatRename({required PlatformInt64 id, required String name}) =>
+    RustLib.instance.api.crateApiStoreChatRename(id: id, name: name);
+
 Future<void> chatDelete({required PlatformInt64 id}) =>
     RustLib.instance.api.crateApiStoreChatDelete(id: id);
 

@@ -20,7 +20,11 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 });
 /// Everything the UI should hear about, from the session and the network.
 static EVENTS: LazyLock<broadcast::Sender<AppEvent>> = LazyLock::new(|| broadcast::channel(512).0);
-static STATUS: LazyLock<Mutex<NetStatus>> = LazyLock::new(|| Mutex::new(NetStatus::Off));
+static STATUS: LazyLock<Mutex<NetInfo>> = LazyLock::new(|| {
+    Mutex::new(NetInfo { status: NetStatus::Off, progress: 0, detail: String::new() })
+});
+/// How long Tor gets to come up before we call it failed and offer a retry.
+const START_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// Opens the encrypted store at `dir` and restores MLS state. Call once at
 /// startup, before anything else that touches chats.
@@ -60,21 +64,31 @@ pub enum AppEventKind {
     Status,
 }
 
+/// Where the connection to Tor stands.
+#[derive(Clone, Debug)]
+pub struct NetInfo {
+    pub status: NetStatus,
+    /// 0–100 while connecting.
+    pub progress: u8,
+    /// What Tor is doing, or why it failed.
+    pub detail: String,
+}
+
 #[derive(Clone, Debug)]
 pub struct AppEvent {
     pub kind: AppEventKind,
     /// The chat or temp chat concerned.
     pub id: i64,
-    pub status: NetStatus,
+    pub net: NetInfo,
 }
 
 fn emit(kind: AppEventKind, id: i64) {
-    let status = *STATUS.lock().unwrap();
-    let _ = EVENTS.send(AppEvent { kind, id, status });
+    let net = STATUS.lock().unwrap().clone();
+    let _ = EVENTS.send(AppEvent { kind, id, net });
 }
 
-fn set_status(status: NetStatus) {
-    *STATUS.lock().unwrap() = status;
+fn set_status(status: NetStatus, progress: u8, detail: impl Into<String>) {
+    *STATUS.lock().unwrap() = NetInfo { status, progress, detail: detail.into() };
     emit(AppEventKind::Status, 0);
 }
 
@@ -97,12 +111,13 @@ pub fn app_events(sink: StreamSink<AppEvent>) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn net_status() -> NetStatus {
-    *STATUS.lock().unwrap()
+pub fn net_status() -> NetInfo {
+    STATUS.lock().unwrap().clone()
 }
 
 /// Connects to Tor and starts this phone's onion service, in the
-/// background. Progress arrives as `Status` events.
+/// background. Progress arrives as `Status` events. Call again after a
+/// failure to retry.
 pub fn net_start(
     state_dir: String,
     cache_dir: String,
@@ -111,19 +126,34 @@ pub fn net_start(
     let secret: [u8; 32] = identity_secret
         .try_into()
         .map_err(|_| anyhow::anyhow!("identity secret must be 32 bytes"))?;
-    if matches!(net_status(), NetStatus::Connecting | NetStatus::Online) {
+    if matches!(net_status().status, NetStatus::Connecting | NetStatus::Online) {
         return Ok(());
     }
     let session = session()?;
-    set_status(NetStatus::Connecting);
+    set_status(NetStatus::Connecting, 0, "Starting Tor");
     RUNTIME.spawn(async move {
-        let started = sanctum_net::tor::Tor::start(
-            &PathBuf::from(state_dir),
-            &PathBuf::from(cache_dir),
+        // Run Tor in its own task so a panic inside it surfaces here as an
+        // error instead of leaving the app "connecting" forever.
+        let mut task = tokio::spawn(sanctum_net::tor::Tor::start(
+            PathBuf::from(state_dir),
+            PathBuf::from(cache_dir),
             secret,
+            |frac, detail| {
+                let percent = (frac.clamp(0.0, 1.0) * 100.0) as u8;
+                if net_status().status == NetStatus::Connecting {
+                    set_status(NetStatus::Connecting, percent, detail);
+                }
+            },
             |transport| Node::new(session, transport),
-        )
-        .await;
+        ));
+        let started = match tokio::time::timeout(START_TIMEOUT, &mut task).await {
+            Ok(Ok(started)) => started,
+            Ok(Err(join)) => Err(anyhow::anyhow!("Tor crashed: {}", panic_text(join))),
+            Err(_) => {
+                task.abort();
+                Err(anyhow::anyhow!("Tor took too long to connect"))
+            }
+        };
         match started {
             Ok((tor, node)) => {
                 // Keep Tor running for the life of the app.
@@ -132,12 +162,23 @@ pub fn net_start(
                 node.spawn_retry_loop(Duration::from_secs(30));
                 node.poke_pending();
                 *NODE.lock().unwrap() = Some(node);
-                set_status(NetStatus::Online);
+                set_status(NetStatus::Online, 100, "Connected");
             }
-            Err(_) => set_status(NetStatus::Failed),
+            Err(e) => set_status(NetStatus::Failed, 0, format!("{e:#}")),
         }
     });
     Ok(())
+}
+
+fn panic_text(join: tokio::task::JoinError) -> String {
+    match join.try_into_panic() {
+        Ok(payload) => payload
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".into()),
+        Err(e) => e.to_string(),
+    }
 }
 
 fn forward_events(node: &Arc<Node>) {
