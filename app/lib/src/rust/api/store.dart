@@ -6,7 +6,52 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `now`, `reach`, `with`
+// These functions are ignored because they are not marked as `pub`: `media_kind`, `now`, `reach`, `with`
+
+/// Sends a file (encrypted on this phone, then to the chat's other phones).
+Future<void> mediaSend({
+  required PlatformInt64 chatId,
+  required String path,
+  required MediaKindView kind,
+  required String mime,
+  required String name,
+  required String caption,
+  required List<int> thumb,
+  required int width,
+  required int height,
+  required int durationMs,
+  PlatformInt64? replyTo,
+}) => RustLib.instance.api.crateApiStoreMediaSend(
+  chatId: chatId,
+  path: path,
+  kind: kind,
+  mime: mime,
+  name: name,
+  caption: caption,
+  thumb: thumb,
+  width: width,
+  height: height,
+  durationMs: durationMs,
+  replyTo: replyTo,
+);
+
+/// A message's file, decrypted (None until it has arrived).
+Future<Uint8List?> mediaBytes({
+  required PlatformInt64 chatId,
+  required PlatformInt64 seq,
+}) => RustLib.instance.api.crateApiStoreMediaBytes(chatId: chatId, seq: seq);
+
+/// Decrypts a message's file to `dest`, to play or open it. False until it
+/// has arrived.
+Future<bool> mediaExport({
+  required PlatformInt64 chatId,
+  required PlatformInt64 seq,
+  required String dest,
+}) => RustLib.instance.api.crateApiStoreMediaExport(
+  chatId: chatId,
+  seq: seq,
+  dest: dest,
+);
 
 /// A fresh 32-byte storage key; Dart keeps it in Keystore-backed storage.
 Future<Uint8List> storeNewKey() =>
@@ -90,6 +135,63 @@ Future<List<MessageView>> messageList({
 
 enum ChatKindView { notes, direct, group }
 
+enum MediaKindView { image, video, audio, file }
+
+class MediaView {
+  final MediaKindView kind;
+  final String mime;
+  final String name;
+  final BigInt size;
+  final int width;
+  final int height;
+  final int durationMs;
+
+  /// A tiny JPEG preview (may be empty).
+  final Uint8List thumb;
+
+  /// The file has arrived (always, for our own).
+  final bool ready;
+
+  const MediaView({
+    required this.kind,
+    required this.mime,
+    required this.name,
+    required this.size,
+    required this.width,
+    required this.height,
+    required this.durationMs,
+    required this.thumb,
+    required this.ready,
+  });
+
+  @override
+  int get hashCode =>
+      kind.hashCode ^
+      mime.hashCode ^
+      name.hashCode ^
+      size.hashCode ^
+      width.hashCode ^
+      height.hashCode ^
+      durationMs.hashCode ^
+      thumb.hashCode ^
+      ready.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MediaView &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          mime == other.mime &&
+          name == other.name &&
+          size == other.size &&
+          width == other.width &&
+          height == other.height &&
+          durationMs == other.durationMs &&
+          thumb == other.thumb &&
+          ready == other.ready;
+}
+
 class MessageView {
   /// Position in the chat: what a reply points at.
   final PlatformInt64 seq;
@@ -106,6 +208,9 @@ class MessageView {
   /// Who wrote it, in a group (None for ours, and in direct chats).
   final String? senderName;
 
+  /// A photo, video, voice note or file.
+  final MediaView? media;
+
   const MessageView({
     required this.seq,
     required this.fromMe,
@@ -114,6 +219,7 @@ class MessageView {
     required this.delivered,
     this.reply,
     this.senderName,
+    this.media,
   });
 
   @override
@@ -124,7 +230,8 @@ class MessageView {
       sentAt.hashCode ^
       delivered.hashCode ^
       reply.hashCode ^
-      senderName.hashCode;
+      senderName.hashCode ^
+      media.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -137,7 +244,8 @@ class MessageView {
           sentAt == other.sentAt &&
           delivered == other.delivered &&
           reply == other.reply &&
-          senderName == other.senderName;
+          senderName == other.senderName &&
+          media == other.media;
 }
 
 class ReplyView {

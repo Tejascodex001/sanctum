@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 
 import '../identity/secrets.dart';
+import '../security/app_lock.dart';
 
 /// Staying reachable while the app is closed: an Android foreground service
 /// keeps the process (and Tor) alive, and notifications are posted on the
@@ -106,6 +107,16 @@ abstract final class Background {
       handler(args['id']! as Uint8List, args['handle']! as int);
     });
   }
+
+  /// The system picker: "visual" (photos and videos) or "file". Returns
+  /// the prepared file (path, name, mime, kind, width, height, durationMs,
+  /// thumb), or null if cancelled.
+  static Future<Map<Object?, Object?>?> pickMedia(String kind) =>
+      AppLock.whileAway(() => _call<Map<Object?, Object?>>(_app, 'pickMedia', {'kind': kind}));
+
+  /// Opens a (decrypted) file in another app the user picks.
+  static Future<bool> openFile(String path, String mime) async =>
+      await _call<bool>(_app, 'openFile', {'path': path, 'mime': mime}) ?? false;
 
   /// Blocks (or allows) screenshots and the recents preview.
   static Future<void> setSecure(bool secure) => _call(_app, 'setSecure', {'secure': secure});

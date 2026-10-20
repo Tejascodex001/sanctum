@@ -1,6 +1,8 @@
 //! Persistent chats, encrypted at rest. See `sanctum_core::store`.
 
 use super::session;
+use sanctum_core::media::Outgoing;
+use sanctum_core::protocol::MediaKind;
 use sanctum_core::store::{ChatKind, ChatMeta, Store};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -43,6 +45,79 @@ pub struct MessageView {
     pub reply: Option<ReplyView>,
     /// Who wrote it, in a group (None for ours, and in direct chats).
     pub sender_name: Option<String>,
+    /// A photo, video, voice note or file.
+    pub media: Option<MediaView>,
+}
+
+pub enum MediaKindView {
+    Image,
+    Video,
+    Audio,
+    File,
+}
+
+pub struct MediaView {
+    pub kind: MediaKindView,
+    pub mime: String,
+    pub name: String,
+    pub size: u64,
+    pub width: u32,
+    pub height: u32,
+    pub duration_ms: u32,
+    /// A tiny JPEG preview (may be empty).
+    pub thumb: Vec<u8>,
+    /// The file has arrived (always, for our own).
+    pub ready: bool,
+}
+
+fn media_kind(kind: MediaKindView) -> MediaKind {
+    match kind {
+        MediaKindView::Image => MediaKind::Image,
+        MediaKindView::Video => MediaKind::Video,
+        MediaKindView::Audio => MediaKind::Audio,
+        MediaKindView::File => MediaKind::File,
+    }
+}
+
+/// Sends a file (encrypted on this phone, then to the chat's other phones).
+#[allow(clippy::too_many_arguments)]
+pub fn media_send(
+    chat_id: i64,
+    path: String,
+    kind: MediaKindView,
+    mime: String,
+    name: String,
+    caption: String,
+    thumb: Vec<u8>,
+    width: u32,
+    height: u32,
+    duration_ms: u32,
+    reply_to: Option<i64>,
+) -> anyhow::Result<()> {
+    let out = Outgoing {
+        path: std::path::Path::new(&path),
+        kind: media_kind(kind),
+        mime: &mime,
+        name: &name,
+        caption: &caption,
+        thumb,
+        width,
+        height,
+        duration_ms,
+    };
+    reach(session::with(|s| Ok(s.send_media(chat_id, out, reply_to)?))?);
+    Ok(())
+}
+
+/// A message's file, decrypted (None until it has arrived).
+pub fn media_bytes(chat_id: i64, seq: i64) -> anyhow::Result<Option<Vec<u8>>> {
+    session::with(|s| Ok(s.media_bytes(chat_id, seq)?))
+}
+
+/// Decrypts a message's file to `dest`, to play or open it. False until it
+/// has arrived.
+pub fn media_export(chat_id: i64, seq: i64, dest: String) -> anyhow::Result<bool> {
+    session::with(|s| Ok(s.media_export(chat_id, seq, std::path::Path::new(&dest))?))
 }
 
 pub struct ReplyView {
@@ -197,6 +272,22 @@ pub fn message_list(chat_id: i64, limit: Option<u32>) -> anyhow::Result<Vec<Mess
                     snippet: q.snippet,
                 }),
                 sender_name: m.sender.filter(|_| group && !m.from_me).map(|k| name_of(&k)),
+                media: m.media.map(|media| MediaView {
+                    ready: s.media_ready(&media),
+                    kind: match media.kind {
+                        MediaKind::Image => MediaKindView::Image,
+                        MediaKind::Video => MediaKindView::Video,
+                        MediaKind::Audio => MediaKindView::Audio,
+                        MediaKind::File => MediaKindView::File,
+                    },
+                    mime: media.mime,
+                    name: media.name,
+                    size: media.size,
+                    width: media.width,
+                    height: media.height,
+                    duration_ms: media.duration_ms,
+                    thumb: media.thumb,
+                }),
                 body: m.body,
             })
             .collect())

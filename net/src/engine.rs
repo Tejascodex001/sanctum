@@ -350,7 +350,11 @@ impl Node {
         peer: &[u8; 32],
         news: &mut mpsc::UnboundedReceiver<Cmd>,
     ) -> anyhow::Result<()> {
-        let first = self.session.lock().unwrap().on_link_up(peer)?;
+        let first = {
+            let mut session = self.session.lock().unwrap();
+            session.link_started(peer);
+            session.on_link_up(peer)?
+        };
         write_frames(conn, &first).await?;
         self.emit_session_events();
         // Frames may have arrived together with the handshake.
@@ -656,6 +660,37 @@ mod tests {
         // Delivered to everyone.
         let session = carol.session.clone();
         until(move || session.lock().unwrap().store.messages(cg, None).unwrap()[0].delivered).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_photo_crosses_a_real_connection() {
+        let book = Arc::default();
+        let (alice, bob) = (phone(&book).await, phone(&book).await);
+        let (ab, ba) = befriend(&alice, &bob).await;
+        alice.node.spawn_retry_loop(Duration::from_millis(50));
+        let bytes: Vec<u8> = (0..400_000u32).map(|i| (i % 253) as u8).collect();
+        let path = alice._dir.path().join("p.jpg");
+        std::fs::write(&path, &bytes).unwrap();
+        let out = sanctum_core::media::Outgoing {
+            path: &path,
+            kind: sanctum_core::protocol::MediaKind::Image,
+            mime: "image/jpeg",
+            name: "p.jpg",
+            caption: "",
+            thumb: Vec::new(),
+            width: 1,
+            height: 1,
+            duration_ms: 0,
+        };
+        let reach = alice.session.lock().unwrap().send_media(ab, out, None).unwrap();
+        for p in reach {
+            alice.node.poke(p);
+        }
+        let session = bob.session.clone();
+        until(move || matches!(session.lock().unwrap().media_bytes(ba, 0), Ok(Some(_)))).await;
+        assert_eq!(bob.session.lock().unwrap().media_bytes(ba, 0).unwrap().unwrap(), bytes);
+        let session = alice.session.clone();
+        until(move || session.lock().unwrap().store.messages(ab, None).unwrap()[0].delivered).await;
     }
 
     #[tokio::test]

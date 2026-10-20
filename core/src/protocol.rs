@@ -75,6 +75,46 @@ pub enum Frame {
         id: MessageId,
         bytes: Vec<u8>,
     },
+    /// A piece of an attachment, already encrypted with the attachment's
+    /// own key (which travels inside MLS, in [`Media`]). The last piece is
+    /// acknowledged with `id`.
+    BlobChunk {
+        id: MessageId,
+        blob: BlobId,
+        index: u32,
+        total: u32,
+        bytes: Vec<u8>,
+    },
+}
+
+pub type BlobId = [u8; 16];
+
+/// An attachment, as its message describes it. The file itself follows as
+/// [`Frame::BlobChunk`]s.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Media {
+    pub blob: BlobId,
+    /// Decrypts the chunks.
+    pub key: [u8; 32],
+    pub kind: MediaKind,
+    pub mime: String,
+    pub name: String,
+    pub size: u64,
+    pub width: u32,
+    pub height: u32,
+    /// Videos and voice notes.
+    pub duration_ms: u32,
+    /// A tiny preview (JPEG, a few KB), shown until the file arrives.
+    pub thumb: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MediaKind {
+    Image,
+    Video,
+    Audio,
+    #[default]
+    File,
 }
 
 /// What a group is called and who's in it, as its admin last said.
@@ -141,6 +181,15 @@ pub enum Content {
     /// The sender's nearby key: lets us recognize their phone's rotating
     /// Bluetooth ID (see `nearby`).
     NearbyKey([u8; 32]),
+    /// A photo, video, voice note or file, with an optional caption. Used in
+    /// friends' chats and groups alike.
+    Media {
+        id: MessageId,
+        body: String,
+        sent_at: u64,
+        quote: Option<Quote>,
+        media: Media,
+    },
 }
 
 /// The message a reply answers: enough to show it even if it's gone.

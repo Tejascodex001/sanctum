@@ -94,6 +94,20 @@ Peer to peer, with no server (`core/src/group.rs`).
   - Keys for 4 past epochs are kept, so a message sent just before a membership change can still be read after it.
   - A message that can't be read yet is left unacknowledged and resent (live links resend every 30 seconds). It is dropped after 5 tries.
 
+## Media
+Photos, videos and files (`core/src/media.rs`).
+- **Encryption:** each attachment gets a random key. The file is encrypted with it in 64 KiB chunks (XChaCha20-Poly1305; the nonce is the blob id and chunk number) and stored like that in the media folder on both phones.
+- **Delivery:**
+  - The key, a description and a tiny blurred preview travel inside MLS (`Content::Media`).
+  - The encrypted chunks follow as `Frame::BlobChunk`s, useless without the key.
+  - The receiver accepts only chunks for a file a message announced, from that message's sender, and checks each chunk as it arrives.
+  - The message gets ✓✓ only once the file has arrived. In groups it goes to each member.
+- **Resending:** big files aren't resent on every flush, only on a new link or after 5 minutes without an acknowledgement.
+- **Photos** are shrunk (2048 px max) and re-encoded on the phone before sending. That also strips EXIF metadata such as location.
+- **Viewing:** photos are decrypted in memory. Videos play in the app from a temporary decrypted copy, which is deleted when the player closes and on every start. Files open in another app through a read-only link.
+- **Limits:** 50 MB per attachment. Temp chats have none, because they're memory-only.
+- Deleting a message or chat deletes its files; panic wipe deletes the media folder.
+
 ## Deleting
 - **Delete a message:** for me, or (your own messages only) for everyone (`Content::DeleteMessage`, by the shared message id). Works in groups too.
 - **Clear chat:** for me, or (friends' chats) for everyone (`Content::ClearChat`). The friendship stays.

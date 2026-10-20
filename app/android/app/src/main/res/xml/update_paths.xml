@@ -2,4 +2,6 @@
 <!-- Downloaded updates, handed to Android's installer. -->
 <paths>
     <cache-path name="updates" path="updates/" />
+    <!-- Decrypted copies of attachments, opened in another app on request. -->
+    <cache-path name="open" path="open/" />
 </paths>

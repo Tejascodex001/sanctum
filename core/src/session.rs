@@ -36,6 +36,10 @@ pub enum SessionError {
     NotAFriend,
     #[error("only the group's admin can do that")]
     NotAdmin,
+    #[error("too large to send (50 MB at most)")]
+    TooLarge,
+    #[error("storage: {0}")]
+    Io(String),
     #[error("the other side broke the protocol")]
     Protocol,
 }
@@ -116,6 +120,10 @@ pub struct Session {
     pub(crate) pokes: Vec<[u8; 32]>,
     /// Friends we've sent our nearby key to this run.
     pub(crate) nearby_offered: HashSet<[u8; 32]>,
+    /// Attachments' encrypted files.
+    pub(crate) media_dir: std::path::PathBuf,
+    /// Attachments sent on the current link, by (peer, outbox id).
+    pub(crate) blobs_sent: std::collections::HashMap<([u8; 32], MessageId), std::time::Instant>,
     requests: Vec<FriendRequest>,
     /// Declined this run; not shown again until a restart.
     declined: HashSet<[u8; 32]>,
@@ -128,6 +136,7 @@ impl Session {
         store_key: &[u8; 32],
     ) -> Result<Self> {
         let identity = Identity::from_secret(identity_secret);
+        let media_dir = path.as_ref().parent().unwrap_or(Path::new(".")).join("media");
         let store = Store::open(path, store_key)?;
         let mls = MlsClient::load(&identity, &store)?;
         Ok(Self {
@@ -141,6 +150,8 @@ impl Session {
             unreadable: Default::default(),
             pokes: Vec::new(),
             nearby_offered: HashSet::new(),
+            media_dir,
+            blobs_sent: Default::default(),
             requests: Vec::new(),
             declined: HashSet::new(),
         })
@@ -315,6 +326,7 @@ impl Session {
                 id: Some(id),
                 reply: quote.clone(),
                 sender: None,
+                media: None,
             },
         )?;
         let Some(peer) = meta.peers.first().map(|p| p.identity) else {
@@ -640,6 +652,13 @@ impl Session {
             | Frame::GroupKeyPackage { .. }
             | Frame::GroupWelcome { .. }
             | Frame::GroupMls { .. } => return self.on_group_frame(peer, frame),
+            Frame::BlobChunk {
+                id,
+                blob,
+                index,
+                total,
+                bytes,
+            } => return self.on_blob_chunk(peer, id, blob, index, total, bytes),
             other => other,
         };
         let Some((chat_id, mut meta)) = self.direct_chat(peer)? else {
@@ -787,6 +806,7 @@ impl Session {
                         id: Some(id),
                         reply,
                         sender: Some(*peer),
+                        media: None,
                     },
                 )?;
                 self.events.push(Event::Chat(chat_id));
@@ -820,12 +840,16 @@ impl Session {
                 // Only their own messages.
                 if let Some((seq, m)) = self.store.message_by_id(chat_id, &id)? {
                     if !m.from_me {
+                        if let Some(media) = &m.media {
+                            self.delete_blobs(&[media.blob]);
+                        }
                         self.store.delete_message(chat_id, seq)?;
                         self.events.push(Event::Chat(chat_id));
                     }
                 }
             }
             Content::ClearChat => {
+                self.delete_blobs(&self.store.blobs_in(chat_id)?);
                 self.store.clear_messages(chat_id)?;
                 self.events.push(Event::Chat(chat_id));
             }
@@ -834,6 +858,13 @@ impl Session {
                 self.events.push(Event::Chat(chat_id));
             }
             Content::NearbyKey(key) => self.on_nearby_key(peer, key)?,
+            Content::Media {
+                id,
+                body,
+                sent_at,
+                quote,
+                media,
+            } => self.receive_media(chat_id, peer, id, body, sent_at, quote, media)?,
             Content::TempWipe { temp } => {
                 if let Some(id) = self.temp.wipe_remote(*peer, temp) {
                     self.forget_temp_outbox(Some(*peer), temp);
@@ -853,6 +884,9 @@ impl Session {
             return Ok(Vec::new());
         };
         self.store.delete_message(chat_id, seq)?;
+        if let Some(media) = &message.media {
+            self.delete_blobs(&[media.blob]);
+        }
         self.events.push(Event::Chat(chat_id));
         match (for_everyone && message.from_me, message.id) {
             (true, Some(id)) => self.tell_chat(chat_id, Content::DeleteMessage { id }),
@@ -863,6 +897,7 @@ impl Session {
     /// Clears a chat's messages, here or on both phones (friends' chats).
     pub fn clear_chat(&mut self, chat_id: i64, for_everyone: bool) -> Result<Vec<[u8; 32]>> {
         let meta = self.chat(chat_id)?;
+        self.delete_blobs(&self.store.blobs_in(chat_id)?);
         self.store.clear_messages(chat_id)?;
         self.events.push(Event::Chat(chat_id));
         if for_everyone && meta.kind == ChatKind::Direct {
@@ -928,6 +963,9 @@ impl Session {
     /// in it. Deleting a friend's chat removes the friend: they can no
     /// longer reach this phone until you pair again.
     pub fn delete_chat(&mut self, chat_id: i64) -> Result<()> {
+        if let Ok(blobs) = self.store.blobs_in(chat_id) {
+            self.delete_blobs(&blobs);
+        }
         if let Ok(meta) = self.chat(chat_id) {
             for peer in meta.peers.iter().filter(|_| meta.kind == ChatKind::Direct) {
                 self.forget_nearby_key(&peer.identity)?;
@@ -957,8 +995,9 @@ impl Session {
                 OutboxState::Cipher(_) => {
                     self.store.outbox_remove(&id)?;
                 }
-                // Other groups' messages are unaffected.
-                OutboxState::Group { .. } | OutboxState::Frame(_) => {}
+                // Other groups' messages, and files (encrypted with their own
+                // keys), are unaffected.
+                OutboxState::Group { .. } | OutboxState::Frame(_) | OutboxState::Blob { .. } => {}
             }
         }
         for out in self.temp_out.iter_mut().filter(|o| &o.peer == peer) {
@@ -990,6 +1029,11 @@ impl Session {
                     frames.extend(Frame::from_bytes(bytes));
                     continue;
                 }
+                OutboxState::Blob { blob, .. } => {
+                    let blob = *blob;
+                    frames.extend(self.blob_frames(peer, id, &blob)?);
+                    continue;
+                }
                 _ => {}
             }
             // Already encrypted: goes out as is.
@@ -1008,7 +1052,7 @@ impl Session {
                 OutboxState::Cipher(bytes) | OutboxState::Sealed { cipher: bytes, .. } => {
                     frames.push(Frame::Mls { id, bytes });
                 }
-                OutboxState::Plain(_) | OutboxState::Group { .. } | OutboxState::Frame(_) => {}
+                OutboxState::Plain(_) | OutboxState::Group { .. } | OutboxState::Frame(_) | OutboxState::Blob { .. } => {}
             }
         }
         let Some(group) = pair_group else {
@@ -1556,6 +1600,98 @@ mod tests {
         // Once removed, no longer recognized.
         alice.s.remove_friend(ab, false).unwrap();
         assert_eq!(alice.s.nearby_friend(&bob.s.my_nearby_id(minute), minute).unwrap(), None);
+    }
+
+    fn photo(phone: &Phone, len: usize) -> (std::path::PathBuf, Vec<u8>) {
+        let bytes: Vec<u8> = (0..len).map(|i| (i * 7 % 251) as u8).collect();
+        let path = phone.dir.path().join("photo.jpg");
+        std::fs::write(&path, &bytes).unwrap();
+        (path, bytes)
+    }
+
+    fn outgoing(path: &std::path::Path) -> crate::media::Outgoing<'_> {
+        crate::media::Outgoing {
+            path,
+            kind: crate::protocol::MediaKind::Image,
+            mime: "image/jpeg",
+            name: "photo.jpg",
+            caption: "sunset",
+            thumb: vec![1, 2, 3],
+            width: 4000,
+            height: 3000,
+            duration_ms: 0,
+        }
+    }
+
+    #[test]
+    fn photos_travel_encrypted_and_arrive_whole() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        // Several chunks' worth.
+        let (path, bytes) = photo(&alice, 3 * crate::media::CHUNK + 1234);
+        assert_eq!(alice.s.send_media(ab, outgoing(&path), None).unwrap(), vec![bob.pk()]);
+        // Stored encrypted: the plain bytes aren't in the media folder.
+        let stored = std::fs::read_dir(alice.dir.path().join("media")).unwrap().next().unwrap().unwrap().path();
+        assert!(!std::fs::read(&stored).unwrap().windows(64).any(|w| w == &bytes[1000..1064]));
+        assert_eq!(alice.s.media_bytes(ab, 0).unwrap().unwrap(), bytes);
+
+        connect(&mut alice, &mut bob);
+        let m = bob.s.store.message(ba, 0).unwrap().unwrap();
+        assert_eq!(m.body, "sunset");
+        let media = m.media.unwrap();
+        assert_eq!((media.size, media.width, media.thumb.as_slice()), (bytes.len() as u64, 4000, &[1u8, 2, 3][..]));
+        assert_eq!(bob.s.media_bytes(ba, 0).unwrap().unwrap(), bytes);
+        assert!(alice.texts(ab)[0].2, "delivered once the file arrived");
+        assert!(bob.s.take_events().contains(&Event::Message(ba)));
+
+        // Delete for everyone takes the file too.
+        alice.s.delete_message(ab, 0, true).unwrap();
+        connect(&mut alice, &mut bob);
+        assert!(bob.s.store.message(ba, 0).unwrap().is_none());
+        assert_eq!(std::fs::read_dir(bob.dir.path().join("media")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_resent_or_forged_file_is_handled() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        let (path, bytes) = photo(&alice, 100);
+        alice.s.send_media(ab, outgoing(&path), None).unwrap();
+        connect(&mut alice, &mut bob);
+        // A new link resends anything unacknowledged; nothing is, so the
+        // file isn't sent twice and Bob's copy is intact.
+        alice.s.link_started(&bob.pk());
+        connect(&mut alice, &mut bob);
+        assert_eq!(bob.s.media_bytes(ba, 0).unwrap().unwrap(), bytes);
+        // Chunks for a file no message announced are ignored.
+        let stray = Frame::BlobChunk { id: [9; 16], blob: [8; 16], index: 0, total: 1, bytes: vec![0; 40] };
+        assert!(bob.s.on_frame(&alice.pk(), stray).unwrap().is_empty());
+    }
+
+    #[test]
+    fn photos_in_groups_reach_every_member() {
+        let (mut alice, mut bob, mut carol) = (Phone::new(), Phone::new(), Phone::new());
+        let (ab, _) = befriend(&mut alice, &mut bob);
+        let ac = alice.s.add_friend(&carol.s.my_code("Carol"), true).unwrap().chat_id;
+        carol.s.add_friend(&alice.s.my_code("Alice"), true).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        let (group, _) = alice.s.create_group("Trip", &[ab, ac]).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        connect(&mut alice, &mut bob);
+        let (path, bytes) = photo(&alice, 70_000);
+        assert_eq!(alice.s.send_media(group, outgoing(&path), None).unwrap().len(), 2);
+        connect(&mut alice, &mut bob);
+        assert!(!alice.texts(group)[0].2, "not everyone has it yet");
+        connect(&mut alice, &mut carol);
+        assert!(alice.texts(group)[0].2);
+        for p in [&bob, &carol] {
+            let g = group_of(p, "Trip").unwrap();
+            assert_eq!(p.s.media_bytes(g, 0).unwrap().unwrap(), bytes);
+        }
     }
 
     #[test]

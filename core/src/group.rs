@@ -190,6 +190,7 @@ impl Session {
                 id: Some(id),
                 reply: quote.clone(),
                 sender: None,
+                media: None,
             },
         )?;
         let content = Content::GroupText {
@@ -405,6 +406,7 @@ impl Session {
                             ..q
                         }),
                         sender: Some(*peer),
+                        media: None,
                     },
                 )?;
                 self.events.push(Event::Chat(chat_id));
@@ -418,10 +420,20 @@ impl Session {
                 self.store.update_chat(chat_id, meta)?;
                 self.events.push(Event::Chat(chat_id));
             }
+            Content::Media {
+                id,
+                body,
+                sent_at,
+                quote,
+                media,
+            } => self.receive_media(chat_id, peer, id, body, sent_at, quote, media)?,
             // Delete for everyone: only the sender's own message.
             Content::DeleteMessage { id } => {
                 if let Some((seq, m)) = self.store.message_by_id(chat_id, &id)? {
                     if m.sender == Some(*peer) {
+                        if let Some(media) = &m.media {
+                            self.delete_blobs(&[media.blob]);
+                        }
                         self.store.delete_message(chat_id, seq)?;
                         self.events.push(Event::Chat(chat_id));
                     }
@@ -462,6 +474,16 @@ impl Session {
 
     pub(crate) fn broadcast_content(&mut self, meta: &ChatMeta, content: &Content) -> Result<Vec<[u8; 32]>> {
         self.broadcast(meta, content, None)
+    }
+
+    /// A message (its delivery is tracked) to every other member.
+    pub(crate) fn broadcast_message(
+        &mut self,
+        meta: &ChatMeta,
+        content: &Content,
+        message: (i64, i64),
+    ) -> Result<Vec<[u8; 32]>> {
+        self.broadcast(meta, content, Some(message))
     }
 
     /// Encrypts once and queues the same bytes for every other member.

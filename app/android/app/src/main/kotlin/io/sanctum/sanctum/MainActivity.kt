@@ -7,7 +7,11 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import android.os.Handler
+import android.os.Looper
+import kotlin.concurrent.thread
 import androidx.core.content.FileProvider
 import java.io.File
 import com.google.zxing.client.android.Intents
@@ -34,6 +38,22 @@ class MainActivity : FlutterFragmentActivity() {
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         pendingPermission?.success(granted)
         pendingPermission = null
+    }
+
+    private var pendingPick: MethodChannel.Result? = null
+    private val pickVisual = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { finishPick(it) }
+    private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { finishPick(it) }
+
+    /** Copies and prepares the pick off the main thread (photos are shrunk). */
+    private fun finishPick(uri: Uri?) {
+        val result = pendingPick ?: return
+        pendingPick = null
+        if (uri == null) return result.success(null)
+        val main = Handler(Looper.getMainLooper())
+        thread(isDaemon = true) {
+            val prepared = runCatching { MediaPrep.prepare(applicationContext, uri) }.getOrNull()
+            main.post { result.success(prepared) }
+        }
     }
 
     private var pendingPermissions: MethodChannel.Result? = null
@@ -108,6 +128,25 @@ class MainActivity : FlutterFragmentActivity() {
                             pendingPermission = result
                             permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
+                    }
+                    "pickMedia" -> {
+                        pendingPick?.success(null)
+                        pendingPick = result
+                        if (call.argument<String>("kind") == "file") {
+                            pickFile.launch(arrayOf("*/*"))
+                        } else {
+                            pickVisual.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                        }
+                    }
+                    "openFile" -> {
+                        // Another app opens a decrypted copy, through a
+                        // read-only link granted just for this.
+                        val file = File(call.argument<String>("path")!!)
+                        val uri = FileProvider.getUriForFile(this, "$packageName.updates", file)
+                        val view = Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(uri, call.argument<String>("mime") ?: "*/*")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        result.success(runCatching { startActivity(Intent.createChooser(view, null)) }.isSuccess)
                     }
                     "requestBluetooth" -> {
                         // Nearby devices (Android 12+); before that, BLE

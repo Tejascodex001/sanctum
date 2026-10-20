@@ -46,6 +46,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
 
   @protected
+  MediaView dco_decode_box_autoadd_media_view(dynamic raw);
+
+  @protected
   ReplyView dco_decode_box_autoadd_reply_view(dynamic raw);
 
   @protected
@@ -121,6 +124,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<TempMessageView> dco_decode_list_temp_message_view(dynamic raw);
 
   @protected
+  MediaKindView dco_decode_media_kind_view(dynamic raw);
+
+  @protected
+  MediaView dco_decode_media_view(dynamic raw);
+
+  @protected
   MessageView dco_decode_message_view(dynamic raw);
 
   @protected
@@ -136,6 +145,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
 
   @protected
+  MediaView? dco_decode_opt_box_autoadd_media_view(dynamic raw);
+
+  @protected
   ReplyView? dco_decode_opt_box_autoadd_reply_view(dynamic raw);
 
   @protected
@@ -146,6 +158,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   UpdateInfo? dco_decode_opt_box_autoadd_update_info(dynamic raw);
+
+  @protected
+  Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw);
 
   @protected
   PairedView dco_decode_paired_view(dynamic raw);
@@ -214,6 +229,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  MediaView sse_decode_box_autoadd_media_view(SseDeserializer deserializer);
 
   @protected
   ReplyView sse_decode_box_autoadd_reply_view(SseDeserializer deserializer);
@@ -299,6 +317,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  MediaKindView sse_decode_media_kind_view(SseDeserializer deserializer);
+
+  @protected
+  MediaView sse_decode_media_view(SseDeserializer deserializer);
+
+  @protected
   MessageView sse_decode_message_view(SseDeserializer deserializer);
 
   @protected
@@ -312,6 +336,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
+
+  @protected
+  MediaView? sse_decode_opt_box_autoadd_media_view(
+    SseDeserializer deserializer,
+  );
 
   @protected
   ReplyView? sse_decode_opt_box_autoadd_reply_view(
@@ -328,6 +357,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   UpdateInfo? sse_decode_opt_box_autoadd_update_info(
     SseDeserializer deserializer,
   );
+
+  @protected
+  Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
   PairedView sse_decode_paired_view(SseDeserializer deserializer);
@@ -401,6 +433,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_media_view(
+    MediaView self,
     SseSerializer serializer,
   );
 
@@ -519,6 +557,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_media_kind_view(MediaKindView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_media_view(MediaView self, SseSerializer serializer);
+
+  @protected
   void sse_encode_message_view(MessageView self, SseSerializer serializer);
 
   @protected
@@ -537,6 +581,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_media_view(
+    MediaView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_reply_view(
     ReplyView? self,
     SseSerializer serializer,
@@ -551,6 +601,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_update_info(
     UpdateInfo? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_list_prim_u_8_strict(
+    Uint8List? self,
     SseSerializer serializer,
   );
 

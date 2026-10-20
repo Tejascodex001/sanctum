@@ -7,7 +7,7 @@
 //! between chats. SQLite only ever sees random ids, sequence numbers and
 //! ciphertext; `secure_delete` zeroes deleted pages.
 
-use crate::protocol::{MessageId, Quote};
+use crate::protocol::{BlobId, Media, MessageId, Quote};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -182,6 +182,20 @@ pub struct StoredMessage {
     pub reply: Option<Quote>,
     /// Who wrote it, for messages we received.
     pub sender: Option<[u8; 32]>,
+    /// A photo, video, voice note or file (the file is in the media folder).
+    pub media: Option<Media>,
+}
+
+/// The third message format, before attachments.
+#[derive(Deserialize)]
+struct StoredMessageV2 {
+    from_me: bool,
+    body: String,
+    sent_at: u64,
+    delivered: bool,
+    id: Option<MessageId>,
+    reply: Option<Quote>,
+    sender: Option<[u8; 32]>,
 }
 
 /// The second message format, before replies.
@@ -225,6 +239,8 @@ pub enum OutboxState {
     Group { group: Vec<u8>, cipher: Vec<u8> },
     /// A whole frame (a group welcome), sent as is until acknowledged.
     Frame(Vec<u8>),
+    /// An attachment's encrypted file, sent as chunks (see `media`).
+    Blob { blob: BlobId, total: u32 },
 }
 
 pub struct Store {
@@ -419,6 +435,15 @@ impl Store {
         Ok(())
     }
 
+    /// The attachments of a chat's messages (to delete their files).
+    pub fn blobs_in(&self, chat_id: i64) -> Result<Vec<BlobId>> {
+        Ok(self
+            .messages_indexed(chat_id, None)?
+            .into_iter()
+            .filter_map(|(_, m)| m.media.map(|media| media.blob))
+            .collect())
+    }
+
     /// Every message in the chat; the chat itself stays.
     pub fn clear_messages(&self, chat_id: i64) -> Result<()> {
         self.db.execute("DELETE FROM messages WHERE chat_id = ?1", [chat_id])?;
@@ -558,6 +583,18 @@ impl Store {
         // Newest format first; older records end before the newer fields.
         if let Ok(m) = postcard::from_bytes::<StoredMessage>(&plain) {
             return Ok(m);
+        }
+        if let Ok(v2) = postcard::from_bytes::<StoredMessageV2>(&plain) {
+            return Ok(StoredMessage {
+                from_me: v2.from_me,
+                body: v2.body,
+                sent_at: v2.sent_at,
+                delivered: v2.delivered,
+                id: v2.id,
+                reply: v2.reply,
+                sender: v2.sender,
+                media: None,
+            });
         }
         if let Ok(v1) = postcard::from_bytes::<StoredMessageV1>(&plain) {
             return Ok(StoredMessage {
@@ -813,6 +850,41 @@ mod tests {
         hidden.admin = Some([5; 32]);
         s.update_chat(7, &hidden).unwrap();
         assert_eq!(s.chats().unwrap().remove(0).1, hidden);
+    }
+
+    #[test]
+    fn messages_from_before_attachments_upgrade() {
+        #[derive(Serialize)]
+        struct V2 {
+            from_me: bool,
+            body: String,
+            sent_at: u64,
+            delivered: bool,
+            id: Option<MessageId>,
+            reply: Option<Quote>,
+            sender: Option<[u8; 32]>,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[5; 32]).unwrap();
+        let chat = s.create_chat(&meta("Bob")).unwrap();
+        let old = V2 {
+            from_me: false,
+            body: "re: dinner".into(),
+            sent_at: 9,
+            delivered: true,
+            id: Some([1; 16]),
+            reply: Some(Quote { id: [2; 16], author: [3; 32], snippet: "dinner?".into() }),
+            sender: Some([4; 32]),
+        };
+        s.db.execute(
+            "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, 0, ?2)",
+            params![chat, s.seal(&message_aad(chat, 0), &old).unwrap()],
+        )
+        .unwrap();
+        let m = s.message(chat, 0).unwrap().unwrap();
+        assert_eq!((m.body.as_str(), m.id, m.sender), ("re: dinner", Some([1; 16]), Some([4; 32])));
+        assert_eq!(m.reply.unwrap().snippet, "dinner?");
+        assert!(m.media.is_none());
     }
 
     #[test]

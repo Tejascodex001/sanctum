@@ -11,6 +11,7 @@ class ChatMessage {
     this.seq,
     this.reply,
     this.senderName,
+    this.media,
   });
 
   final String body;
@@ -29,6 +30,9 @@ class ChatMessage {
 
   /// In a group: who wrote it.
   final String? senderName;
+
+  /// A photo, video, voice note or file.
+  final MediaView? media;
 }
 
 /// The part of a message a reply shows.
@@ -72,6 +76,7 @@ class StoreSource implements MessageSource {
             delivered: m.delivered,
             seq: m.seq,
             senderName: m.senderName,
+            media: m.media,
             reply: m.reply == null
                 ? null
                 : ChatQuote(

@@ -40,7 +40,7 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Panic wipe** | Hold 2 seconds, even from the lock screen. Destroys the keys and data, then closes the app |
 | ✅ | **Encrypted storage** | SQLite with every row sealed (XChaCha20-Poly1305), keys in Android Keystore, no backups |
 | ✅ | **Over-the-air updates** | Checked and downloaded through Tor, with changelogs |
-| ⏳ | Media | Photos, videos, files |
+| ✅ | **Media** | Photos, videos and files up to 50 MB, end-to-end encrypted and stored encrypted. Photos are resized and lose hidden metadata like location |
 | ⏳ | Voice notes | |
 | ⏳ | Decoy PIN | Opens a harmless, empty-looking Sanctum |
 

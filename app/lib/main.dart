@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'home/home_screen.dart';
 import 'background/background.dart';
 import 'identity/secrets.dart';
+import 'chat/media.dart';
 import 'net/net_bus.dart';
 import 'notify/notifier.dart';
 import 'security/app_lock.dart';
@@ -25,6 +26,8 @@ Future<void> main() async {
       storeKey: await loadOrCreateStoreKey(),
     );
     await profileSetName(name: await loadDisplayName());
+    // Decrypted copies never outlive a run.
+    await clearDecryptedCopies();
     NetBus.instance.start();
     Notifier.instance.start();
     await NetBus.instance.connect(

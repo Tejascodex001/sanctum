@@ -1,13 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../background/background.dart';
 import '../deck/chat_card.dart';
 import '../deck/chat_tile.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
+import 'media.dart';
 import '../security/screenshots.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
@@ -316,6 +319,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           highlight: m.seq != null && m.seq == _flash,
           onQuoteTap: () => _jumpTo(m.reply?.seq),
           onLongPress: () => _actions(m),
+          chatId: widget.card.id,
           accent: accent,
           showTime: !grouped,
           showTicks: widget.card.friend,
@@ -371,10 +375,87 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     );
   }
 
+  /// Picks a photo, video or file and sends it (with the typed text as
+  /// its caption).
+  Future<void> _attach() async {
+    final kind = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded),
+              title: const Text('Photo or video'),
+              subtitle: const Text('Photos are resized and lose hidden data like location'),
+              onTap: () => Navigator.pop(sheet, 'visual'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.attach_file_rounded),
+              title: const Text('File'),
+              subtitle: const Text('Up to 50 MB'),
+              onTap: () => Navigator.pop(sheet, 'file'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (kind == null) return;
+    final picked = await Background.pickMedia(kind);
+    if (picked == null || !mounted) return;
+    final path = picked['path']! as String;
+    final caption = _input.text.trim();
+    final replyTo = _replyTo;
+    HapticFeedback.lightImpact();
+    setState(() {
+      _input.clear();
+      _replyTo = null;
+    });
+    try {
+      await mediaSend(
+        chatId: widget.card.id,
+        path: path,
+        kind: switch (picked['kind']) {
+          'image' => MediaKindView.image,
+          'video' => MediaKindView.video,
+          'audio' => MediaKindView.audio,
+          _ => MediaKindView.file,
+        },
+        mime: picked['mime']! as String,
+        name: picked['name']! as String,
+        caption: caption,
+        thumb: picked['thumb']! as Uint8List,
+        width: picked['width']! as int,
+        height: picked['height']! as int,
+        durationMs: picked['durationMs']! as int,
+        replyTo: replyTo?.seq,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Couldn\'t send: $e')));
+      }
+    } finally {
+      // Sanctum keeps its own encrypted copy.
+      try {
+        File(path).deleteSync();
+      } catch (_) {}
+    }
+    await _reload();
+  }
+
   Widget _composerRow(Color accent) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
+        // Attachments live on disk, so temp chats (memory only) have none.
+        if (!widget.card.temp)
+          IconButton(
+            tooltip: 'Attach',
+            onPressed: _attach,
+            icon: const Icon(Icons.add_circle_outline_rounded),
+            color: Palette.textMuted,
+          ),
         Expanded(
           child: TextField(
             controller: _input,
@@ -691,9 +772,13 @@ class _Bubble extends StatefulWidget {
     this.highlight = false,
     this.onQuoteTap,
     this.onLongPress,
+    required this.chatId,
   });
 
   final ChatMessage message;
+
+  /// For loading the message's attachment.
+  final int chatId;
   final Color accent;
   final bool showTime;
 
@@ -775,7 +860,12 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
                 ),
               ),
             ),
-          Text(m.body, style: AppText.body.copyWith(color: fg)),
+          if (m.media != null)
+            Padding(
+              padding: EdgeInsets.only(bottom: m.body.isEmpty ? 0 : Space.xs),
+              child: MediaContent(media: m.media!, chatId: widget.chatId, seq: m.seq, fg: fg),
+            ),
+          if (m.body.isNotEmpty || m.media == null) Text(m.body, style: AppText.body.copyWith(color: fg)),
           if (widget.showTime || (mine && widget.showTicks)) ...[
             const SizedBox(height: 3),
             Row(

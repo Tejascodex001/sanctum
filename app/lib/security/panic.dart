@@ -25,7 +25,11 @@ Future<void> panicWipe() async {
     await wipeEverything(paths: [
       for (final suffix in ['', '-wal', '-shm', '-journal']) '$support/sanctum.db$suffix',
       '$support/tor-state',
+      '$support/media',
       '$cache/tor-cache',
+      '$cache/open',
+      '$cache/outgoing',
+      '$cache/updates',
     ]);
   } catch (_) {
     // Already unreadable without the keys; leftovers are noise.
