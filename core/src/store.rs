@@ -90,6 +90,34 @@ pub struct StoredMessage {
     pub body: String,
     /// Unix seconds.
     pub sent_at: u64,
+    /// Our messages: the friend's phone confirmed it received this.
+    pub delivered: bool,
+}
+
+/// The first message format, before delivery receipts.
+#[derive(Deserialize)]
+struct StoredMessageV0 {
+    from_me: bool,
+    body: String,
+    sent_at: u64,
+}
+
+/// Something waiting to be delivered to a friend, kept sealed on disk so it
+/// survives restarts until the friend's phone acknowledges it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutboxItem {
+    pub peer: [u8; 32],
+    pub state: OutboxState,
+    /// The stored message this delivers, to mark it delivered on ack.
+    pub message: Option<(i64, i64)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum OutboxState {
+    /// Waiting for the chat's encrypted session to exist.
+    Plain(Vec<u8>),
+    /// Encrypted, sent until acknowledged.
+    Cipher(Vec<u8>),
 }
 
 pub struct Store {
@@ -114,6 +142,15 @@ impl Store {
              CREATE TABLE IF NOT EXISTS mls_kv (
                  k BLOB PRIMARY KEY,
                  sealed BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS outbox (
+                 id BLOB PRIMARY KEY,
+                 peer BLOB NOT NULL,
+                 sealed BLOB NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS outbox_peer ON outbox(peer);
+             CREATE TABLE IF NOT EXISTS seen (
+                 k BLOB PRIMARY KEY
              );
              CREATE TABLE IF NOT EXISTS messages (
                  chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
@@ -200,6 +237,19 @@ impl Store {
 
     /// Messages in order. `limit` keeps only the newest ones.
     pub fn messages(&self, chat_id: i64, limit: Option<u32>) -> Result<Vec<StoredMessage>> {
+        Ok(self
+            .messages_indexed(chat_id, limit)?
+            .into_iter()
+            .map(|(_, m)| m)
+            .collect())
+    }
+
+    /// Messages in order with their sequence numbers.
+    pub fn messages_indexed(
+        &self,
+        chat_id: i64,
+        limit: Option<u32>,
+    ) -> Result<Vec<(i64, StoredMessage)>> {
         let mut stmt = self.db.prepare(
             "SELECT seq, sealed FROM messages WHERE chat_id = ?1 ORDER BY seq DESC LIMIT ?2",
         )?;
@@ -210,11 +260,138 @@ impl Store {
         let mut out = rows
             .map(|row| {
                 let (seq, sealed) = row?;
-                self.open_sealed(&message_aad(chat_id, seq), &sealed)
+                Ok((seq, self.decode_message(chat_id, seq, &sealed)?))
             })
             .collect::<Result<Vec<_>>>()?;
         out.reverse();
         Ok(out)
+    }
+
+    pub fn set_delivered(&self, chat_id: i64, seq: i64) -> Result<()> {
+        let sealed: Option<Vec<u8>> = self
+            .db
+            .query_row(
+                "SELECT sealed FROM messages WHERE chat_id = ?1 AND seq = ?2",
+                params![chat_id, seq],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(sealed) = sealed else { return Ok(()) };
+        let mut msg = self.decode_message(chat_id, seq, &sealed)?;
+        msg.delivered = true;
+        self.db.execute(
+            "UPDATE messages SET sealed = ?3 WHERE chat_id = ?1 AND seq = ?2",
+            params![chat_id, seq, self.seal(&message_aad(chat_id, seq), &msg)?],
+        )?;
+        Ok(())
+    }
+
+    pub fn outbox_put(&self, id: &[u8; 16], item: &OutboxItem) -> Result<()> {
+        self.db.execute(
+            "INSERT OR REPLACE INTO outbox (id, peer, sealed) VALUES (?1, ?2, ?3)",
+            params![
+                id.as_slice(),
+                self.peer_index(&item.peer),
+                self.seal(&outbox_aad(id), item)?
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Everything waiting for `peer`, oldest first.
+    pub fn outbox_for(&self, peer: &[u8; 32]) -> Result<Vec<([u8; 16], OutboxItem)>> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT id, sealed FROM outbox WHERE peer = ?1 ORDER BY rowid")?;
+        let rows = stmt.query_map([self.peer_index(peer)], |r| {
+            Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?;
+        rows.map(|row| {
+            let (id, sealed) = row?;
+            let id: [u8; 16] = id.try_into().map_err(|_| StoreError::Decrypt)?;
+            Ok((id, self.open_sealed(&outbox_aad(&id), &sealed)?))
+        })
+        .collect()
+    }
+
+    /// Friends with something waiting, so the app knows whom to reach.
+    pub fn outbox_peers(&self) -> Result<Vec<[u8; 32]>> {
+        let mut stmt = self
+            .db
+            .prepare("SELECT id, sealed FROM outbox ORDER BY rowid")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?;
+        let mut peers = Vec::new();
+        for row in rows {
+            let (id, sealed) = row?;
+            let id: [u8; 16] = id.try_into().map_err(|_| StoreError::Decrypt)?;
+            let item: OutboxItem = self.open_sealed(&outbox_aad(&id), &sealed)?;
+            if !peers.contains(&item.peer) {
+                peers.push(item.peer);
+            }
+        }
+        Ok(peers)
+    }
+
+    pub fn outbox_remove(&self, id: &[u8; 16]) -> Result<Option<OutboxItem>> {
+        let sealed: Option<Vec<u8>> = self
+            .db
+            .query_row(
+                "SELECT sealed FROM outbox WHERE id = ?1",
+                [id.as_slice()],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(sealed) = sealed else {
+            return Ok(None);
+        };
+        let item = self.open_sealed(&outbox_aad(id), &sealed)?;
+        self.db
+            .execute("DELETE FROM outbox WHERE id = ?1", [id.as_slice()])?;
+        Ok(Some(item))
+    }
+
+    /// Records a delivered message id. Returns false if it was seen before
+    /// (a resend after a lost acknowledgement).
+    pub fn mark_seen(&self, id: &[u8; 16]) -> Result<bool> {
+        let n = self.db.execute(
+            "INSERT OR IGNORE INTO seen (k) VALUES (?1)",
+            [self.mls_index(&[b"seen:".as_slice(), id].concat())],
+        )?;
+        Ok(n == 1)
+    }
+
+    pub fn is_seen(&self, id: &[u8; 16]) -> Result<bool> {
+        Ok(self
+            .db
+            .query_row(
+                "SELECT 1 FROM seen WHERE k = ?1",
+                [self.mls_index(&[b"seen:".as_slice(), id].concat())],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    fn peer_index(&self, peer: &[u8; 32]) -> Vec<u8> {
+        self.mls_index(&[b"peer:".as_slice(), peer].concat())
+    }
+
+    fn decode_message(&self, chat_id: i64, seq: i64, sealed: &[u8]) -> Result<StoredMessage> {
+        let plain = self.open_bytes(&message_aad(chat_id, seq), sealed)?;
+        match postcard::from_bytes::<StoredMessage>(&plain) {
+            Ok(m) => Ok(m),
+            Err(_) => {
+                let v0: StoredMessageV0 = postcard::from_bytes(&plain)?;
+                Ok(StoredMessage {
+                    from_me: v0.from_me,
+                    body: v0.body,
+                    sent_at: v0.sent_at,
+                    delivered: false,
+                })
+            }
+        }
     }
 
     /// All persisted MLS state (group secrets, ratchets, key packages).
@@ -303,6 +480,10 @@ fn mls_aad(hashed_key: &[u8]) -> Vec<u8> {
     [b"mls:".as_slice(), hashed_key].concat()
 }
 
+fn outbox_aad(id: &[u8; 16]) -> Vec<u8> {
+    [b"outbox:".as_slice(), id].concat()
+}
+
 fn message_aad(chat_id: i64, seq: i64) -> Vec<u8> {
     [
         b"msg:".as_slice(),
@@ -369,7 +550,85 @@ mod tests {
             from_me: true,
             body: body.into(),
             sent_at,
+            delivered: false,
         }
+    }
+
+    #[test]
+    fn delivery_outbox_and_seen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.db");
+        let key = [6u8; 32];
+        let (peer, other) = ([1u8; 32], [2u8; 32]);
+        let chat = {
+            let s = Store::open(&path, &key).unwrap();
+            let chat = s.create_chat(&meta("Bob")).unwrap();
+            let seq = s.add_message(chat, &msg("hi", 1)).unwrap();
+            let item = OutboxItem {
+                peer,
+                state: OutboxState::Plain(b"hi".to_vec()),
+                message: Some((chat, seq)),
+            };
+            s.outbox_put(&[9; 16], &item).unwrap();
+            s.outbox_put(
+                &[8; 16],
+                &OutboxItem {
+                    peer: other,
+                    state: OutboxState::Cipher(vec![1]),
+                    message: None,
+                },
+            )
+            .unwrap();
+            assert!(s.mark_seen(&[7; 16]).unwrap());
+            assert!(
+                !s.mark_seen(&[7; 16]).unwrap(),
+                "second time is a duplicate"
+            );
+            chat
+        };
+        // Everything survives a restart.
+        let s = Store::open(&path, &key).unwrap();
+        assert_eq!(s.outbox_peers().unwrap(), vec![peer, other]);
+        let pending = s.outbox_for(&peer).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert!(!s.mark_seen(&[7; 16]).unwrap());
+        let removed = s.outbox_remove(&pending[0].0).unwrap().unwrap();
+        let (c, seq) = removed.message.unwrap();
+        s.set_delivered(c, seq).unwrap();
+        assert!(s.messages(chat, None).unwrap()[0].delivered);
+        assert!(s.outbox_for(&peer).unwrap().is_empty());
+        assert!(s.outbox_remove(&pending[0].0).unwrap().is_none());
+    }
+
+    #[test]
+    fn old_messages_upgrade() {
+        #[derive(Serialize)]
+        struct V0 {
+            from_me: bool,
+            body: String,
+            sent_at: u64,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[3; 32]).unwrap();
+        let chat = s.create_chat(&meta("x")).unwrap();
+        s.db.execute(
+            "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, 0, ?2)",
+            params![
+                chat,
+                s.seal(
+                    &message_aad(chat, 0),
+                    &V0 {
+                        from_me: true,
+                        body: "old".into(),
+                        sent_at: 4
+                    }
+                )
+                .unwrap()
+            ],
+        )
+        .unwrap();
+        let m = &s.messages(chat, None).unwrap()[0];
+        assert_eq!((m.body.as_str(), m.delivered), ("old", false));
     }
 
     #[test]

@@ -5,6 +5,7 @@ pub mod base32;
 pub mod identity;
 pub mod invite;
 pub mod mls;
+pub mod protocol;
 pub mod session;
 pub mod sigil;
 pub mod store;
