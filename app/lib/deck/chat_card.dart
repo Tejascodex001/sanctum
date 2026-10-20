@@ -12,6 +12,7 @@ class ChatCard {
     this.friend = false,
     this.verified = false,
     this.friendChatId,
+    this.hidden = false,
     this.note,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
@@ -31,6 +32,9 @@ class ChatCard {
   /// The friend's chat (itself, or the one a temp chat is with): whether
   /// they're online is looked up by it.
   final int? friendChatId;
+
+  /// Hidden from the list; shown only after revealing hidden chats.
+  final bool hidden;
 
   /// Shown under the title inside the chat.
   final String? note;

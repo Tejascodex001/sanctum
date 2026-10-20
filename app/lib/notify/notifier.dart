@@ -99,9 +99,13 @@ class Notifier with WidgetsBindingObserver {
     if (_foreground) return;
     final temp = key.startsWith('t:');
     final id = int.parse(key.substring(2));
+    final chat = temp ? null : (await chatList()).where((c) => c.id == id).firstOrNull;
+    // A hidden chat's notification doesn't say whose it is.
     final title = temp
         ? (await tempList()).where((t) => t.id.toInt() == id).firstOrNull?.title
-        : (await chatList()).where((c) => c.id == id).firstOrNull?.title;
+        : chat?.hidden ?? true
+            ? null
+            : chat?.title;
     final what = temp ? 'temp message' : 'message';
     await Background.notify(
       id: _notificationId(key),

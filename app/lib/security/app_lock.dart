@@ -5,6 +5,7 @@ import 'package:local_auth/local_auth.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/sigil.dart';
 import '../theme/tokens.dart';
+import 'panic.dart';
 
 /// Covers the app until the user unlocks with biometrics or the device
 /// PIN/pattern, and locks again whenever the app leaves the foreground.
@@ -153,6 +154,16 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
               child: FadeTransition(
                 opacity: Tween(begin: 0.35, end: 0.9).animate(_pulse),
                 child: const Text('TAP TO UNLOCK', style: AppText.overline),
+              ),
+            ),
+            // In an emergency, wiping mustn't need unlocking first.
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: SafeArea(
+                child: TextButton(
+                  onPressed: () => showPanicSheet(context),
+                  child: Text('Emergency wipe', style: AppText.micro.copyWith(color: Palette.textFaint)),
+                ),
               ),
             ),
           ],

@@ -36,3 +36,7 @@ Future<bool> loadFlag(String key, {required bool fallback}) async {
 }
 
 Future<void> saveFlag(String key, bool on) => _storage.write(key: 'flag_$key', value: on ? '1' : '0');
+
+/// Panic wipe: destroys every key and setting. Without the store key the
+/// database can never be decrypted, even if flash storage keeps old blocks.
+Future<void> wipeSecrets() => _storage.deleteAll();

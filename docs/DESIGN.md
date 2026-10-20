@@ -55,6 +55,12 @@ Rust core (sanctum-core)
 - **At rest:** every chat, message and MLS secret is sealed before SQLite sees it, with the row's identity bound as associated data so rows can't be swapped. Lookup keys for MLS state are keyed hashes, so group ids never appear on disk. `secure_delete` zeroes deleted data. Temp chats never touch disk.
 - MLS state is persisted after every operation; a crash before persisting just rolls back to the last saved state.
 
+## Replies
+- Every message has an id that is the same on both phones (the network message id).
+- A reply (`Content::Reply`) carries a quote: the original's id, its author's key and its first 140 characters. It can be shown even if the original is gone, and tapping it scrolls to the original when it's nearby.
+- Swipe a message right, or long-press it and choose Reply.
+- Message and chat records upgrade in place: each on-disk format is tried newest first, and an older record fails to decode as a newer one because it ends before the new fields.
+
 ## Adding friends
 - A **friend code** holds your identity key and name: `SANCTUM1:` + Crockford Base32 (digits and letters, no I/L/O/U), about 70–85 characters, with a 16-bit checksum that catches typos. It fits a QR version 4, encoded in alphanumeric mode, so it scans instantly and is easy to read out or type (case-insensitive; prefix optional; O/I/L forgiven).
 - **One code is enough.** Adding someone's code (scan, type or paste) sends them a **friend request** over Tor. Your phone retries every 30 s until theirs is reachable. They see your name, the pair sigil and the safety number, and they accept or decline. Accepting adds you as *not verified*. The hello before a request already proves which key sent it; only the name is self-chosen. A stranger may send a request frame and nothing else, and then the connection closes. Requests are held in memory only, capped at 20, with names capped at 64 characters. Declines last until restart.
@@ -65,9 +71,16 @@ Rust core (sanctum-core)
 - Scanning uses ZXing's native Android scanner (on-device, no Google ML Kit, which reports usage to Google). Verified in tests by decoding generated QRs with both Java ZXing and zxing-cpp, including blurred, rotated and tiny images.
 
 ## Security features
-- App lock with biometric or PIN; locks again when the app goes to the background.
-- Screenshots blocked by default (`FLAG_SECURE`); can be allowed per chat after a biometric check.
-- Hidden chats behind a second PIN; a decoy PIN; a panic-wipe gesture.
+- **App lock** with biometrics or the device PIN. It locks again when the app goes to the background and prompts as soon as the app is back on screen.
+- **Screenshots** are blocked by default (`FLAG_SECURE`, which also blanks the recents preview). A chat can allow them from the camera icon in its header, after a biometric check, and only while that chat is open.
+- **Hidden chats.** Long-press a chat to hide it.
+  - Long-press the "Sanctum" wordmark and pass a biometric check to show hidden chats until the app leaves the screen.
+  - The hidden flag is stored inside the encrypted record. A hidden chat's notifications don't show its name, and hidden friends are left out of the temp-chat picker.
+- **Panic wipe.** Hold for 2 seconds, from the sigil sheet or from "Emergency wipe" on the lock screen, which needs no unlock.
+  - It destroys the Keystore-held keys first (crypto-shredding, since flash storage can't be reliably overwritten).
+  - Then it deletes the database and Tor's files, stops the service, clears notifications and exits. Temp chats die with the process.
+- **Background reliability:** one tap opens the phone maker's own "allow in background" page (Xiaomi Autostart, Oppo/Realme startup manager, Vivo, Samsung battery, Huawei, OnePlus), falling back to the app's settings.
+- Decoy PIN: later.
 - Verification: both people see the same sigil for their chat. If the sigils match, the chat is secure.
 
 ## UI: Sigil design system

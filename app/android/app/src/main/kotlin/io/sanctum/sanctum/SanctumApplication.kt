@@ -55,6 +55,10 @@ class SanctumApplication : Application() {
                         )
                         result.success(null)
                     }
+                    "cancelAll" -> {
+                        NotificationManagerCompat.from(this).cancelAll()
+                        result.success(null)
+                    }
                     "cancel" -> {
                         NotificationManagerCompat.from(this).cancel(call.argument<Int>("id")!!)
                         result.success(null)

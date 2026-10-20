@@ -75,6 +75,23 @@ pub enum Content {
     TempWipe {
         temp: TempId,
     },
+    /// A message answering an earlier one, which it quotes.
+    Reply {
+        body: String,
+        sent_at: u64,
+        quote: Quote,
+    },
+}
+
+/// The message a reply answers: enough to show it even if it's gone.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Quote {
+    /// The quoted message's id (zero for messages from before replies).
+    pub id: MessageId,
+    /// Who wrote it.
+    pub author: [u8; 32],
+    /// Its start, up to 140 characters.
+    pub snippet: String,
 }
 
 impl Content {

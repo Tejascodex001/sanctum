@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:local_auth/local_auth.dart';
 
 import '../chat/chat_screen.dart';
 import '../chat/message_source.dart';
@@ -10,8 +11,11 @@ import '../deck/chat_stack.dart';
 import '../deck/chat_tile.dart';
 import '../friends/add_friend_screen.dart';
 import '../background/background.dart';
+import '../identity/secrets.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
+import '../security/app_lock.dart';
+import '../security/panic.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
@@ -36,6 +40,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// Friends who haven't accepted our request yet.
   final _waiting = <int>{};
+
+  /// Hidden chats are listed only after a biometric check, until the app
+  /// leaves the screen.
+  bool _showHidden = false;
+  List<ChatCard> get _visibleChats => [for (final c in _chats) if (_showHidden || !c.hidden) c];
   final _pages = PageController();
   final _search = TextEditingController();
   final _sigils = <String, SigilSpec>{};
@@ -63,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// reconnect now instead of waiting for the next retry.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden && _showHidden) setState(() => _showHidden = false);
     if (state != AppLifecycleState.resumed) return;
     NetBus.instance.refresh();
     _loadChats();
@@ -191,6 +201,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         source: StoreSource(c.id),
         friend: !notes,
         friendChatId: notes ? null : c.id,
+        hidden: c.hidden,
         verified: c.verified,
         note: notes
             ? 'Only on this device'
@@ -256,7 +267,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     final picked = await showModalBottomSheet<(bool, int?)>(
       context: context,
-      builder: (context) => _TempPicker(friends: friends, sigil: _sigil),
+      builder: (context) => _TempPicker(
+        friends: [for (final f in friends) if (_showHidden || !f.hidden) f],
+        sigil: _sigil,
+      ),
     );
     if (picked == null) return;
     HapticFeedback.mediumImpact();
@@ -318,6 +332,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _wipe(card);
                 },
               ),
+            if (!card.temp && card.friendChatId != null)
+              ListTile(
+                leading: Icon(card.hidden ? Icons.visibility_rounded : Icons.visibility_off_rounded),
+                title: Text(card.hidden ? 'Unhide chat' : 'Hide chat'),
+                subtitle: card.hidden ? null : const Text('Long-press "Sanctum" to see hidden chats'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _setHidden(card, !card.hidden);
+                },
+              ),
             if (card.friend && !card.temp) ...[
               ListTile(
                 leading: const Icon(Icons.edit_rounded),
@@ -340,6 +364,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  Future<void> _toggleHidden() async {
+    if (_showHidden) {
+      HapticFeedback.selectionClick();
+      setState(() => _showHidden = false);
+      return;
+    }
+    if (!_chats.any((c) => c.hidden)) return;
+    final ok = await AppLock.whileAway(() async {
+      try {
+        final auth = LocalAuthentication();
+        return !await auth.isDeviceSupported() || await auth.authenticate(localizedReason: 'Show hidden chats');
+      } on LocalAuthException {
+        return false;
+      }
+    });
+    if (!ok || !mounted) return;
+    HapticFeedback.mediumImpact();
+    setState(() => _showHidden = true);
+    _goTo(0);
+  }
+
+  Future<void> _setHidden(ChatCard card, bool hidden) async {
+    HapticFeedback.mediumImpact();
+    await chatSetHidden(id: card.id, hidden: hidden);
+    await _loadChats();
+    if (!mounted || !hidden) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('Hidden. Long-press "Sanctum" to see hidden chats.')));
   }
 
   Future<void> _rename(ChatCard card) async {
@@ -409,16 +464,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context: context,
       backgroundColor: widget.mySigil.background.color,
       showDragHandle: true,
-      builder: (_) => SizedBox(
-        height: 600,
-        child: Column(
+      isScrollControlled: true,
+      builder: (sheet) => ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.88),
+        child: ListView(
+          shrinkWrap: true,
           children: [
-            const Text('YOUR SIGIL', style: AppText.overline),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: AspectRatio(
-                  aspectRatio: 1,
+            const Center(child: Text('YOUR SIGIL', style: AppText.overline)),
+            Padding(
+              padding: const EdgeInsets.all(24),
+              child: Center(
+                child: SizedBox.square(
+                  dimension: 220,
                   child: ClipOval(child: LivingSigil(spec: widget.mySigil, period: 60)),
                 ),
               ),
@@ -433,9 +490,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             const Padding(
-              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
+              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
               child: _BackgroundSettings(),
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
+              child: ListTile(
+                leading: const Icon(Icons.delete_forever_rounded, color: Palette.danger),
+                title: const Text('Panic wipe', style: TextStyle(color: Palette.danger)),
+                subtitle: const Text('Erase everything from this phone'),
+                onTap: () => showPanicSheet(context),
+              ),
+            ),
+            SizedBox(height: MediaQuery.paddingOf(sheet).bottom),
           ],
         ),
       ),
@@ -453,7 +520,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: const EdgeInsets.fromLTRB(Space.xl, Space.md, Space.md, Space.sm),
               child: Row(
                 children: [
-                  const Text('Sanctum', style: AppText.display),
+                  // Long-press: reveal hidden chats (after a biometric check).
+                  GestureDetector(
+                    onLongPress: _toggleHidden,
+                    child: const Text('Sanctum', style: AppText.display),
+                  ),
                   const SizedBox(width: Space.md),
                   const _NetPill(),
                   const Spacer(),
@@ -506,6 +577,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
               child: _SearchField(controller: _search),
             ),
+            const _ReliabilityBanner(),
             AnimatedSize(
               duration: Motion.medium,
               curve: Motion.decelerate,
@@ -522,7 +594,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 onPageChanged: (_) => HapticFeedback.selectionClick(),
                 children: [
                   ChatStack(
-                    cards: _chats,
+                    cards: _visibleChats,
                     query: _search.text,
                     openBuilder: _openChat,
                     onClosed: _closed,
@@ -548,11 +620,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _FriendsPage(
                     requests: _requests,
                     friends: [
-                      for (final c in _chats)
+                      for (final c in _visibleChats)
                         if (c.friend && !_waiting.contains(c.id)) c,
                     ],
                     waiting: [
-                      for (final c in _chats)
+                      for (final c in _visibleChats)
                         if (_waiting.contains(c.id)) c,
                     ],
                     query: _search.text,
@@ -1259,6 +1331,7 @@ class _BackgroundSettingsState extends State<_BackgroundSettings> with WidgetsBi
   bool? _on;
   bool _unrestricted = true;
   bool _canNotify = true;
+  ({String brand, bool aggressive}) _brand = (brand: '', aggressive: false);
 
   @override
   void initState() {
@@ -1283,8 +1356,10 @@ class _BackgroundSettingsState extends State<_BackgroundSettings> with WidgetsBi
     final on = await Background.enabled();
     final unrestricted = await Background.batteryUnrestricted();
     final canNotify = await Background.canNotify();
+    final brand = await Background.brand();
     if (!mounted) return;
     setState(() {
+      _brand = brand;
       _on = on;
       _unrestricted = unrestricted;
       _canNotify = canNotify;
@@ -1334,8 +1409,125 @@ class _BackgroundSettingsState extends State<_BackgroundSettings> with WidgetsBi
               subtitle: const Text('Some phones cut background connections to save battery. Tap to allow.'),
               onTap: Background.requestUnrestricted,
             ),
+          if (on)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.settings_suggest_rounded),
+              title: Text(_brand.aggressive ? 'Let Sanctum run on ${_brandName(_brand.brand)}' : 'Background settings'),
+              subtitle: Text(
+                _brand.aggressive
+                    ? '${_brandName(_brand.brand)} phones stop apps in the background. Opens the setting directly: '
+                        'turn on Autostart / allow background activity for Sanctum.'
+                    : 'Opens Sanctum\'s settings, if notifications stop after a while.',
+              ),
+              trailing: const Icon(Icons.open_in_new_rounded, size: 18),
+              onTap: Background.openBackgroundSettings,
+            ),
         ],
       ),
+    );
+  }
+}
+
+String _brandName(String brand) => switch (brand) {
+      'xiaomi' => 'Xiaomi',
+      'oppo' => 'Oppo / Realme',
+      'vivo' => 'Vivo',
+      'huawei' => 'Huawei / Honor',
+      'samsung' => 'Samsung',
+      'oneplus' => 'OnePlus',
+      _ => brand.isEmpty ? 'this phone' : brand[0].toUpperCase() + brand.substring(1),
+    };
+
+/// Shown until background delivery is set up to be reliable on this phone:
+/// one tap opens the exact setting.
+class _ReliabilityBanner extends StatefulWidget {
+  const _ReliabilityBanner();
+
+  @override
+  State<_ReliabilityBanner> createState() => _ReliabilityBannerState();
+}
+
+class _ReliabilityBannerState extends State<_ReliabilityBanner> with WidgetsBindingObserver {
+  bool _show = false;
+  bool _unrestricted = true;
+  String _brand = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _load();
+  }
+
+  Future<void> _load() async {
+    final show = await Background.needsReliabilityStep() && !await loadFlag('reliability_dismissed', fallback: false);
+    final unrestricted = await Background.batteryUnrestricted();
+    final brand = (await Background.brand()).brand;
+    if (!mounted) return;
+    setState(() {
+      _show = show;
+      _unrestricted = unrestricted;
+      _brand = brand;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSize(
+      duration: Motion.medium,
+      curve: Motion.decelerate,
+      child: !_show
+          ? const SizedBox(width: double.infinity)
+          : Container(
+              margin: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+              padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.xs, Space.sm),
+              decoration: BoxDecoration(
+                color: Palette.surface,
+                borderRadius: BorderRadius.circular(Radii.md),
+                border: Border.all(color: _amber.withValues(alpha: 0.35)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.battery_alert_rounded, color: _amber),
+                  const SizedBox(width: Space.md),
+                  Expanded(
+                    child: Text(
+                      _unrestricted
+                          ? '${_brandName(_brand)} phones can stop Sanctum in the background. Allow it to keep running.'
+                          : 'Allow Sanctum to run in the background, so messages reach you when it\'s closed.',
+                      style: AppText.caption,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () async {
+                      HapticFeedback.selectionClick();
+                      _unrestricted ? await Background.openBackgroundSettings() : await Background.requestUnrestricted();
+                    },
+                    child: const Text('Open'),
+                  ),
+                  IconButton(
+                    tooltip: 'Dismiss',
+                    icon: const Icon(Icons.close_rounded, size: 18),
+                    onPressed: () async {
+                      await saveFlag('reliability_dismissed', true);
+                      _load();
+                    },
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }

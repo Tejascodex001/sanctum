@@ -225,6 +225,33 @@ pub fn net_set_background(background: bool) {
     }
 }
 
+/// Panic wipe, after the app has destroyed the keys: cuts every link,
+/// closes the store and deletes `paths` (the database, Tor's state and
+/// cache). The app exits right after; temp chats die with the process.
+pub fn wipe_everything(paths: Vec<String>) -> anyhow::Result<()> {
+    if let Some(node) = NODE.lock().unwrap().take() {
+        node.shutdown_links();
+    }
+    SESSION.lock().unwrap().take();
+    set_status(NetStatus::Off, 0, "Wiped");
+    let mut failed = Vec::new();
+    for path in paths {
+        let path = PathBuf::from(path);
+        let result = if path.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else if path.exists() {
+            std::fs::remove_file(&path)
+        } else {
+            Ok(())
+        };
+        if result.is_err() {
+            failed.push(path.display().to_string());
+        }
+    }
+    anyhow::ensure!(failed.is_empty(), "couldn't delete {}", failed.join(", "));
+    Ok(())
+}
+
 /// Pull to refresh: reconnects to every friend not connected, now.
 pub fn net_refresh() {
     if let Some(node) = NODE.lock().unwrap().clone() {
@@ -381,6 +408,7 @@ pub struct FriendView {
     pub chat_id: i64,
     pub name: String,
     pub sigil_key: Vec<u8>,
+    pub hidden: bool,
 }
 
 /// Friends, for choosing whom to start a temp chat with.
@@ -395,6 +423,7 @@ pub fn friend_list() -> anyhow::Result<Vec<FriendView>> {
                     chat_id,
                     name: peer.name,
                     sigil_key: meta.sigil_key,
+                    hidden: meta.hidden,
                 })
             })
             .collect()

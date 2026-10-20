@@ -32,6 +32,10 @@ Future<void> chatSetPinned({required PlatformInt64 id, required bool pinned}) =>
 Future<void> chatRename({required PlatformInt64 id, required String name}) =>
     RustLib.instance.api.crateApiStoreChatRename(id: id, name: name);
 
+/// Hides a chat from the list (or shows it again).
+Future<void> chatSetHidden({required PlatformInt64 id, required bool hidden}) =>
+    RustLib.instance.api.crateApiStoreChatSetHidden(id: id, hidden: hidden);
+
 Future<void> chatDelete({required PlatformInt64 id}) =>
     RustLib.instance.api.crateApiStoreChatDelete(id: id);
 
@@ -40,7 +44,12 @@ Future<void> chatDelete({required PlatformInt64 id}) =>
 Future<void> messageSend({
   required PlatformInt64 chatId,
   required String body,
-}) => RustLib.instance.api.crateApiStoreMessageSend(chatId: chatId, body: body);
+  PlatformInt64? replyTo,
+}) => RustLib.instance.api.crateApiStoreMessageSend(
+  chatId: chatId,
+  body: body,
+  replyTo: replyTo,
+);
 
 /// Messages in order; `limit` keeps only the newest.
 Future<List<MessageView>> messageList({
@@ -52,6 +61,8 @@ Future<List<MessageView>> messageList({
 enum ChatKindView { notes, direct, group }
 
 class MessageView {
+  /// Position in the chat: what a reply points at.
+  final PlatformInt64 seq;
   final bool fromMe;
   final String body;
   final PlatformInt64 sentAt;
@@ -59,26 +70,75 @@ class MessageView {
   /// Our messages: the friend's phone has it.
   final bool delivered;
 
+  /// The message this one answers.
+  final ReplyView? reply;
+
+  /// Who wrote it, in a group (None for ours, and in direct chats).
+  final String? senderName;
+
   const MessageView({
+    required this.seq,
     required this.fromMe,
     required this.body,
     required this.sentAt,
     required this.delivered,
+    this.reply,
+    this.senderName,
   });
 
   @override
   int get hashCode =>
-      fromMe.hashCode ^ body.hashCode ^ sentAt.hashCode ^ delivered.hashCode;
+      seq.hashCode ^
+      fromMe.hashCode ^
+      body.hashCode ^
+      sentAt.hashCode ^
+      delivered.hashCode ^
+      reply.hashCode ^
+      senderName.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is MessageView &&
           runtimeType == other.runtimeType &&
+          seq == other.seq &&
           fromMe == other.fromMe &&
           body == other.body &&
           sentAt == other.sentAt &&
-          delivered == other.delivered;
+          delivered == other.delivered &&
+          reply == other.reply &&
+          senderName == other.senderName;
+}
+
+class ReplyView {
+  /// "You", or the author's name.
+  final String author;
+  final bool fromMe;
+  final String snippet;
+
+  /// Where the quoted message is in this chat, if it's still there.
+  final PlatformInt64? seq;
+
+  const ReplyView({
+    required this.author,
+    required this.fromMe,
+    required this.snippet,
+    this.seq,
+  });
+
+  @override
+  int get hashCode =>
+      author.hashCode ^ fromMe.hashCode ^ snippet.hashCode ^ seq.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReplyView &&
+          runtimeType == other.runtimeType &&
+          author == other.author &&
+          fromMe == other.fromMe &&
+          snippet == other.snippet &&
+          seq == other.seq;
 }
 
 class StoredChat {
@@ -97,6 +157,9 @@ class StoredChat {
   /// is still going out).
   final bool waiting;
 
+  /// Left out of the list until revealed with biometrics.
+  final bool hidden;
+
   const StoredChat({
     required this.id,
     required this.kind,
@@ -106,6 +169,7 @@ class StoredChat {
     required this.createdAt,
     required this.verified,
     required this.waiting,
+    required this.hidden,
   });
 
   @override
@@ -117,7 +181,8 @@ class StoredChat {
       pinned.hashCode ^
       createdAt.hashCode ^
       verified.hashCode ^
-      waiting.hashCode;
+      waiting.hashCode ^
+      hidden.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -131,5 +196,6 @@ class StoredChat {
           pinned == other.pinned &&
           createdAt == other.createdAt &&
           verified == other.verified &&
-          waiting == other.waiting;
+          waiting == other.waiting &&
+          hidden == other.hidden;
 }

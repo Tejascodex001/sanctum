@@ -98,6 +98,10 @@ class _Text extends StatelessWidget {
       children: [
         Row(
           children: [
+            if (card.hidden) ...[
+              const Icon(Icons.visibility_off_rounded, size: 13, color: Palette.textFaint),
+              const SizedBox(width: Space.xs),
+            ],
             if (card.pinned) ...[
               Icon(Icons.push_pin_rounded, size: 13, color: card.sigil.accent.color),
               const SizedBox(width: Space.xs),

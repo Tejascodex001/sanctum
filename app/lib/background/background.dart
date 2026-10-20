@@ -34,6 +34,7 @@ abstract final class Background {
       _call(_bg, 'notify', {'id': id, 'channel': channel, 'title': title, 'body': body, 'open': open, 'count': count});
 
   static Future<void> cancel(int id) => _call(_bg, 'cancel', {'id': id});
+  static Future<void> cancelAll() => _call(_bg, 'cancelAll');
 
   static Future<bool> canNotify() async => await _call<bool>(_bg, 'canNotify') ?? false;
 
@@ -47,6 +48,31 @@ abstract final class Background {
 
   static Future<bool> batteryUnrestricted() async => await _call<bool>(_bg, 'batteryUnrestricted') ?? true;
   static Future<void> requestUnrestricted() => _call(_app, 'requestUnrestricted');
+
+  /// The phone's maker, and whether it's known to stop background apps
+  /// (Xiaomi, Oppo, Vivo, Samsung, Huawei, OnePlus and their brands).
+  static Future<({String brand, bool aggressive})> brand() async {
+    final m = await _call<Map<Object?, Object?>>(_app, 'backgroundBrand');
+    return (brand: (m?['brand'] as String?) ?? '', aggressive: (m?['aggressive'] as bool?) ?? false);
+  }
+
+  /// Opens the maker's own "let it run in the background" page directly
+  /// (else Sanctum's app settings).
+  static Future<void> openBackgroundSettings() async {
+    await _call(_app, 'openBackgroundSettings');
+    await saveFlag('opened_background_settings', true);
+  }
+
+  /// Whether the user still has a step to make background delivery
+  /// reliable: the battery exemption, then (on strict phones) the maker's page.
+  static Future<bool> needsReliabilityStep() async {
+    if (!await enabled()) return false;
+    if (!await batteryUnrestricted()) return true;
+    return (await brand()).aggressive && !await loadFlag('opened_background_settings', fallback: false);
+  }
+
+  /// Blocks (or allows) screenshots and the recents preview.
+  static Future<void> setSecure(bool secure) => _call(_app, 'setSecure', {'secure': secure});
 
   /// A chat named by a tapped notification ("c:12", "t:3"), if any.
   static Future<String?> takeOpen() => _call<String>(_app, 'takeOpen');

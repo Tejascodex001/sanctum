@@ -7,6 +7,7 @@
 //! between chats. SQLite only ever sees random ids, sequence numbers and
 //! ciphertext; `secure_delete` zeroes deleted pages.
 
+use crate::protocol::{MessageId, Quote};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -50,6 +51,11 @@ pub struct ChatMeta {
     pub group_id: Vec<u8>,
     /// Everyone in the chat except us.
     pub peers: Vec<Peer>,
+    /// Left out of the chat list until revealed with biometrics.
+    pub hidden: bool,
+    /// Groups: the member who manages membership (its creator). Only they
+    /// commit changes, so members never disagree about the group's state.
+    pub admin: Option<[u8; 32]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -61,6 +67,34 @@ pub struct Peer {
     /// Their key is confirmed: their QR was scanned in person, or the
     /// safety number was compared (like Threema's green level).
     pub verified: bool,
+}
+
+/// The third on-disk format, before hidden chats and groups.
+#[derive(Deserialize)]
+struct ChatMetaV2 {
+    kind: ChatKind,
+    title: String,
+    sigil_key: Vec<u8>,
+    pinned: bool,
+    created_at: u64,
+    group_id: Vec<u8>,
+    peers: Vec<Peer>,
+}
+
+impl From<ChatMetaV2> for ChatMeta {
+    fn from(v: ChatMetaV2) -> Self {
+        Self {
+            kind: v.kind,
+            title: v.title,
+            sigil_key: v.sigil_key,
+            pinned: v.pinned,
+            created_at: v.created_at,
+            group_id: v.group_id,
+            peers: v.peers,
+            hidden: false,
+            admin: None,
+        }
+    }
 }
 
 /// The second on-disk format, before friends could be verified.
@@ -101,6 +135,8 @@ impl From<ChatMetaV1> for ChatMeta {
                     verified: false,
                 })
                 .collect(),
+            hidden: false,
+            admin: None,
         }
     }
 }
@@ -125,11 +161,13 @@ impl From<ChatMetaV0> for ChatMeta {
             created_at: v.created_at,
             group_id: Vec::new(),
             peers: Vec::new(),
+            hidden: false,
+            admin: None,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct StoredMessage {
     pub from_me: bool,
     pub body: String,
@@ -137,6 +175,22 @@ pub struct StoredMessage {
     pub sent_at: u64,
     /// Our messages: the friend's phone confirmed it received this.
     pub delivered: bool,
+    /// The same on every phone in the chat (the network message id), so
+    /// replies can point at it. None for messages from before replies.
+    pub id: Option<MessageId>,
+    /// The message this one answers.
+    pub reply: Option<Quote>,
+    /// Who wrote it, for messages we received.
+    pub sender: Option<[u8; 32]>,
+}
+
+/// The second message format, before replies.
+#[derive(Deserialize)]
+struct StoredMessageV1 {
+    from_me: bool,
+    body: String,
+    sent_at: u64,
+    delivered: bool,
 }
 
 /// The first message format, before delivery receipts.
@@ -316,6 +370,19 @@ impl Store {
         Ok(out)
     }
 
+    /// One message, by its sequence number.
+    pub fn message(&self, chat_id: i64, seq: i64) -> Result<Option<StoredMessage>> {
+        let sealed: Option<Vec<u8>> = self
+            .db
+            .query_row(
+                "SELECT sealed FROM messages WHERE chat_id = ?1 AND seq = ?2",
+                params![chat_id, seq],
+                |r| r.get(0),
+            )
+            .optional()?;
+        sealed.map(|s| self.decode_message(chat_id, seq, &s)).transpose()
+    }
+
     pub fn set_delivered(&self, chat_id: i64, seq: i64) -> Result<()> {
         let sealed: Option<Vec<u8>> = self
             .db
@@ -429,18 +496,26 @@ impl Store {
 
     fn decode_message(&self, chat_id: i64, seq: i64, sealed: &[u8]) -> Result<StoredMessage> {
         let plain = self.open_bytes(&message_aad(chat_id, seq), sealed)?;
-        match postcard::from_bytes::<StoredMessage>(&plain) {
-            Ok(m) => Ok(m),
-            Err(_) => {
-                let v0: StoredMessageV0 = postcard::from_bytes(&plain)?;
-                Ok(StoredMessage {
-                    from_me: v0.from_me,
-                    body: v0.body,
-                    sent_at: v0.sent_at,
-                    delivered: false,
-                })
-            }
+        // Newest format first; older records end before the newer fields.
+        if let Ok(m) = postcard::from_bytes::<StoredMessage>(&plain) {
+            return Ok(m);
         }
+        if let Ok(v1) = postcard::from_bytes::<StoredMessageV1>(&plain) {
+            return Ok(StoredMessage {
+                from_me: v1.from_me,
+                body: v1.body,
+                sent_at: v1.sent_at,
+                delivered: v1.delivered,
+                ..Default::default()
+            });
+        }
+        let v0: StoredMessageV0 = postcard::from_bytes(&plain)?;
+        Ok(StoredMessage {
+            from_me: v0.from_me,
+            body: v0.body,
+            sent_at: v0.sent_at,
+            ..Default::default()
+        })
     }
 
     /// All persisted MLS state (group secrets, ratchets, key packages).
@@ -514,8 +589,13 @@ impl Store {
     /// Reads a chat in the current format, upgrading older records.
     fn decode_chat(&self, id: i64, sealed: &[u8]) -> Result<ChatMeta> {
         let plain = self.open_bytes(&chat_aad(id), sealed)?;
+        // Newest first: an older record ends before the newer fields, so it
+        // fails to decode as the newer format.
         if let Ok(meta) = postcard::from_bytes::<ChatMeta>(&plain) {
             return Ok(meta);
+        }
+        if let Ok(v2) = postcard::from_bytes::<ChatMetaV2>(&plain) {
+            return Ok(v2.into());
         }
         if let Ok(v1) = postcard::from_bytes::<ChatMetaV1>(&plain) {
             return Ok(v1.into());
@@ -558,6 +638,8 @@ mod tests {
             created_at: 1,
             group_id: Vec::new(),
             peers: Vec::new(),
+            hidden: false,
+            admin: None,
         }
     }
 
@@ -597,12 +679,80 @@ mod tests {
         assert!(meta.pinned && meta.peers.is_empty() && meta.group_id.is_empty());
     }
 
+    #[test]
+    fn chats_from_before_hidden_chats_upgrade() {
+        #[derive(Serialize)]
+        struct V2 {
+            kind: ChatKind,
+            title: String,
+            sigil_key: Vec<u8>,
+            pinned: bool,
+            created_at: u64,
+            group_id: Vec<u8>,
+            peers: Vec<Peer>,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.db");
+        let key = [3u8; 32];
+        let peer = Peer { identity: [4; 32], name: "Bob".into(), onion: None, verified: true };
+        {
+            let s = Store::open(&path, &key).unwrap();
+            let old = V2 {
+                kind: ChatKind::Direct,
+                title: "Bob".into(),
+                sigil_key: vec![1; 32],
+                pinned: false,
+                created_at: 5,
+                group_id: vec![8; 16],
+                peers: vec![peer.clone()],
+            };
+            s.db.execute(
+                "INSERT INTO chats (id, sealed) VALUES (?1, ?2)",
+                params![7, s.seal(&chat_aad(7), &old).unwrap()],
+            )
+            .unwrap();
+        }
+        let s = Store::open(&path, &key).unwrap();
+        let (_, meta) = s.chats().unwrap().remove(0);
+        assert_eq!((&meta.peers, &meta.group_id), (&vec![peer], &vec![8; 16]));
+        assert!(!meta.hidden && meta.admin.is_none());
+        // And the new fields round-trip.
+        let mut hidden = meta.clone();
+        hidden.hidden = true;
+        hidden.admin = Some([5; 32]);
+        s.update_chat(7, &hidden).unwrap();
+        assert_eq!(s.chats().unwrap().remove(0).1, hidden);
+    }
+
+    #[test]
+    fn messages_from_before_replies_upgrade() {
+        #[derive(Serialize)]
+        struct V1 {
+            from_me: bool,
+            body: String,
+            sent_at: u64,
+            delivered: bool,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[2; 32]).unwrap();
+        let chat = s.create_chat(&meta("Bob")).unwrap();
+        let old = V1 { from_me: true, body: "old".into(), sent_at: 3, delivered: true };
+        s.db.execute(
+            "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, 0, ?2)",
+            params![chat, s.seal(&message_aad(chat, 0), &old).unwrap()],
+        )
+        .unwrap();
+        let m = s.message(chat, 0).unwrap().unwrap();
+        assert_eq!((m.body.as_str(), m.sent_at, m.delivered), ("old", 3, true));
+        assert!(m.id.is_none() && m.reply.is_none() && m.sender.is_none());
+    }
+
     fn msg(body: &str, sent_at: u64) -> StoredMessage {
         StoredMessage {
             from_me: true,
             body: body.into(),
             sent_at,
-            delivered: false,
+            ..Default::default()
         }
     }
 

@@ -8,6 +8,9 @@ class ChatMessage {
     required this.sentAt,
     this.expiresAt,
     this.delivered = false,
+    this.seq,
+    this.reply,
+    this.senderName,
   });
 
   final String body;
@@ -17,6 +20,27 @@ class ChatMessage {
 
   /// Our messages: the friend's phone has it.
   final bool delivered;
+
+  /// Position in a persistent chat; what replies point at.
+  final int? seq;
+
+  /// The message this one answers.
+  final ChatQuote? reply;
+
+  /// In a group: who wrote it.
+  final String? senderName;
+}
+
+/// The part of a message a reply shows.
+class ChatQuote {
+  const ChatQuote({required this.author, required this.fromMe, required this.snippet, this.seq});
+
+  final String author;
+  final bool fromMe;
+  final String snippet;
+
+  /// Where the quoted message is, if it's still in the chat.
+  final int? seq;
 }
 
 DateTime _fromUnix(int s) => DateTime.fromMillisecondsSinceEpoch(s * 1000);
@@ -24,7 +48,12 @@ DateTime _fromUnix(int s) => DateTime.fromMillisecondsSinceEpoch(s * 1000);
 abstract interface class MessageSource {
   /// Messages oldest first; [limit] keeps only the newest.
   Future<List<ChatMessage>> load({int? limit});
-  Future<void> send(String body);
+
+  /// Sends [body], answering the message at [replyTo] if given.
+  Future<void> send(String body, {int? replyTo});
+
+  /// Whether messages here can be replied to.
+  bool get replies;
 }
 
 /// A persistent chat in the encrypted store.
@@ -36,11 +65,29 @@ class StoreSource implements MessageSource {
   @override
   Future<List<ChatMessage>> load({int? limit}) async => [
         for (final m in await messageList(chatId: chatId, limit: limit))
-          ChatMessage(body: m.body, fromMe: m.fromMe, sentAt: _fromUnix(m.sentAt), delivered: m.delivered),
+          ChatMessage(
+            body: m.body,
+            fromMe: m.fromMe,
+            sentAt: _fromUnix(m.sentAt),
+            delivered: m.delivered,
+            seq: m.seq,
+            senderName: m.senderName,
+            reply: m.reply == null
+                ? null
+                : ChatQuote(
+                    author: m.reply!.author,
+                    fromMe: m.reply!.fromMe,
+                    snippet: m.reply!.snippet,
+                    seq: m.reply!.seq,
+                  ),
+          ),
       ];
 
   @override
-  Future<void> send(String body) => messageSend(chatId: chatId, body: body);
+  Future<void> send(String body, {int? replyTo}) => messageSend(chatId: chatId, body: body, replyTo: replyTo);
+
+  @override
+  bool get replies => true;
 }
 
 /// A temp chat held in Rust memory (on both phones, never on disk);
@@ -66,5 +113,8 @@ class TempSource implements MessageSource {
   }
 
   @override
-  Future<void> send(String body) => tempSend(id: id, body: body);
+  Future<void> send(String body, {int? replyTo}) => tempSend(id: id, body: body);
+
+  @override
+  bool get replies => false;
 }

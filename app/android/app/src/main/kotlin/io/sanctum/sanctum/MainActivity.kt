@@ -100,6 +100,20 @@ class MainActivity : FlutterFragmentActivity() {
                             permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
                     }
+                    "setSecure" -> {
+                        // Screenshots and the recents preview: blocked unless
+                        // the open chat allows them.
+                        if (call.argument<Boolean>("secure") != false) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        }
+                        result.success(null)
+                    }
+                    "backgroundBrand" -> result.success(
+                        mapOf("brand" to BackgroundSettings.brand(), "aggressive" to BackgroundSettings.aggressive()),
+                    )
+                    "openBackgroundSettings" -> result.success(BackgroundSettings.open(this@MainActivity))
                     "requestUnrestricted" -> {
                         // Lets the connection survive Doze and aggressive
                         // battery savers. The user confirms in a system dialog.

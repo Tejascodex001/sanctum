@@ -46,6 +46,12 @@ Future<void> netSetBackground({required bool background}) => RustLib
     .api
     .crateApiSessionNetSetBackground(background: background);
 
+/// Panic wipe, after the app has destroyed the keys: cuts every link,
+/// closes the store and deletes `paths` (the database, Tor's state and
+/// cache). The app exits right after; temp chats die with the process.
+Future<void> wipeEverything({required List<String> paths}) =>
+    RustLib.instance.api.crateApiSessionWipeEverything(paths: paths);
+
 /// Pull to refresh: reconnects to every friend not connected, now.
 Future<void> netRefresh() => RustLib.instance.api.crateApiSessionNetRefresh();
 
@@ -144,15 +150,18 @@ class FriendView {
   final PlatformInt64 chatId;
   final String name;
   final Uint8List sigilKey;
+  final bool hidden;
 
   const FriendView({
     required this.chatId,
     required this.name,
     required this.sigilKey,
+    required this.hidden,
   });
 
   @override
-  int get hashCode => chatId.hashCode ^ name.hashCode ^ sigilKey.hashCode;
+  int get hashCode =>
+      chatId.hashCode ^ name.hashCode ^ sigilKey.hashCode ^ hidden.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -161,7 +170,8 @@ class FriendView {
           runtimeType == other.runtimeType &&
           chatId == other.chatId &&
           name == other.name &&
-          sigilKey == other.sigilKey;
+          sigilKey == other.sigilKey &&
+          hidden == other.hidden;
 }
 
 /// Where the connection to Tor stands.

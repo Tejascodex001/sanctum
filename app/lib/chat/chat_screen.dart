@@ -8,6 +8,7 @@ import '../deck/chat_card.dart';
 import '../deck/chat_tile.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
+import '../security/screenshots.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
 import '../theme/tokens.dart';
@@ -28,12 +29,20 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateMixin {
   final _input = TextEditingController();
+  final _focus = FocusNode();
   // Loaded before the screen opens, so nothing pops in mid-transition.
   late List<ChatMessage> _messages = widget.card.preloaded ?? const [];
   late final int _initialCount = _messages.length;
   Timer? _tick;
   StreamSubscription<AppEvent>? _events;
   bool _hasText = false;
+
+  /// The message being answered, shown above the composer.
+  ChatMessage? _replyTo;
+
+  /// Bubbles on screen, by sequence number: tapping a quote scrolls there.
+  final _bubbleKeys = <int, GlobalKey>{};
+  int? _flash;
   late final _wipe = AnimationController(vsync: this, duration: Motion.slow);
 
   @override
@@ -47,14 +56,14 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     Notifier.instance
       ..viewing = _key
       ..markRead(_key);
+    Screenshots.enter(_key);
     // Friends' messages and delivery receipts arrive live.
     _events = NetBus.instance.events.listen((e) {
       if (e.id.toInt() != widget.card.id) return;
       final temp = widget.card.temp;
       if (temp && e.kind == AppEventKind.tempGone) {
         if (!mounted) return;
-        ScaffoldMessenger.maybeOf(context)
-            ?.showSnackBar(const SnackBar(content: Text('This temp chat was wiped.')));
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('This temp chat was wiped.')));
         widget.close();
       } else if ((temp && e.kind == AppEventKind.temp) || (!temp && e.kind == AppEventKind.chat)) {
         _reload();
@@ -71,9 +80,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   @override
   void dispose() {
     if (Notifier.instance.viewing == _key) Notifier.instance.viewing = null;
+    Screenshots.leave();
     _tick?.cancel();
     _events?.cancel();
     _input.dispose();
+    _focus.dispose();
     _wipe.dispose();
     super.dispose();
   }
@@ -88,11 +99,81 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     if (body.isEmpty) return;
     HapticFeedback.lightImpact();
     _input.clear();
+    final replyTo = _replyTo;
     // Shown at once; the reload swaps in the stored copy.
     final now = DateTime.fromMillisecondsSinceEpoch(DateTime.now().millisecondsSinceEpoch ~/ 1000 * 1000);
-    setState(() => _messages = [..._messages, ChatMessage(body: body, fromMe: true, sentAt: now)]);
-    await widget.card.source.send(body);
+    setState(() {
+      _replyTo = null;
+      _messages = [
+        ..._messages,
+        ChatMessage(
+          body: body,
+          fromMe: true,
+          sentAt: now,
+          reply: replyTo == null
+              ? null
+              : ChatQuote(
+                  author: replyTo.fromMe ? 'You' : (replyTo.senderName ?? widget.card.title),
+                  fromMe: replyTo.fromMe,
+                  snippet: replyTo.body,
+                  seq: replyTo.seq,
+                ),
+        ),
+      ];
+    });
+    await widget.card.source.send(body, replyTo: replyTo?.seq);
     await _reload();
+  }
+
+  void _startReply(ChatMessage m) {
+    if (!widget.card.source.replies || m.seq == null) return;
+    HapticFeedback.selectionClick();
+    setState(() => _replyTo = m);
+    _focus.requestFocus();
+  }
+
+  /// Scrolls to a quoted message (when it's near enough to be built) and
+  /// flashes it.
+  void _jumpTo(int? seq) {
+    final context = seq == null ? null : _bubbleKeys[seq]?.currentContext;
+    if (context == null) return;
+    Scrollable.ensureVisible(context, duration: Motion.medium, curve: Motion.emphasized, alignment: 0.5);
+    setState(() => _flash = seq);
+    Future<void>.delayed(const Duration(milliseconds: 900), () {
+      if (mounted && _flash == seq) setState(() => _flash = null);
+    });
+  }
+
+  Future<void> _actions(ChatMessage m) async {
+    HapticFeedback.mediumImpact();
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (widget.card.source.replies && m.seq != null)
+              ListTile(
+                leading: const Icon(Icons.reply_rounded),
+                title: const Text('Reply'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _startReply(m);
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.copy_rounded),
+              title: const Text('Copy'),
+              onTap: () {
+                Navigator.pop(sheet);
+                Clipboard.setData(ClipboardData(text: m.body));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _doWipe() async {
@@ -138,7 +219,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                           // Blur only while actually wiping.
                           child: t == 0
                               ? child
-                              : ImageFiltered(imageFilter: ImageFilter.blur(sigmaX: 10 * t, sigmaY: 10 * t), child: child),
+                              : ImageFiltered(
+                                  imageFilter: ImageFilter.blur(sigmaX: 10 * t, sigmaY: 10 * t), child: child),
                         ),
                       );
                     },
@@ -174,75 +256,120 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         final next = index + 1 < _messages.length ? _messages[index + 1] : null;
         // Messages from the same side within two minutes are grouped.
         final grouped = next != null && next.fromMe == m.fromMe && next.sentAt.difference(m.sentAt).inMinutes < 2;
-        return _Bubble(
+        final bubble = _Bubble(
           // By position: messages only append (temp ones also burn from
           // the front), so a reload never replays an entrance.
           key: ValueKey(index),
           message: m,
+          highlight: m.seq != null && m.seq == _flash,
+          onQuoteTap: () => _jumpTo(m.reply?.seq),
+          onLongPress: () => _actions(m),
           accent: accent,
           showTime: !grouped,
           showTicks: widget.card.friend,
           friendOnline: online,
           animate: index >= _initialCount,
         );
+        final keyed =
+            m.seq == null ? bubble : KeyedSubtree(key: _bubbleKeys.putIfAbsent(m.seq!, GlobalKey.new), child: bubble);
+        return widget.card.source.replies && m.seq != null
+            ? _SwipeToReply(onReply: () => _startReply(m), fromMe: m.fromMe, child: keyed)
+            : keyed;
       },
     );
   }
 
   Widget _composer(Color accent) {
+    final reply = _replyTo;
     return Container(
       padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, Space.md),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: TextField(
-              controller: _input,
-              minLines: 1,
-              maxLines: 5,
-              textCapitalization: TextCapitalization.sentences,
-              cursorColor: accent,
-              style: AppText.body,
-              decoration: InputDecoration(
-                hintText: widget.card.temp ? 'Burns in 24h…' : 'Message',
-                fillColor: Palette.surfaceHigh,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.xl), borderSide: BorderSide.none),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(Radii.xl),
-                  borderSide: const BorderSide(color: Palette.outline),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(Radii.xl),
-                  borderSide: BorderSide(color: accent.withValues(alpha: 0.6)),
-                ),
-              ),
-              onSubmitted: (_) => _send(),
-            ),
-          ),
-          const SizedBox(width: Space.sm),
-          AnimatedScale(
-            scale: _hasText ? 1 : 0.86,
+          AnimatedSize(
             duration: Motion.medium,
             curve: Motion.emphasized,
-            child: AnimatedContainer(
-              duration: Motion.medium,
-              curve: Motion.emphasized,
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _hasText ? accent : Palette.surfaceHigh,
-              ),
-              child: IconButton(
-                tooltip: 'Send',
-                icon: Icon(Icons.arrow_upward_rounded,
-                    color: _hasText ? Palette.onColor(accent) : Palette.textFaint),
-                onPressed: _hasText ? _send : null,
-              ),
-            ),
+            child: reply == null
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.only(bottom: Space.sm),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _QuoteBlock(
+                            author: reply.fromMe ? 'You' : (reply.senderName ?? widget.card.title),
+                            snippet: reply.body,
+                            color: accent,
+                            fg: Palette.text,
+                            label: 'Replying to',
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Cancel reply',
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          onPressed: () => setState(() => _replyTo = null),
+                        ),
+                      ],
+                    ),
+                  ),
           ),
+          _composerRow(accent),
         ],
       ),
+    );
+  }
+
+  Widget _composerRow(Color accent) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _input,
+            focusNode: _focus,
+            minLines: 1,
+            maxLines: 5,
+            textCapitalization: TextCapitalization.sentences,
+            cursorColor: accent,
+            style: AppText.body,
+            decoration: InputDecoration(
+              hintText: widget.card.temp ? 'Burns in 24h…' : 'Message',
+              fillColor: Palette.surfaceHigh,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.xl), borderSide: BorderSide.none),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(Radii.xl),
+                borderSide: const BorderSide(color: Palette.outline),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(Radii.xl),
+                borderSide: BorderSide(color: accent.withValues(alpha: 0.6)),
+              ),
+            ),
+            onSubmitted: (_) => _send(),
+          ),
+        ),
+        const SizedBox(width: Space.sm),
+        AnimatedScale(
+          scale: _hasText ? 1 : 0.86,
+          duration: Motion.medium,
+          curve: Motion.emphasized,
+          child: AnimatedContainer(
+            duration: Motion.medium,
+            curve: Motion.emphasized,
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _hasText ? accent : Palette.surfaceHigh,
+            ),
+            child: IconButton(
+              tooltip: 'Send',
+              icon: Icon(Icons.arrow_upward_rounded, color: _hasText ? Palette.onColor(accent) : Palette.textFaint),
+              onPressed: _hasText ? _send : null,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -366,6 +493,7 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
+          _ShotsButton(chatKey: card.temp ? Notifier.tempKey(card.id) : Notifier.chatKey(card.id)),
           if (card.friend && !card.temp) _VerifyButton(card: card),
           if (onWipe != null)
             TextButton.icon(
@@ -422,7 +550,8 @@ class _VerifyButtonState extends State<_VerifyButton> {
                 const SizedBox(height: Space.lg),
                 const Text('SAFETY NUMBER', style: AppText.overline),
                 const SizedBox(height: 6),
-                SelectableText(number, style: AppText.mono.copyWith(fontSize: 26, letterSpacing: 3, color: card.sigil.accent.color)),
+                SelectableText(number,
+                    style: AppText.mono.copyWith(fontSize: 26, letterSpacing: 3, color: card.sigil.accent.color)),
                 const SizedBox(height: Space.xl),
                 SizedBox(
                   width: double.infinity,
@@ -500,6 +629,9 @@ class _Bubble extends StatefulWidget {
     required this.showTicks,
     this.friendOnline = true,
     required this.animate,
+    this.highlight = false,
+    this.onQuoteTap,
+    this.onLongPress,
   });
 
   final ChatMessage message;
@@ -513,13 +645,17 @@ class _Bubble extends StatefulWidget {
   final bool friendOnline;
   final bool animate;
 
+  /// Briefly lit up: a quote pointing at it was tapped.
+  final bool highlight;
+  final VoidCallback? onQuoteTap;
+  final VoidCallback? onLongPress;
+
   @override
   State<_Bubble> createState() => _BubbleState();
 }
 
 class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
-  late final _c = AnimationController(vsync: this, duration: Motion.medium, value: widget.animate ? 0 : 1)
-    ..forward();
+  late final _c = AnimationController(vsync: this, duration: Motion.medium, value: widget.animate ? 0 : 1)..forward();
   late final _curve = CurvedAnimation(parent: _c, curve: Motion.emphasized);
 
   @override
@@ -562,6 +698,24 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (m.senderName != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(m.senderName!, style: AppText.micro.copyWith(color: accent, fontWeight: FontWeight.w700)),
+            ),
+          if (m.reply != null)
+            GestureDetector(
+              onTap: widget.onQuoteTap,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _QuoteBlock(
+                  author: m.reply!.author,
+                  snippet: m.reply!.snippet,
+                  color: mine ? fg : accent,
+                  fg: fg,
+                ),
+              ),
+            ),
           Text(m.body, style: AppText.body.copyWith(color: fg)),
           if (widget.showTime || (mine && widget.showTicks)) ...[
             const SizedBox(height: 3),
@@ -603,15 +757,179 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
     );
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: FadeTransition(
-        opacity: _curve,
-        child: ScaleTransition(
-          alignment: mine ? Alignment.bottomRight : Alignment.bottomLeft,
-          scale: Tween(begin: 0.9, end: 1.0).animate(_curve),
-          child: SlideTransition(
-            position: Tween(begin: const Offset(0, 0.25), end: Offset.zero).animate(_curve),
-            child: bubble,
+      child: GestureDetector(
+        onLongPress: widget.onLongPress,
+        child: AnimatedScale(
+          scale: widget.highlight ? 1.04 : 1,
+          duration: Motion.medium,
+          curve: Motion.emphasized,
+          child: FadeTransition(
+            opacity: _curve,
+            child: ScaleTransition(
+              alignment: mine ? Alignment.bottomRight : Alignment.bottomLeft,
+              scale: Tween(begin: 0.9, end: 1.0).animate(_curve),
+              child: SlideTransition(
+                position: Tween(begin: const Offset(0, 0.25), end: Offset.zero).animate(_curve),
+                child: bubble,
+              ),
+            ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The quoted message inside a reply (and above the composer).
+class _QuoteBlock extends StatelessWidget {
+  const _QuoteBlock({required this.author, required this.snippet, required this.color, required this.fg, this.label});
+
+  final String author;
+  final String snippet;
+  final Color color;
+  final Color fg;
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+      decoration: BoxDecoration(
+        color: fg.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(Radii.sm),
+        border: Border(left: BorderSide(color: color, width: 3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label == null ? author : '$label $author',
+            style: AppText.micro.copyWith(color: color, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 1),
+          Text(snippet,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.caption.copyWith(color: fg.withValues(alpha: 0.75))),
+        ],
+      ),
+    );
+  }
+}
+
+/// Swipe a message right to answer it, as in WhatsApp or Signal.
+class _SwipeToReply extends StatefulWidget {
+  const _SwipeToReply({required this.child, required this.onReply, required this.fromMe});
+
+  final Widget child;
+  final VoidCallback onReply;
+  final bool fromMe;
+
+  @override
+  State<_SwipeToReply> createState() => _SwipeToReplyState();
+}
+
+class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderStateMixin {
+  static const _trigger = 64.0;
+  late final AnimationController _back = AnimationController(vsync: this, duration: Motion.fast)
+    ..addListener(() => setState(() => _dx = _from * (1 - Curves.easeOut.transform(_back.value))));
+  double _dx = 0;
+  double _from = 0;
+  bool _armed = false;
+
+  @override
+  void dispose() {
+    _back.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = (_dx / _trigger).clamp(0.0, 1.0);
+    return GestureDetector(
+      onHorizontalDragUpdate: (d) {
+        _back.stop();
+        setState(() => _dx = (_dx + d.delta.dx).clamp(0.0, _trigger * 1.4));
+        if (!_armed && _dx >= _trigger) {
+          _armed = true;
+          HapticFeedback.selectionClick();
+        } else if (_armed && _dx < _trigger) {
+          _armed = false;
+        }
+      },
+      onHorizontalDragEnd: (_) {
+        if (_armed) widget.onReply();
+        _armed = false;
+        _from = _dx;
+        _back.forward(from: 0);
+      },
+      child: Stack(
+        alignment: Alignment.centerLeft,
+        children: [
+          Positioned(
+            left: 4,
+            child: Opacity(
+              opacity: t,
+              child: Transform.scale(
+                  scale: 0.6 + 0.4 * t, child: const Icon(Icons.reply_rounded, color: Palette.textMuted)),
+            ),
+          ),
+          Transform.translate(offset: Offset(_dx, 0), child: widget.child),
+        ],
+      ),
+    );
+  }
+}
+
+/// Screenshots in this chat: blocked (default) or allowed after biometric
+/// confirmation.
+class _ShotsButton extends StatefulWidget {
+  const _ShotsButton({required this.chatKey});
+
+  final String chatKey;
+
+  @override
+  State<_ShotsButton> createState() => _ShotsButtonState();
+}
+
+class _ShotsButtonState extends State<_ShotsButton> {
+  bool _allowed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Screenshots.allowed(widget.chatKey).then((v) {
+      if (mounted) setState(() => _allowed = v);
+    });
+  }
+
+  Future<void> _toggle() async {
+    HapticFeedback.selectionClick();
+    final allowed = await Screenshots.set(widget.chatKey, !_allowed);
+    if (!mounted) return;
+    setState(() => _allowed = allowed);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(allowed
+            ? 'Screenshots allowed in this chat (only while it\'s open).'
+            : 'Screenshots blocked in this chat.'),
+      ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: _allowed ? 'Screenshots allowed' : 'Screenshots blocked',
+      onPressed: _toggle,
+      icon: AnimatedSwitcher(
+        duration: Motion.fast,
+        child: Icon(
+          _allowed ? Icons.screenshot_rounded : Icons.no_photography_outlined,
+          key: ValueKey(_allowed),
+          size: 20,
+          color: _allowed ? const Color(0xFFFFC145) : Palette.textFaint,
         ),
       ),
     );

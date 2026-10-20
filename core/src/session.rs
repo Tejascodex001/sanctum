@@ -9,7 +9,7 @@
 use crate::identity::{pair_fingerprint, safety_number, verify, Identity};
 use crate::invite::{FriendCode, InviteError};
 use crate::mls::{MlsClient, MlsError, Received};
-use crate::protocol::{hello_message, Content, Frame, MessageId, TempId};
+use crate::protocol::{hello_message, Content, Frame, MessageId, Quote, TempId};
 use crate::store::{
     ChatKind, ChatMeta, OutboxItem, OutboxState, Peer, Store, StoreError, StoredMessage,
 };
@@ -180,6 +180,8 @@ impl Session {
                 onion: None,
                 verified: scanned,
             }],
+            hidden: false,
+            admin: None,
         })?;
         Ok(Paired {
             chat_id,
@@ -205,6 +207,14 @@ impl Session {
                 p.name = name.to_string();
             }
         }
+        self.store.update_chat(chat_id, &meta)?;
+        Ok(())
+    }
+
+    /// Hides a chat from the list (or shows it again). Only on this phone.
+    pub fn set_hidden(&mut self, chat_id: i64, hidden: bool) -> Result<()> {
+        let mut meta = self.chat(chat_id)?;
+        meta.hidden = hidden;
         self.store.update_chat(chat_id, &meta)?;
         Ok(())
     }
@@ -262,9 +272,25 @@ impl Session {
     /// Saves our message and queues it for the friend. Returns the friend
     /// to reach, or `None` for notes to self.
     pub fn send_text(&mut self, chat_id: i64, body: &str) -> Result<Option<[u8; 32]>> {
+        self.send_message(chat_id, body, None)
+    }
+
+    /// Like [`Session::send_text`], optionally answering the message at
+    /// `reply_to` (its sequence number in the chat), which it quotes.
+    pub fn send_message(
+        &mut self,
+        chat_id: i64,
+        body: &str,
+        reply_to: Option<i64>,
+    ) -> Result<Option<[u8; 32]>> {
         let meta = self.chat(chat_id)?;
         let sent_at = now();
         let note = meta.kind == ChatKind::Notes;
+        let id: MessageId = rand::random();
+        let quote = match reply_to {
+            Some(seq) => self.quote(&meta, chat_id, seq)?,
+            None => None,
+        };
         let seq = self.store.add_message(
             chat_id,
             &StoredMessage {
@@ -272,17 +298,27 @@ impl Session {
                 body: body.into(),
                 sent_at,
                 delivered: note,
+                id: Some(id),
+                reply: quote.clone(),
+                sender: None,
             },
         )?;
         let Some(peer) = meta.peers.first().map(|p| p.identity) else {
             return Ok(None);
         };
-        let content = Content::Text {
-            body: body.into(),
-            sent_at,
+        let content = match quote {
+            Some(quote) => Content::Reply {
+                body: body.into(),
+                sent_at,
+                quote,
+            },
+            None => Content::Text {
+                body: body.into(),
+                sent_at,
+            },
         };
         self.store.outbox_put(
-            &rand::random(),
+            &id,
             &OutboxItem {
                 peer,
                 state: OutboxState::Plain(content.encode()),
@@ -291,6 +327,25 @@ impl Session {
         )?;
         self.events.push(Event::Chat(chat_id));
         Ok(Some(peer))
+    }
+
+    /// What a reply to the message at `seq` shows of it.
+    fn quote(&self, meta: &ChatMeta, chat_id: i64, seq: i64) -> Result<Option<Quote>> {
+        let Some(m) = self.store.message(chat_id, seq)? else {
+            return Ok(None);
+        };
+        let author = if m.from_me {
+            self.public_key()
+        } else {
+            m.sender
+                .or_else(|| meta.peers.first().map(|p| p.identity))
+                .unwrap_or_default()
+        };
+        Ok(Some(Quote {
+            id: m.id.unwrap_or_default(),
+            author,
+            snippet: clip(&m.body, 140),
+        }))
     }
 
     /// Friends with something waiting to be delivered.
@@ -607,7 +662,7 @@ impl Session {
                     Ok(Received::Message { sender, plaintext }) if sender == *peer => {
                         self.mls.persist(&self.store)?;
                         if let Some(content) = Content::decode(&plaintext) {
-                            self.deliver(chat_id, peer, content)?;
+                            self.deliver(chat_id, peer, id, content)?;
                         }
                     }
                     Ok(_) => self.mls.persist(&self.store)?,
@@ -637,11 +692,29 @@ impl Session {
     }
 
     /// Applies a friend's message.
-    fn deliver(&mut self, chat_id: i64, peer: &[u8; 32], content: Content) -> Result<()> {
+    fn deliver(
+        &mut self,
+        chat_id: i64,
+        peer: &[u8; 32],
+        id: MessageId,
+        content: Content,
+    ) -> Result<()> {
         let name = self.friend_name(peer);
         self.purge();
         match content {
-            Content::Text { body, sent_at } => {
+            Content::Text { .. } | Content::Reply { .. } => {
+                let (body, sent_at, reply) = match content {
+                    Content::Text { body, sent_at } => (body, sent_at, None),
+                    Content::Reply {
+                        body,
+                        sent_at,
+                        mut quote,
+                    } => {
+                        quote.snippet = clip(&quote.snippet, 140);
+                        (body, sent_at, Some(quote))
+                    }
+                    _ => unreachable!(),
+                };
                 self.store.add_message(
                     chat_id,
                     &StoredMessage {
@@ -649,6 +722,9 @@ impl Session {
                         body,
                         sent_at: sent_at.min(now()),
                         delivered: true,
+                        id: Some(id),
+                        reply,
+                        sender: Some(*peer),
                     },
                 )?;
                 self.events.push(Event::Chat(chat_id));
@@ -1058,6 +1134,32 @@ mod tests {
     }
 
     #[test]
+    fn replies_quote_the_message_they_answer() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        alice.s.send_text(ab, "dinner at 8?").unwrap();
+        connect(&mut alice, &mut bob);
+        // Bob answers Alice's message (seq 0 in his chat).
+        bob.s.send_message(ba, "yes!", Some(0)).unwrap();
+        // And Alice answers her own.
+        alice.s.send_message(ab, "or 9", Some(0)).unwrap();
+        connect(&mut bob, &mut alice);
+
+        let original = alice.s.store.message(ab, 0).unwrap().unwrap();
+        let on_bob = bob.s.store.message(ba, 0).unwrap().unwrap();
+        assert!(original.id.is_some() && original.id == on_bob.id, "same id on both phones");
+        assert_eq!(on_bob.sender, Some(alice.pk()));
+
+        let msgs = alice.s.store.messages(ab, None).unwrap();
+        let yes = msgs.iter().find(|m| m.body == "yes!").unwrap();
+        let quote = yes.reply.as_ref().unwrap();
+        assert_eq!((quote.id, quote.author, quote.snippet.as_str()), (original.id.unwrap(), alice.pk(), "dinner at 8?"));
+        let msgs = bob.s.store.messages(ba, None).unwrap();
+        let or9 = msgs.iter().find(|m| m.body == "or 9").unwrap();
+        assert_eq!(or9.reply.as_ref().unwrap().author, alice.pk());
+    }
+
+    #[test]
     fn renaming_a_friend() {
         let (mut alice, bob) = (Phone::new(), Phone::new());
         let ab = alice.s.add_friend(&bob.s.my_code(""), true).unwrap().chat_id;
@@ -1206,6 +1308,8 @@ mod tests {
                 created_at: 1,
                 group_id: vec![],
                 peers: vec![],
+                hidden: false,
+                admin: None,
             })
             .unwrap();
         assert_eq!(alice.s.send_text(notes, "x").unwrap(), None);
