@@ -12,6 +12,7 @@ import '../sigil/sigil_painter.dart';
 import '../src/rust/api/sigil.dart';
 import '../src/rust/api/store.dart';
 import '../src/rust/api/temp_chat.dart';
+import '../theme/tokens.dart';
 
 const _tempNames = ['Ember', 'Spark', 'Flare', 'Cinder', 'Ash', 'Blaze', 'Flicker', 'Glow'];
 
@@ -206,7 +207,7 @@ class _HomeScreenState extends State<HomeScreen> {
         height: 440,
         child: Column(
           children: [
-            const Text('YOUR SIGIL', style: TextStyle(letterSpacing: 4, color: Colors.white70)),
+            const Text('YOUR SIGIL', style: AppText.overline),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(24),
@@ -219,10 +220,10 @@ class _HomeScreenState extends State<HomeScreen> {
             const Padding(
               padding: EdgeInsets.fromLTRB(32, 0, 32, 32),
               child: Text(
-                'Made from your key. Friends will add you by scanning your QR in person, '
-                'and you will both see the same sigil for your chat.',
+                'Made from your key. When you and a friend add each other, '
+                'you both see the same sigil for your chat.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white54),
+                style: AppText.caption,
               ),
             ),
           ],
@@ -239,33 +240,33 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              padding: const EdgeInsets.fromLTRB(Space.xl, Space.md, Space.md, Space.sm),
               child: Row(
                 children: [
-                  _Tabs(page: _page, onTap: _goTo, tempCount: _temp.length),
+                  const Text('Sanctum', style: AppText.display),
                   const Spacer(),
                   AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
+                    duration: Motion.fast,
                     child: _onTemp && _temp.isNotEmpty
                         ? IconButton(
                             key: const ValueKey('wipe-all'),
                             tooltip: 'Wipe all',
                             onPressed: _wipeAll,
-                            icon: const Icon(Icons.local_fire_department_rounded, color: Colors.redAccent),
+                            icon: const Icon(Icons.local_fire_department_rounded, color: Palette.danger),
                           )
-                        : const SizedBox(key: ValueKey('none'), width: 48),
+                        : const SizedBox(key: ValueKey('none')),
                   ),
                   IconButton(
                     tooltip: 'Add a friend',
                     onPressed: _addFriend,
                     icon: const Icon(Icons.person_add_alt_1_rounded),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: Space.xs),
                   GestureDetector(
                     onTap: _showMe,
                     child: Container(
-                      width: 40,
-                      height: 40,
+                      width: 38,
+                      height: 38,
                       padding: const EdgeInsets.all(1.5),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
@@ -278,7 +279,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              padding: const EdgeInsets.fromLTRB(Space.lg, Space.xs, Space.lg, Space.sm),
+              child: _Tabs(page: _page, onTap: _goTo, tempCount: _temp.length),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
               child: _SearchField(controller: _search),
             ),
             Expanded(
@@ -315,8 +320,8 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       floatingActionButton: AnimatedScale(
         scale: _onTemp ? 1 : 0,
-        duration: const Duration(milliseconds: 280),
-        curve: _onTemp ? Curves.easeOutBack : Curves.easeIn,
+        duration: Motion.medium,
+        curve: _onTemp ? Motion.decelerate : Motion.accelerate,
         child: FloatingActionButton.extended(
           onPressed: _onTemp ? _newTemp : null,
           icon: const Icon(Icons.add_rounded),
@@ -327,7 +332,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-/// Two labels with a pill that slides between them, tracking the page swipe.
+/// Two segments with a pill that slides between them, tracking the swipe.
 class _Tabs extends StatelessWidget {
   const _Tabs({required this.page, required this.onTap, required this.tempCount});
 
@@ -335,57 +340,57 @@ class _Tabs extends StatelessWidget {
   final ValueChanged<int> onTap;
   final int tempCount;
 
-  static const _width = 96.0;
-
   @override
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
     return Container(
-      height: 40,
-      width: _width * 2 + 8,
+      height: 44,
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(20),
+        color: Palette.surface,
+        borderRadius: BorderRadius.circular(Radii.md),
+        border: Border.all(color: Palette.outline),
       ),
-      child: Stack(
-        children: [
-          Positioned(
-            left: page.clamp(0.0, 1.0) * _width,
-            width: _width,
-            top: 0,
-            bottom: 0,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: 0.22),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: accent.withValues(alpha: 0.5)),
+      child: LayoutBuilder(builder: (context, box) {
+        final half = box.maxWidth / 2;
+        return Stack(
+          children: [
+            Positioned(
+              left: page.clamp(0.0, 1.0) * half,
+              width: half,
+              top: 0,
+              bottom: 0,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Palette.surfaceHigh,
+                  borderRadius: BorderRadius.circular(Radii.sm),
+                  border: Border.all(color: accent.withValues(alpha: 0.45)),
+                ),
               ),
             ),
-          ),
-          Row(
-            children: [
-              for (final (i, label) in [(0, 'Chats'), (1, tempCount > 0 ? 'Temp · $tempCount' : 'Temp')])
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => onTap(i),
-                  child: SizedBox(
-                    width: _width,
-                    child: Center(
-                      child: Text(
-                        label,
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: Color.lerp(Colors.white, Colors.white38, (page - i).abs().clamp(0.0, 1.0)),
+            Row(
+              children: [
+                for (final (i, label) in [(0, 'Chats'), (1, tempCount > 0 ? 'Temp · $tempCount' : 'Temp')])
+                  Expanded(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onTap(i),
+                      child: Center(
+                        child: Text(
+                          label,
+                          style: AppText.bodyStrong.copyWith(
+                            fontSize: 14,
+                            color: Color.lerp(Palette.text, Palette.textFaint, (page - i).abs().clamp(0.0, 1.0)),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-            ],
-          ),
-        ],
-      ),
+              ],
+            ),
+          ],
+        );
+      }),
     );
   }
 }
@@ -412,13 +417,8 @@ class _SearchField extends StatelessWidget {
                   icon: const Icon(Icons.close_rounded, size: 18),
                   onPressed: controller.clear,
                 ),
-          filled: true,
-          fillColor: Colors.white.withValues(alpha: 0.05),
+          fillColor: Palette.surface,
           contentPadding: EdgeInsets.zero,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(21),
-            borderSide: BorderSide.none,
-          ),
         ),
       ),
     );
@@ -439,10 +439,10 @@ class _Empty extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(text, style: const TextStyle(fontSize: 17, color: Colors.white70)),
+            Text(text, style: AppText.heading),
             if (detail != null) ...[
               const SizedBox(height: 10),
-              Text(detail!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white38)),
+              Text(detail!, textAlign: TextAlign.center, style: AppText.caption),
             ],
           ],
         ),

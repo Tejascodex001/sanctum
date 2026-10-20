@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../sigil/sigil_painter.dart';
+import '../theme/tokens.dart';
 import 'chat_card.dart';
 
 /// The face of a chat card: emblem, name, last message, and the chat's sigil
@@ -10,75 +11,46 @@ class ChatTile extends StatelessWidget {
 
   final ChatCard card;
 
-  static const height = 82.0;
+  static const height = 78.0;
 
   @override
   Widget build(BuildContext context) {
     final bg = card.sigil.background.color;
-    final accent = card.sigil.accent.color;
     return SizedBox(
       height: height,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [
-              Color.lerp(bg, Colors.black, 0.2)!,
-              Color.lerp(bg, accent, 0.10)!,
-            ],
+      child: Stack(
+        children: [
+          Positioned(
+            right: -28,
+            top: -36,
+            width: 150,
+            height: 150,
+            child: SigilView(spec: card.sigil, opacity: 0.28, background: false),
           ),
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              right: -30,
-              top: -34,
-              width: 150,
-              height: 150,
-              child: SigilView(spec: card.sigil, opacity: 0.35, background: false),
-            ),
-            // Keeps text readable over the watermark.
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [bg.withValues(alpha: 0.9), bg.withValues(alpha: 0)],
-                    stops: const [0.45, 0.85],
-                  ),
+          // Keeps text readable over the watermark.
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [bg, bg.withValues(alpha: 0.85), bg.withValues(alpha: 0)],
+                  stops: const [0, 0.55, 0.9],
                 ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  _Emblem(card: card),
-                  const SizedBox(width: 12),
-                  Expanded(child: _Text(card: card)),
-                  const SizedBox(width: 8),
-                  _Trailing(card: card),
-                ],
-              ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+            child: Row(
+              children: [
+                Hero(tag: 'emblem-${card.id}', child: _Emblem(card: card)),
+                const SizedBox(width: Space.md),
+                Expanded(child: _Text(card: card)),
+                const SizedBox(width: Space.sm),
+                _Trailing(card: card),
+              ],
             ),
-            // A hairline of the accent along the top edge, like a card's foil.
-            Positioned(
-              left: 24,
-              right: 24,
-              top: 0,
-              child: Container(
-                height: 1,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [
-                    accent.withValues(alpha: 0),
-                    accent.withValues(alpha: 0.7),
-                    accent.withValues(alpha: 0),
-                  ]),
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -92,16 +64,12 @@ class _Emblem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 48,
-      height: 48,
+      width: 46,
+      height: 46,
       padding: const EdgeInsets.all(1.5),
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: SweepGradient(colors: [
-          card.sigil.accent.color,
-          card.sigil.palette[0].color,
-          card.sigil.accent.color,
-        ]),
+        border: Border.all(color: card.sigil.accent.color.withValues(alpha: 0.55), width: 1.2),
       ),
       child: ClipOval(child: SigilView(spec: card.sigil)),
     );
@@ -122,33 +90,20 @@ class _Text extends StatelessWidget {
         Row(
           children: [
             if (card.pinned) ...[
-              Icon(Icons.push_pin_rounded, size: 14, color: card.sigil.accent.color),
-              const SizedBox(width: 4),
+              Icon(Icons.push_pin_rounded, size: 13, color: card.sigil.accent.color),
+              const SizedBox(width: Space.xs),
             ],
             Flexible(
-              child: Text(
-                card.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.2,
-                ),
-              ),
+              child: Text(card.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.heading),
             ),
           ],
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 3),
         Text(
-          card.preview ?? (card.temp ? 'Nothing yet · burns 24h after sending' : 'No messages yet'),
+          card.preview ?? (card.temp ? 'Burns 24h after sending' : 'No messages yet'),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 14,
-            color: Colors.white.withValues(alpha: card.preview == null ? 0.4 : 0.65),
-          ),
+          style: AppText.caption.copyWith(color: card.preview == null ? Palette.textFaint : Palette.textMuted),
         ),
       ],
     );
@@ -175,11 +130,9 @@ class _Trailing extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        if (card.preview != null)
-          Text(_ago(card.updatedAt),
-              style: const TextStyle(fontSize: 12, color: Colors.white54)),
+        if (card.preview != null) Text(_ago(card.updatedAt), style: AppText.micro),
         if (card.temp && card.nextBurn != null) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: Space.xs + 2),
           _BurnRing(burnsAt: card.nextBurn!, color: accent),
         ],
       ],
@@ -201,21 +154,18 @@ class _BurnRing extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(left.inHours >= 1 ? '${left.inHours}h' : '${left.inMinutes.clamp(0, 59)}m',
-            style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600)),
+        Text(
+          left.inHours >= 1 ? '${left.inHours}h' : '${left.inMinutes.clamp(0, 59)}m',
+          style: AppText.micro.copyWith(color: color, fontWeight: FontWeight.w600),
+        ),
         const SizedBox(width: 6),
         SizedBox.square(
-          dimension: 16,
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: 1, end: fraction),
-            duration: const Duration(milliseconds: 900),
-            curve: Curves.easeOutCubic,
-            builder: (_, v, _) => CircularProgressIndicator(
-              value: v,
-              strokeWidth: 2.5,
-              color: color,
-              backgroundColor: color.withValues(alpha: 0.15),
-            ),
+          dimension: 14,
+          child: CircularProgressIndicator(
+            value: fraction,
+            strokeWidth: 2.2,
+            color: color,
+            backgroundColor: color.withValues(alpha: 0.15),
           ),
         ),
       ],

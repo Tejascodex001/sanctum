@@ -8,6 +8,7 @@ import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
 import '../src/rust/api/store.dart';
+import '../theme/tokens.dart';
 import 'qr_codec.dart';
 import 'scanner.dart';
 
@@ -132,7 +133,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: widget.mySigil.background.color,
+      backgroundColor: Palette.bg,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         title: const Text('Add a friend'),
@@ -165,7 +166,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
         const Text(
           'Each of you reads the other\'s code. Together: scan each other\'s QR. '
           'Far away: share yours, and type or paste theirs.',
-          style: TextStyle(color: Colors.white60, height: 1.4),
+          style: AppText.caption,
         ),
         const SizedBox(height: 20),
         _Section(
@@ -186,9 +187,6 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
                   labelText: 'Your name',
                   helperText: 'Shown only to friends who read your code',
                   isDense: true,
-                  filled: true,
-                  fillColor: Colors.white.withValues(alpha: 0.04),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                 ),
               ),
               const SizedBox(height: 18),
@@ -220,7 +218,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
                 SelectableText(
                   codeGroups(_myCode!),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontFamily: 'monospace', fontSize: 16, letterSpacing: 1.5, height: 1.6),
+                  style: AppText.mono.copyWith(fontSize: 16),
                 ),
               const SizedBox(height: 12),
               Row(
@@ -274,13 +272,10 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
                 autocorrect: false,
                 enableSuggestions: false,
                 textCapitalization: TextCapitalization.characters,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 15, letterSpacing: 1.2),
+                style: AppText.mono,
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   hintText: 'or type / paste their code',
-                  filled: true,
-                  fillColor: Colors.white.withValues(alpha: 0.04),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                   suffixIcon: IconButton(tooltip: 'Paste', icon: const Icon(Icons.content_paste_rounded), onPressed: _paste),
                 ),
               ),
@@ -318,28 +313,22 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
         Text(
           'Is this really ${paired.friend}?',
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+          style: AppText.title,
         ),
         const SizedBox(height: 10),
         const Text(
           'Once they have added your code too, their phone shows this same sigil and number. '
           'Together, compare the sigils. Far away, read the number to each other on a call.',
           textAlign: TextAlign.center,
-          style: TextStyle(color: Colors.white60, height: 1.4),
+          style: AppText.caption,
         ),
         const SizedBox(height: 20),
-        const Text('SAFETY NUMBER', textAlign: TextAlign.center, style: TextStyle(letterSpacing: 3, color: Colors.white54)),
+        const Text('SAFETY NUMBER', textAlign: TextAlign.center, style: AppText.overline),
         const SizedBox(height: 6),
         SelectableText(
           paired.safetyNumber,
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 30,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 2,
-            color: widget.mySigil.accent.color,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
+          style: AppText.mono.copyWith(fontSize: 30, letterSpacing: 3, color: widget.mySigil.accent.color),
         ),
         const SizedBox(height: 28),
         FilledButton(
@@ -369,16 +358,16 @@ class _Section extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+      padding: const EdgeInsets.fromLTRB(Space.lg, Space.lg, Space.lg, Space.lg + 2),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white10),
+        color: Palette.surface,
+        borderRadius: BorderRadius.circular(Radii.xl),
+        border: Border.all(color: Palette.outline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(title, style: const TextStyle(letterSpacing: 3, fontSize: 12, color: Colors.white54)),
+          Text(title, style: AppText.overline),
           const SizedBox(height: 14),
           child,
         ],

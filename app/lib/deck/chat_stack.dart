@@ -1,8 +1,8 @@
-import 'package:animations/animations.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../sigil/sigil_painter.dart';
+import '../theme/tokens.dart';
 import 'chat_card.dart';
 import 'chat_tile.dart';
 
@@ -89,12 +89,7 @@ class _ChatStackState extends State<ChatStack> {
             child: item,
           );
         }
-        // Each card tucks under the next, like a fanned deck.
-        item = Align(
-          alignment: Alignment.topCenter,
-          heightFactor: i == cards.length - 1 ? 1 : 0.92,
-          child: item,
-        );
+        item = Padding(padding: const EdgeInsets.only(bottom: Space.sm), child: item);
         return animate
             ? _Entrance(key: ValueKey('in-${card.id}'), delay: i.clamp(0, 10) * 45, child: item)
             : item;
@@ -116,42 +111,59 @@ class _StackedCard extends StatelessWidget {
   final VoidCallback onClosed;
   final VoidCallback? onLongPress;
 
-  static const _shape = RoundedRectangleBorder(
-    borderRadius: BorderRadius.all(Radius.circular(22)),
-  );
+  Future<void> _open(BuildContext context) async {
+    HapticFeedback.selectionClick();
+    // Load first, so the chat appears complete on its first frame.
+    card.preloaded = await card.source.load();
+    if (!context.mounted) return;
+    await Navigator.of(context).push(ChatRoute(builder: (ctx) => openBuilder(card, () => Navigator.pop(ctx))));
+    card.preloaded = null;
+    onClosed();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        borderRadius: BorderRadius.all(Radius.circular(22)),
-        boxShadow: [
-          BoxShadow(color: Colors.black54, blurRadius: 24, offset: Offset(0, -4)),
-        ],
+    return Material(
+      color: card.sigil.background.color,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(Radii.lg),
+        side: const BorderSide(color: Palette.outline),
       ),
-      child: OpenContainer(
-        transitionDuration: const Duration(milliseconds: 480),
-        transitionType: ContainerTransitionType.fadeThrough,
-        closedShape: _shape,
-        closedElevation: 0,
-        openElevation: 0,
-        closedColor: card.sigil.background.color,
-        openColor: card.sigil.background.color,
-        middleColor: card.sigil.background.color,
-        onClosed: (_) => onClosed(),
-        closedBuilder: (context, open) => GestureDetector(
-          onLongPress: onLongPress == null
-              ? null
-              : () {
-                  HapticFeedback.mediumImpact();
-                  onLongPress!();
-                },
-          child: ChatTile(card: card),
-        ),
-        openBuilder: (context, close) => openBuilder(card, close),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _open(context),
+        onLongPress: onLongPress == null
+            ? null
+            : () {
+                HapticFeedback.mediumImpact();
+                onLongPress!();
+              },
+        child: ChatTile(card: card),
       ),
     );
   }
+}
+
+/// Opening a chat: the page fades and settles up into place while the
+/// chat's emblem flies from the card into the header. Only opacity and
+/// transforms animate, which the GPU handles without re-layout.
+class ChatRoute<T> extends PageRouteBuilder<T> {
+  ChatRoute({required WidgetBuilder builder})
+      : super(
+          transitionDuration: Motion.slow,
+          reverseTransitionDuration: Motion.medium,
+          pageBuilder: (context, _, _) => builder(context),
+          transitionsBuilder: (context, animation, _, child) {
+            final t = CurvedAnimation(parent: animation, curve: Motion.decelerate, reverseCurve: Motion.accelerate);
+            return FadeTransition(
+              opacity: CurvedAnimation(parent: animation, curve: const Interval(0, 0.6)),
+              child: SlideTransition(
+                position: Tween(begin: const Offset(0, 0.04), end: Offset.zero).animate(t),
+                child: ScaleTransition(scale: Tween(begin: 0.96, end: 1.0).animate(t), child: child),
+              ),
+            );
+          },
+        );
 }
 
 class _WipeBackground extends StatelessWidget {

@@ -29,6 +29,10 @@ class ChatCard {
   /// Temp chats: when the oldest remaining message burns.
   DateTime? nextBurn;
 
+  /// Messages loaded just before opening the chat, so the chat screen can
+  /// show them on its very first frame.
+  List<ChatMessage>? preloaded;
+
   /// Refreshes preview, activity time and burn time from the source.
   Future<void> refresh() async {
     // Persistent chats only need the newest message; temp chats are in

@@ -284,8 +284,43 @@ class SigilPainter extends CustomPainter {
       old.spec != spec || old.phase != phase || old.opacity != opacity;
 }
 
-/// A static sigil, cached as a raster after the first paint. Use this in
-/// lists: it costs nothing to scroll.
+/// Rendered sigils, kept as GPU images. Drawing a sigil is expensive
+/// (hundreds of path segments); showing or rotating an image is nearly
+/// free, so every sigil on screen comes from here.
+abstract final class _SigilImages {
+  static final _ready = <String, ui.Image>{};
+  static final _pending = <String, Future<ui.Image>>{};
+  static const _max = 120;
+
+  static String _key(SigilSpec spec, int px, double opacity) => '${spec.hashCode}/$px/$opacity';
+
+  static ui.Image? peek(SigilSpec spec, int px, double opacity) {
+    final key = _key(spec, px, opacity);
+    final image = _ready.remove(key);
+    if (image != null) _ready[key] = image; // most recently used last
+    return image;
+  }
+
+  static Future<ui.Image> load(SigilSpec spec, int px, double opacity) {
+    final key = _key(spec, px, opacity);
+    return _pending[key] ??= () async {
+      final recorder = ui.PictureRecorder();
+      SigilPainter(spec, opacity: opacity, background: false).paint(Canvas(recorder), Size.square(px.toDouble()));
+      final image = await recorder.endRecording().toImage(px, px);
+      _ready[key] = image;
+      _pending.remove(key);
+      // Least recently used images are dropped (not disposed: one may
+      // still be on screen; the GC frees it once unused).
+      while (_ready.length > _max) {
+        _ready.remove(_ready.keys.first);
+      }
+      return image;
+    }();
+  }
+}
+
+/// A sigil, drawn once into an image and cached. Cheap enough for long,
+/// fast-scrolling lists and for animation.
 class SigilView extends StatelessWidget {
   const SigilView({super.key, required this.spec, this.opacity = 1, this.background = true});
 
@@ -295,17 +330,38 @@ class SigilView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return RepaintBoundary(
-      child: CustomPaint(
-        isComplex: true,
-        painter: SigilPainter(spec, opacity: opacity, background: background),
-        size: Size.infinite,
-      ),
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (background) SigilBackground(spec: spec),
+        LayoutBuilder(builder: (context, box) {
+          final side = box.biggest.shortestSide;
+          if (!side.isFinite || side <= 0) return const SizedBox.shrink();
+          // Round up to 32 px steps so similar sizes share one image.
+          final px = (((side * dpr) / 32).ceil() * 32).clamp(32, 2048);
+          final ready = _SigilImages.peek(spec, px, opacity);
+          final image = ready == null
+              ? FutureBuilder<ui.Image>(
+                  future: _SigilImages.load(spec, px, opacity),
+                  builder: (_, snap) => snap.data == null
+                      ? const SizedBox.shrink()
+                      : TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0, end: 1),
+                          duration: const Duration(milliseconds: 220),
+                          builder: (_, v, _) => RawImage(image: snap.data, opacity: AlwaysStoppedAnimation(v)),
+                        ),
+                )
+              : RawImage(image: ready);
+          return Center(child: SizedBox.square(dimension: side, child: image));
+        }),
+      ],
     );
   }
 }
 
-/// A slowly turning sigil, for the lock screen and chat backdrops.
+/// A slowly turning sigil (lock screen, chat backdrops). Only the cached
+/// image rotates, on the GPU; nothing is redrawn per frame.
 class LivingSigil extends StatefulWidget {
   const LivingSigil({super.key, required this.spec, this.opacity = 1, this.period = 90});
 
@@ -336,16 +392,11 @@ class _LivingSigilState extends State<LivingSigil> with SingleTickerProviderStat
     return Stack(
       fit: StackFit.expand,
       children: [
-        // The background never moves, so paint it once.
         SigilBackground(spec: widget.spec),
         RepaintBoundary(
-          child: AnimatedBuilder(
-            animation: _controller,
-            builder: (_, _) => CustomPaint(
-              painter: SigilPainter(widget.spec,
-                  phase: _controller.value, opacity: widget.opacity, background: false),
-              size: Size.infinite,
-            ),
+          child: RotationTransition(
+            turns: _controller,
+            child: SigilView(spec: widget.spec, opacity: widget.opacity, background: false),
           ),
         ),
       ],
@@ -367,11 +418,4 @@ class SigilBackground extends StatelessWidget {
       ),
     );
   }
-}
-
-/// Renders [spec] to an image, e.g. for previews.
-Future<ui.Image> renderSigil(SigilSpec spec, double size) {
-  final recorder = ui.PictureRecorder();
-  SigilPainter(spec).paint(Canvas(recorder), Size.square(size));
-  return recorder.endRecording().toImage(size.toInt(), size.toInt());
 }

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../deck/chat_card.dart';
 import '../sigil/sigil_painter.dart';
+import '../theme/tokens.dart';
 import 'message_source.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -23,13 +24,12 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateMixin {
   final _input = TextEditingController();
-  List<ChatMessage> _messages = [];
-
-  /// Messages already on screen when the chat opened don't animate in.
-  int _initialCount = -1;
+  // Loaded before the screen opens, so nothing pops in mid-transition.
+  late List<ChatMessage> _messages = widget.card.preloaded ?? const [];
+  late final int _initialCount = _messages.length;
   Timer? _tick;
   bool _hasText = false;
-  late final _wipe = AnimationController(vsync: this, duration: const Duration(milliseconds: 650));
+  late final _wipe = AnimationController(vsync: this, duration: Motion.slow);
 
   @override
   void initState() {
@@ -38,7 +38,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       final has = _input.text.trim().isNotEmpty;
       if (has != _hasText) setState(() => _hasText = has);
     });
-    _reload();
+    if (widget.card.preloaded == null) _reload();
     // Temp messages count down and disappear while the chat is open.
     if (widget.card.temp) {
       _tick = Timer.periodic(const Duration(seconds: 30), (_) => _reload());
@@ -55,11 +55,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   Future<void> _reload() async {
     final messages = await widget.card.source.load();
-    if (!mounted) return;
-    setState(() {
-      _messages = messages;
-      if (_initialCount < 0) _initialCount = messages.length;
-    });
+    if (mounted) setState(() => _messages = messages);
   }
 
   Future<void> _send() async {
@@ -83,17 +79,20 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     final sigil = widget.card.sigil;
     final accent = sigil.accent.color;
     return Scaffold(
-      backgroundColor: sigil.background.color,
+      backgroundColor: Palette.bg,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // The chat's sigil turns slowly behind everything, oversized and faint.
+          // The chat's sigil turns slowly behind everything: a cached
+          // image rotated on the GPU, so it costs nothing per frame.
           Positioned(
-            right: -160,
-            top: 40,
+            right: -170,
+            top: 60,
             width: 520,
             height: 520,
-            child: LivingSigil(spec: sigil, opacity: 0.16, period: 160),
+            child: IgnorePointer(
+              child: RepaintBoundary(child: _Backdrop(card: widget.card)),
+            ),
           ),
           SafeArea(
             child: Column(
@@ -102,17 +101,19 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 Expanded(
                   child: AnimatedBuilder(
                     animation: _wipe,
-                    builder: (context, child) => Opacity(
-                      opacity: 1 - Curves.easeIn.transform(_wipe.value),
-                      child: Transform.scale(
-                        scale: 1 - 0.08 * _wipe.value,
-                        child: ImageFiltered(
-                          enabled: _wipe.value > 0,
-                          imageFilter: ImageFilter.blur(sigmaX: 8 * _wipe.value, sigmaY: 8 * _wipe.value),
-                          child: child,
+                    builder: (context, child) {
+                      final t = Motion.accelerate.transform(_wipe.value);
+                      return Opacity(
+                        opacity: 1 - t,
+                        child: Transform.scale(
+                          scale: 1 - 0.06 * t,
+                          // Blur only while actually wiping.
+                          child: t == 0
+                              ? child
+                              : ImageFiltered(imageFilter: ImageFilter.blur(sigmaX: 10 * t, sigmaY: 10 * t), child: child),
                         ),
-                      ),
-                    ),
+                      );
+                    },
                     child: _messages.isEmpty ? _EmptyChat(card: widget.card) : _list(accent),
                   ),
                 ),
@@ -128,16 +129,14 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   Widget _list(Color accent) {
     return ListView.builder(
       reverse: true,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, Space.sm),
       itemCount: _messages.length,
       itemBuilder: (_, i) {
         final index = _messages.length - 1 - i;
         final m = _messages[index];
         final next = index + 1 < _messages.length ? _messages[index + 1] : null;
         // Messages from the same side within two minutes are grouped.
-        final grouped = next != null &&
-            next.fromMe == m.fromMe &&
-            next.sentAt.difference(m.sentAt).inMinutes < 2;
+        final grouped = next != null && next.fromMe == m.fromMe && next.sentAt.difference(m.sentAt).inMinutes < 2;
         return _Bubble(
           key: ValueKey('${m.sentAt.microsecondsSinceEpoch}-$index'),
           message: m,
@@ -150,62 +149,108 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   }
 
   Widget _composer(Color accent) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.07),
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(
-                color: (_hasText ? accent : Colors.white).withValues(alpha: _hasText ? 0.5 : 0.1),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, Space.md),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _input,
+              minLines: 1,
+              maxLines: 5,
+              textCapitalization: TextCapitalization.sentences,
+              cursorColor: accent,
+              style: AppText.body,
+              decoration: InputDecoration(
+                hintText: widget.card.temp ? 'Burns in 24h…' : 'Message',
+                fillColor: Palette.surfaceHigh,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.xl), borderSide: BorderSide.none),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Radii.xl),
+                  borderSide: const BorderSide(color: Palette.outline),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Radii.xl),
+                  borderSide: BorderSide(color: accent.withValues(alpha: 0.6)),
+                ),
               ),
-            ),
-            padding: const EdgeInsets.only(left: 20, right: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _input,
-                    minLines: 1,
-                    maxLines: 5,
-                    textCapitalization: TextCapitalization.sentences,
-                    cursorColor: accent,
-                    decoration: InputDecoration(
-                      border: InputBorder.none,
-                      hintText: widget.card.temp ? 'Burns in 24h…' : 'Message',
-                    ),
-                    onSubmitted: (_) => _send(),
-                  ),
-                ),
-                AnimatedScale(
-                  scale: _hasText ? 1 : 0.82,
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOutBack,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 220),
-                    margin: const EdgeInsets.symmetric(vertical: 6),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _hasText ? accent : Colors.white.withValues(alpha: 0.08),
-                    ),
-                    child: IconButton(
-                      tooltip: 'Send',
-                      icon: Icon(Icons.arrow_upward_rounded,
-                          color: _hasText ? Colors.black : Colors.white38),
-                      onPressed: _hasText ? _send : null,
-                    ),
-                  ),
-                ),
-              ],
+              onSubmitted: (_) => _send(),
             ),
           ),
-        ),
+          const SizedBox(width: Space.sm),
+          AnimatedScale(
+            scale: _hasText ? 1 : 0.86,
+            duration: Motion.medium,
+            curve: Motion.emphasized,
+            child: AnimatedContainer(
+              duration: Motion.medium,
+              curve: Motion.emphasized,
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _hasText ? accent : Palette.surfaceHigh,
+              ),
+              child: IconButton(
+                tooltip: 'Send',
+                icon: Icon(Icons.arrow_upward_rounded,
+                    color: _hasText ? Palette.onColor(accent) : Palette.textFaint),
+                onPressed: _hasText ? _send : null,
+              ),
+            ),
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// The faint, slowly turning sigil behind a chat. It fades in after the
+/// open transition so the transition itself stays light.
+class _Backdrop extends StatelessWidget {
+  const _Backdrop({required this.card});
+
+  final ChatCard card;
+
+  @override
+  Widget build(BuildContext context) {
+    final route = ModalRoute.of(context)?.animation;
+    final sigil = Opacity(
+      opacity: 0.9,
+      child: _RotatingImage(card: card),
+    );
+    if (route == null) return sigil;
+    return FadeTransition(
+      opacity: CurvedAnimation(parent: route, curve: const Interval(0.5, 1, curve: Curves.easeOut)),
+      child: sigil,
+    );
+  }
+}
+
+class _RotatingImage extends StatefulWidget {
+  const _RotatingImage({required this.card});
+
+  final ChatCard card;
+
+  @override
+  State<_RotatingImage> createState() => _RotatingImageState();
+}
+
+class _RotatingImageState extends State<_RotatingImage> with SingleTickerProviderStateMixin {
+  late final _turn = AnimationController(vsync: this, duration: const Duration(seconds: 160))..repeat();
+
+  @override
+  void dispose() {
+    _turn.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _turn,
+      child: SigilView(spec: widget.card.sigil, opacity: 0.18, background: false),
     );
   }
 }
@@ -219,8 +264,9 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 4, 8, 4),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(Space.xs, Space.xs, Space.sm, Space.sm),
+      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Palette.outline))),
       child: Row(
         children: [
           IconButton(
@@ -228,22 +274,25 @@ class _Header extends StatelessWidget {
             icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
             onPressed: onBack,
           ),
-          SizedBox.square(
-            dimension: 38,
-            child: ClipOval(child: SigilView(spec: card.sigil)),
+          Hero(
+            tag: 'emblem-${card.id}',
+            child: SizedBox.square(
+              dimension: 40,
+              child: ClipOval(child: SigilView(spec: card.sigil)),
+            ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: Space.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(card.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+                Text(card.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.heading),
+                const SizedBox(height: 2),
                 Text(
                   card.temp ? 'Temp · burns after 24h' : card.note ?? 'Only on this device',
-                  style: const TextStyle(fontSize: 12, color: Colors.white54),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.micro,
                 ),
               ],
             ),
@@ -251,8 +300,8 @@ class _Header extends StatelessWidget {
           if (onWipe != null)
             TextButton.icon(
               onPressed: onWipe,
-              icon: const Icon(Icons.local_fire_department_rounded, color: Colors.redAccent, size: 18),
-              label: const Text('Wipe', style: TextStyle(color: Colors.redAccent)),
+              icon: const Icon(Icons.local_fire_department_rounded, color: Palette.danger, size: 18),
+              label: const Text('Wipe', style: TextStyle(color: Palette.danger)),
             ),
         ],
       ),
@@ -268,17 +317,12 @@ class _EmptyChat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: 1),
-        duration: const Duration(milliseconds: 600),
-        curve: Curves.easeOutCubic,
-        builder: (_, v, child) => Opacity(
-          opacity: v,
-          child: Transform.translate(offset: Offset(0, 16 * (1 - v)), child: child),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.all(Space.xxl),
         child: Text(
-          card.temp ? 'Say something. It burns in 24 hours.' : 'Write yourself a note.',
-          style: const TextStyle(color: Colors.white38),
+          card.temp ? 'Say something. It burns in 24 hours.' : 'Nothing here yet.',
+          textAlign: TextAlign.center,
+          style: AppText.caption,
         ),
       ),
     );
@@ -304,13 +348,9 @@ class _Bubble extends StatefulWidget {
 }
 
 class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
-  late final _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 420),
-    value: widget.animate ? 0 : 1,
-  )..forward();
-  late final _spring = CurvedAnimation(parent: _c, curve: Curves.easeOutBack);
-  late final _fade = CurvedAnimation(parent: _c, curve: const Interval(0, 0.6));
+  late final _c = AnimationController(vsync: this, duration: Motion.medium, value: widget.animate ? 0 : 1)
+    ..forward();
+  late final _curve = CurvedAnimation(parent: _c, curve: Motion.emphasized);
 
   @override
   void dispose() {
@@ -318,8 +358,7 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
     super.dispose();
   }
 
-  String _time(DateTime t) =>
-      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  String _time(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
   String _burnsIn(DateTime at) {
     final left = at.difference(DateTime.now());
@@ -332,42 +371,33 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
     final m = widget.message;
     final mine = m.fromMe;
     final accent = widget.accent;
+    final fg = mine ? Palette.onColor(accent) : Palette.text;
+    const r = Radius.circular(20);
+    const tail = Radius.circular(6);
     final bubble = Container(
       constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.76),
-      margin: EdgeInsets.only(top: 2, bottom: widget.showTime ? 8 : 2),
-      padding: const EdgeInsets.fromLTRB(15, 10, 15, 9),
+      margin: EdgeInsets.only(top: 2, bottom: widget.showTime ? Space.sm : 2),
+      padding: const EdgeInsets.fromLTRB(14, 9, 14, 8),
       decoration: BoxDecoration(
-        gradient: mine
-            ? LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [accent.withValues(alpha: 0.42), accent.withValues(alpha: 0.24)],
-              )
-            : null,
-        color: mine ? null : Colors.white.withValues(alpha: 0.08),
-        border: Border.all(color: (mine ? accent : Colors.white).withValues(alpha: 0.22)),
+        color: mine ? accent : Palette.surfaceHigh,
+        border: mine ? null : Border.all(color: Palette.outline),
         borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(20),
-          topRight: const Radius.circular(20),
-          bottomLeft: Radius.circular(mine || !widget.showTime ? 20 : 6),
-          bottomRight: Radius.circular(!mine || !widget.showTime ? 20 : 6),
+          topLeft: r,
+          topRight: r,
+          bottomLeft: mine || !widget.showTime ? r : tail,
+          bottomRight: !mine || !widget.showTime ? r : tail,
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(m.body, style: const TextStyle(fontSize: 16, height: 1.3)),
+          Text(m.body, style: AppText.body.copyWith(color: fg)),
           if (widget.showTime) ...[
             const SizedBox(height: 3),
             Text(
-              m.expiresAt == null
-                  ? _time(m.sentAt)
-                  : '${_time(m.sentAt)} · ${_burnsIn(m.expiresAt!)}',
-              style: TextStyle(
-                fontSize: 11,
-                color: m.expiresAt == null ? Colors.white54 : accent.withValues(alpha: 0.9),
-              ),
+              m.expiresAt == null ? _time(m.sentAt) : '${_time(m.sentAt)} · ${_burnsIn(m.expiresAt!)}',
+              style: AppText.micro.copyWith(color: fg.withValues(alpha: 0.6)),
             ),
           ],
         ],
@@ -376,17 +406,13 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: FadeTransition(
-        opacity: _fade,
-        child: AnimatedBuilder(
-          animation: _spring,
-          child: bubble,
-          builder: (_, child) => Transform.translate(
-            offset: Offset(0, 18 * (1 - _spring.value)),
-            child: Transform.scale(
-              alignment: mine ? Alignment.bottomRight : Alignment.bottomLeft,
-              scale: 0.86 + 0.14 * _spring.value,
-              child: child,
-            ),
+        opacity: _curve,
+        child: ScaleTransition(
+          alignment: mine ? Alignment.bottomRight : Alignment.bottomLeft,
+          scale: Tween(begin: 0.9, end: 1.0).animate(_curve),
+          child: SlideTransition(
+            position: Tween(begin: const Offset(0, 0.25), end: Offset.zero).animate(_curve),
+            child: bubble,
           ),
         ),
       ),

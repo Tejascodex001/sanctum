@@ -25,19 +25,23 @@ Future<void> settle(WidgetTester tester, [int frames = 10]) async {
   }
 }
 
-/// Real fonts, so screenshots show text instead of test boxes.
+/// The app's bundled fonts (and Material icons), so screenshots show real
+/// text instead of test boxes.
 Future<void> loadFonts() async {
-  final dir = '${Platform.environment['FLUTTER_ROOT'] ?? '/opt/flutter'}/bin/cache/artifacts/material_fonts';
-  final roboto = FontLoader('Roboto');
-  for (final f in ['Roboto-Regular.ttf', 'Roboto-Medium.ttf', 'Roboto-Bold.ttf']) {
-    final file = File('$dir/$f');
-    if (file.existsSync()) roboto.addFont(Future.value(ByteData.sublistView(file.readAsBytesSync())));
+  Future<void> load(String family, List<String> files) async {
+    final loader = FontLoader(family);
+    for (final f in files) {
+      final file = File(f);
+      if (file.existsSync()) loader.addFont(Future.value(ByteData.sublistView(file.readAsBytesSync())));
+    }
+    await loader.load();
   }
-  await roboto.load();
-  final icons = File('$dir/MaterialIcons-Regular.otf');
-  if (icons.existsSync()) {
-    await (FontLoader('MaterialIcons')..addFont(Future.value(ByteData.sublistView(icons.readAsBytesSync())))).load();
-  }
+
+  await load('Inter', ['assets/fonts/Inter-400.ttf', 'assets/fonts/Inter-500.ttf', 'assets/fonts/Inter-600.ttf']);
+  await load('SpaceGrotesk', ['assets/fonts/SpaceGrotesk-500.ttf', 'assets/fonts/SpaceGrotesk-700.ttf']);
+  await load('JetBrainsMono', ['assets/fonts/JetBrainsMono-500.ttf']);
+  final icons = '${Platform.environment['FLUTTER_ROOT'] ?? '/opt/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf';
+  await load('MaterialIcons', [icons]);
 }
 
 final _shotKey = GlobalKey();

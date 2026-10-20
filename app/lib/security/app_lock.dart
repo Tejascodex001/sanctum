@@ -4,6 +4,7 @@ import 'package:local_auth/local_auth.dart';
 
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/sigil.dart';
+import '../theme/tokens.dart';
 
 /// Covers the app until the user unlocks with biometrics or the device
 /// PIN/pattern, and locks again whenever the app leaves the foreground.
@@ -128,14 +129,15 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
                 ),
               ),
             ),
+            const Align(
+              alignment: Alignment(0, -0.78),
+              child: Text('Sanctum', style: AppText.display),
+            ),
             Align(
-              alignment: const Alignment(0, 0.82),
+              alignment: const Alignment(0, 0.8),
               child: FadeTransition(
                 opacity: Tween(begin: 0.35, end: 0.9).animate(_pulse),
-                child: const Text(
-                  'TAP TO UNLOCK',
-                  style: TextStyle(letterSpacing: 4, fontSize: 13, fontWeight: FontWeight.w600),
-                ),
+                child: const Text('TAP TO UNLOCK', style: AppText.overline),
               ),
             ),
           ],

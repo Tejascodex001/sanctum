@@ -47,11 +47,14 @@ Rust core (sanctum-core)
 - Hidden chats behind a second PIN; a decoy PIN; a panic-wipe gesture.
 - Verification: both people see the same sigil for their chat. If the sigils match, the chat is secure.
 
-## UI: Sigil + Deck
-- **Sigil:** each chat's emblem is generated in Rust from its key fingerprint and drawn as crisp vector art (no blur). Six families (rosette, constellation, shards, orbits, lattice, rune), four colour harmonies, 3–12-fold symmetry and varying density and stroke weight, so two keys almost never look alike. The sigil supplies the chat's colours, card face, header emblem and slowly turning chat backdrop.
-- **Deck:** chats are a stack of overlapping cards (lazy list, sigils painted once and cached), pinned first, then most recent. Search filters by name and last message. Swipe between Chats and Temp; the tab pill follows the swipe.
-- **Card:** emblem, name, last message, time, and the sigil as a large cropped watermark. Temp cards show a ring counting down to the next burn. Long-press to pin or wipe; swipe a temp card left to wipe it.
-- **Motion:** cards open with a container transform, enter with a staggered slide, messages spring in, the send button wakes as you type, a wiped chat blurs and dissolves, and unlocking zooms through your sigil.
+## UI: Sigil design system
+Flutter with **Material 3** as the foundation (accessibility, text input, platform behaviour such as predictive back), restyled with our own tokens in `app/lib/theme/tokens.dart`; screens use only these.
+- **Type:** Space Grotesk (headings), Inter (text), JetBrains Mono (codes, safety numbers). Bundled in the app (OFL 1.1), never fetched at runtime.
+- **Colour:** neutral near-black surfaces; each chat's sigil accent is the only strong colour (your bubbles, focus, highlights).
+- **Shape and space:** 4-pt spacing scale, radii 12/16/22/28, hairline borders instead of shadows.
+- **Motion:** Material 3 emphasized curves; 160/280/420 ms. Only opacity and transforms animate.
+- **Sigils** are drawn once into GPU images and cached (LRU); lists and the slowly turning chat/lock backdrops only move those images, so nothing is re-drawn per frame.
+- **Opening a chat:** messages load first, then the page fades and settles up while the chat's emblem flies from the card into the header (Hero). The backdrop sigil fades in after the transition.
 
 ## Roadmap
 - **v1:** identity, QR invites, encrypted 1:1 and group chat over Tor, media, voice notes, threads, temp chats (internet/Wi-Fi Direct/Bluetooth), app lock, screenshot control, hidden chats.
