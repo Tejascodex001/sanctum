@@ -40,6 +40,8 @@ class MainActivity : FlutterFragmentActivity() {
         pendingPermission = null
     }
 
+    private val voice by lazy { VoiceRecorder(applicationContext) }
+
     private var pendingPick: MethodChannel.Result? = null
     private val pickVisual = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { finishPick(it) }
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { finishPick(it) }
@@ -128,6 +130,18 @@ class MainActivity : FlutterFragmentActivity() {
                             pendingPermission = result
                             permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
+                    }
+                    "requestMicrophone" -> {
+                        pendingPermission?.success(false)
+                        pendingPermission = result
+                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                    "recordStart" -> result.success(voice.start())
+                    "recordLevel" -> result.success(voice.level())
+                    "recordStop" -> result.success(voice.stop())
+                    "recordCancel" -> {
+                        voice.cancel()
+                        result.success(null)
                     }
                     "pickMedia" -> {
                         pendingPick?.success(null)

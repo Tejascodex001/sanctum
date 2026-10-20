@@ -47,6 +47,13 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   /// The message being answered, shown above the composer.
   ChatMessage? _replyTo;
 
+  // A voice note being recorded (hold the mic; slide left to cancel).
+  bool _recording = false;
+  bool _cancelArmed = false;
+  DateTime _recordStart = DateTime.now();
+  double _level = 0;
+  Timer? _recordTick;
+
   /// Bubbles on screen, by sequence number: tapping a quote scrolls there.
   final _bubbleKeys = <int, GlobalKey>{};
   int? _flash;
@@ -90,6 +97,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     Screenshots.leave();
     _tick?.cancel();
     _events?.cancel();
+    _recordTick?.cancel();
+    if (_recording) Background.recordCancel();
     _input.dispose();
     _focus.dispose();
     _wipe.dispose();
@@ -160,7 +169,10 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   Future<void> _delete(ChatMessage m, {required bool everyone}) async {
     HapticFeedback.mediumImpact();
-    setState(() => _messages = [for (final x in _messages) if (!identical(x, m)) x]);
+    setState(() => _messages = [
+          for (final x in _messages)
+            if (!identical(x, m)) x
+        ]);
     await messageDelete(chatId: widget.card.id, seq: m.seq!, forEveryone: everyone);
     await _reload();
   }
@@ -444,43 +456,149 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     await _reload();
   }
 
+  Future<void> _recordBegin() async {
+    if (!await Background.requestMicrophone()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Allow the microphone to record voice notes.')));
+      }
+      return;
+    }
+    if (!await Background.recordStart()) return;
+    HapticFeedback.mediumImpact();
+    setState(() {
+      _recording = true;
+      _cancelArmed = false;
+      _recordStart = DateTime.now();
+    });
+    _recordTick = Timer.periodic(const Duration(milliseconds: 100), (_) async {
+      final level = await Background.recordLevel();
+      if (mounted && _recording) setState(() => _level = (level / 20000).clamp(0.0, 1.0));
+    });
+  }
+
+  Future<void> _recordEnd() async {
+    _recordTick?.cancel();
+    if (!_recording) return;
+    final cancel = _cancelArmed;
+    final replyTo = _replyTo;
+    setState(() {
+      _recording = false;
+      _level = 0;
+      if (!cancel) _replyTo = null;
+    });
+    if (cancel) {
+      HapticFeedback.selectionClick();
+      await Background.recordCancel();
+      return;
+    }
+    final note = await Background.recordStop();
+    if (note == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Hold the mic to record a voice note.')));
+      }
+      return;
+    }
+    HapticFeedback.lightImpact();
+    final path = note['path']! as String;
+    try {
+      await mediaSend(
+        chatId: widget.card.id,
+        path: path,
+        kind: MediaKindView.audio,
+        mime: 'audio/mp4',
+        name: 'Voice note.m4a',
+        caption: '',
+        thumb: Uint8List(0),
+        width: 0,
+        height: 0,
+        durationMs: note['durationMs']! as int,
+        replyTo: replyTo?.seq,
+      );
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Couldn\'t send: $e')));
+    } finally {
+      try {
+        File(path).deleteSync();
+      } catch (_) {}
+    }
+    await _reload();
+  }
+
+  /// While recording: the time, a pulse with the voice, slide to cancel.
+  Widget _recordingBar(Color accent) {
+    final elapsed = DateTime.now().difference(_recordStart);
+    return Container(
+      height: 50,
+      padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+      decoration: BoxDecoration(
+        color: Palette.surfaceHigh,
+        borderRadius: BorderRadius.circular(Radii.xl),
+        border: Border.all(color: _cancelArmed ? Palette.danger : accent.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 100),
+            width: 10 + 10 * _level,
+            height: 10 + 10 * _level,
+            decoration: const BoxDecoration(color: Palette.danger, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: Space.md),
+          Text(formatDuration(elapsed.inMilliseconds), style: AppText.bodyStrong),
+          const Spacer(),
+          Text(
+            _cancelArmed ? 'Release to cancel' : '‹ Slide to cancel',
+            style: AppText.caption.copyWith(color: _cancelArmed ? Palette.danger : null),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _composerRow(Color accent) {
+    // Voice notes and attachments live on disk, so temp chats (memory
+    // only) have neither.
+    final voice = !widget.card.temp && !_hasText;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        // Attachments live on disk, so temp chats (memory only) have none.
-        if (!widget.card.temp)
+        if (!widget.card.temp && !_recording)
           IconButton(
             tooltip: 'Attach',
             onPressed: _attach,
             icon: const Icon(Icons.add_circle_outline_rounded),
             color: Palette.textMuted,
           ),
-        Expanded(
-          child: TextField(
-            controller: _input,
-            focusNode: _focus,
-            minLines: 1,
-            maxLines: 5,
-            textCapitalization: TextCapitalization.sentences,
-            cursorColor: accent,
-            style: AppText.body,
-            decoration: InputDecoration(
-              hintText: widget.card.temp ? 'Burns in 24h…' : 'Message',
-              fillColor: Palette.surfaceHigh,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.xl), borderSide: BorderSide.none),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(Radii.xl),
-                borderSide: const BorderSide(color: Palette.outline),
+        if (_recording)
+          Expanded(child: _recordingBar(accent))
+        else
+          Expanded(
+            child: TextField(
+              controller: _input,
+              focusNode: _focus,
+              minLines: 1,
+              maxLines: 5,
+              textCapitalization: TextCapitalization.sentences,
+              cursorColor: accent,
+              style: AppText.body,
+              decoration: InputDecoration(
+                hintText: widget.card.temp ? 'Burns in 24h…' : 'Message',
+                fillColor: Palette.surfaceHigh,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.xl), borderSide: BorderSide.none),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Radii.xl),
+                  borderSide: const BorderSide(color: Palette.outline),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(Radii.xl),
+                  borderSide: BorderSide(color: accent.withValues(alpha: 0.6)),
+                ),
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(Radii.xl),
-                borderSide: BorderSide(color: accent.withValues(alpha: 0.6)),
-              ),
+              onSubmitted: (_) => _send(),
             ),
-            onSubmitted: (_) => _send(),
           ),
-        ),
         const SizedBox(width: Space.sm),
         AnimatedScale(
           scale: _hasText ? 1 : 0.86,
@@ -495,11 +613,36 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               shape: BoxShape.circle,
               color: _hasText ? accent : Palette.surfaceHigh,
             ),
-            child: IconButton(
-              tooltip: 'Send',
-              icon: Icon(Icons.arrow_upward_rounded, color: _hasText ? Palette.onColor(accent) : Palette.textFaint),
-              onPressed: _hasText ? _send : null,
-            ),
+            child: voice
+                ? GestureDetector(
+                    onLongPressStart: (_) => _recordBegin(),
+                    onLongPressMoveUpdate: (d) {
+                      final armed = d.offsetFromOrigin.dx < -80;
+                      if (armed != _cancelArmed) {
+                        HapticFeedback.selectionClick();
+                        setState(() => _cancelArmed = armed);
+                      }
+                    },
+                    onLongPressEnd: (_) => _recordEnd(),
+                    onTap: () => ScaffoldMessenger.of(context)
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(const SnackBar(content: Text('Hold to record a voice note.'))),
+                    child: AnimatedScale(
+                      scale: _recording ? 1.25 : 1,
+                      duration: Motion.fast,
+                      child: Icon(
+                        Icons.mic_rounded,
+                        semanticLabel: 'Hold to record a voice note',
+                        color: _recording ? accent : Palette.textMuted,
+                      ),
+                    ),
+                  )
+                : IconButton(
+                    tooltip: 'Send',
+                    icon:
+                        Icon(Icons.arrow_upward_rounded, color: _hasText ? Palette.onColor(accent) : Palette.textFaint),
+                    onPressed: _hasText ? _send : null,
+                  ),
           ),
         ),
       ],

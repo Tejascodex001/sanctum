@@ -114,6 +114,16 @@ abstract final class Background {
   static Future<Map<Object?, Object?>?> pickMedia(String kind) =>
       AppLock.whileAway(() => _call<Map<Object?, Object?>>(_app, 'pickMedia', {'kind': kind}));
 
+  /// Voice notes: the microphone permission (asked once), then recording.
+  static Future<bool> requestMicrophone() =>
+      AppLock.whileAway(() async => await _call<bool>(_app, 'requestMicrophone') ?? false);
+  static Future<bool> recordStart() async => await _call<bool>(_app, 'recordStart') ?? false;
+  static Future<int> recordLevel() async => await _call<int>(_app, 'recordLevel') ?? 0;
+
+  /// The recording (path, durationMs), or null if it was too short.
+  static Future<Map<Object?, Object?>?> recordStop() => _call<Map<Object?, Object?>>(_app, 'recordStop');
+  static Future<void> recordCancel() => _call(_app, 'recordCancel');
+
   /// Opens a (decrypted) file in another app the user picks.
   static Future<bool> openFile(String path, String mime) async =>
       await _call<bool>(_app, 'openFile', {'path': path, 'mime': mime}) ?? false;

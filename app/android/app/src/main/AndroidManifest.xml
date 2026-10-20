@@ -13,6 +13,8 @@
     <!-- Updates: installing a newer release (Android checks it's signed
          with the same key). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Voice notes, recorded only while the mic button is held. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Nearby over Bluetooth (Android 10+): advertising a rotating ID only
          friends recognize, and linking to their phones. Never for location. -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />

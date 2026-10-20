@@ -69,13 +69,15 @@ class MediaContent extends StatelessWidget {
     return switch (media.kind) {
       MediaKindView.image => _Visual(media: media, chatId: chatId, seq: seq, maxWidth: maxWidth, video: false),
       MediaKindView.video => _Visual(media: media, chatId: chatId, seq: seq, maxWidth: maxWidth, video: true),
+      MediaKindView.audio => _VoiceNote(media: media, chatId: chatId, seq: seq, fg: fg),
       _ => _FileRow(media: media, chatId: chatId, seq: seq, fg: fg),
     };
   }
 }
 
 class _Visual extends StatelessWidget {
-  const _Visual({required this.media, required this.chatId, required this.seq, required this.maxWidth, required this.video});
+  const _Visual(
+      {required this.media, required this.chatId, required this.seq, required this.maxWidth, required this.video});
 
   final MediaView media;
   final int chatId;
@@ -192,7 +194,8 @@ class _FileRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(media.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.bodyStrong.copyWith(color: fg)),
+                  Text(media.name,
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.bodyStrong.copyWith(color: fg)),
                   Text(
                     media.ready ? formatSize(media.size.toInt()) : 'Receiving · ${formatSize(media.size.toInt())}',
                     style: AppText.micro.copyWith(color: fg.withValues(alpha: 0.7)),
@@ -299,6 +302,113 @@ class _VideoScreenState extends State<VideoScreen> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// A voice note: play/pause and progress. Plays from a decrypted copy
+/// that's deleted when the bubble goes away.
+class _VoiceNote extends StatefulWidget {
+  const _VoiceNote({required this.media, required this.chatId, required this.seq, required this.fg});
+
+  final MediaView media;
+  final int chatId;
+  final int? seq;
+  final Color fg;
+
+  @override
+  State<_VoiceNote> createState() => _VoiceNoteState();
+}
+
+class _VoiceNoteState extends State<_VoiceNote> {
+  VideoPlayerController? _player;
+  File? _file;
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _player?.dispose();
+    try {
+      _file?.deleteSync();
+    } catch (_) {}
+    super.dispose();
+  }
+
+  Future<void> _toggle() async {
+    final player = _player;
+    if (player != null) {
+      if (player.value.isPlaying) {
+        await player.pause();
+      } else {
+        if (player.value.position >= player.value.duration) await player.seekTo(Duration.zero);
+        await player.play();
+      }
+      return;
+    }
+    if (widget.seq == null || !widget.media.ready || _loading) return;
+    setState(() => _loading = true);
+    final file = await _export(widget.chatId, widget.seq!, 'voice-${widget.seq}.m4a');
+    if (file == null || !mounted) return;
+    _file = file;
+    final created = VideoPlayerController.file(file);
+    await created.initialize();
+    created.addListener(() {
+      if (mounted) setState(() {});
+    });
+    if (!mounted) {
+      await created.dispose();
+      return;
+    }
+    setState(() {
+      _player = created;
+      _loading = false;
+    });
+    await created.play();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = widget.fg;
+    final player = _player;
+    final total = widget.media.durationMs;
+    final position = player?.value.position.inMilliseconds ?? 0;
+    final playing = player?.value.isPlaying ?? false;
+    final progress = total == 0 ? 0.0 : (position / total).clamp(0.0, 1.0);
+    return SizedBox(
+      width: 220,
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: playing ? 'Pause' : 'Play',
+            onPressed: widget.media.ready ? _toggle : null,
+            icon: !widget.media.ready || _loading
+                ? SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 2, color: fg))
+                : Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded, color: fg, size: 30),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 3,
+                    color: fg,
+                    backgroundColor: fg.withValues(alpha: 0.25),
+                  ),
+                ),
+                const SizedBox(height: Space.xs),
+                Text(
+                  playing || position > 0 ? formatDuration(position) : formatDuration(total),
+                  style: AppText.micro.copyWith(color: fg.withValues(alpha: 0.75)),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

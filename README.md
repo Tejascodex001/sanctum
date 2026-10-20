@@ -41,7 +41,7 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Encrypted storage** | SQLite with every row sealed (XChaCha20-Poly1305), keys in Android Keystore, no backups |
 | ✅ | **Over-the-air updates** | Checked and downloaded through Tor, with changelogs |
 | ✅ | **Media** | Photos, videos and files up to 50 MB, end-to-end encrypted and stored encrypted. Photos are resized and lose hidden metadata like location |
-| ⏳ | Voice notes | |
+| ✅ | **Voice notes** | Hold the mic to record, release to send, slide left to cancel. Encrypted like any attachment |
 | ⏳ | Decoy PIN | Opens a harmless, empty-looking Sanctum |
 
 ### Milestone v2: more than messages
