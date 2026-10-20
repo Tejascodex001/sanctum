@@ -220,12 +220,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ..nextBurn = v.nextBurn == null ? null : DateTime.fromMillisecondsSinceEpoch(v.nextBurn!.toInt() * 1000);
       cards.add(card);
     }
-    if (mounted)
-      setState(
-        () => _temp
-          ..clear()
-          ..addAll(cards),
-      );
+    if (mounted) setState(() => _temp..clear()..addAll(cards));
   }
 
   bool get _onTemp => _page > 0.5 && _page < 1.5;
