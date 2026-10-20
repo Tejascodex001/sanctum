@@ -136,6 +136,7 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 - **Opening a chat:** messages load first, then the page fades and settles up while the chat's emblem flies from the card into the header (Hero). The backdrop sigil fades in after the transition.
 
 ## Roadmap
-- **v1:** identity, QR invites, encrypted 1:1 and group chat over Tor, media, voice notes, threads, temp chats (internet/Wi-Fi Direct/Bluetooth), app lock, screenshot control, hidden chats.
-- **v2:** Fediverse tab (Pixelfed/PeerTube, Reels-style), plans and date polls, shared albums, daily moment, on-device AI (catch-up summaries, transcription, search).
-- **v3:** voice and video calls (WebRTC over Tor/relayed, no IP exposure).
+Status per feature is tracked in the README's feature table. In short:
+- **v1, private messaging:** done, apart from media, voice notes, the decoy PIN, nearby over Bluetooth / Wi-Fi Direct, and a thread view.
+- **v2:** a Fediverse tab (Pixelfed, PeerTube, Reels-style), plans and date polls, shared albums, a daily moment, on-device AI (catch-up summaries, transcription, search).
+- **v3:** voice and video calls, with no IP exposure.
