@@ -2,6 +2,7 @@
 //! the network node that talks to friends over Tor.
 
 use crate::frb_generated::StreamSink;
+use sanctum_core::identity::{pair_fingerprint, safety_number};
 use sanctum_core::session::{Event, Paired, Session};
 use sanctum_net::{NetEvent, Node};
 use std::path::PathBuf;
@@ -60,8 +61,10 @@ pub enum AppEventKind {
     Temp,
     /// A temp chat was wiped by the friend, or burned away.
     TempGone,
-    /// Network status changed; see `status`.
+    /// Network status changed; see `net`.
     Status,
+    /// A friend request arrived.
+    Request,
 }
 
 /// Where the connection to Tor stands.
@@ -200,6 +203,7 @@ fn emit_session(e: Event) {
         Event::Chat(id) => emit(AppEventKind::Chat, id),
         Event::Temp(id) => emit(AppEventKind::Temp, id as i64),
         Event::TempGone(id) => emit(AppEventKind::TempGone, id as i64),
+        Event::Request => emit(AppEventKind::Request, 0),
     }
 }
 
@@ -247,6 +251,8 @@ pub fn my_code(my_name: String) -> anyhow::Result<String> {
 /// verified), pasted or typed (verify later by comparing safety numbers).
 pub fn friend_add(code: String, scanned: bool) -> anyhow::Result<PairedView> {
     let paired = with(|s| Ok(s.add_friend(&code, scanned)?))?;
+    // Our friend request goes out now, in case they haven't added us.
+    poke(Some(paired.friend_key));
     Ok(paired.into())
 }
 
@@ -257,6 +263,64 @@ pub fn friend_set_verified(chat_id: i64, verified: bool) -> anyhow::Result<()> {
 
 pub fn friend_safety_number(chat_id: i64) -> anyhow::Result<String> {
     with(|s| Ok(s.safety_number(chat_id)?))
+}
+
+/// The name your friend requests carry.
+pub fn profile_set_name(name: String) -> anyhow::Result<()> {
+    with(|s| {
+        s.set_my_name(&name);
+        Ok(())
+    })
+}
+
+/// Someone who added your code and asks you to add them back.
+pub struct RequestView {
+    /// Their identity key: their own sigil comes from it.
+    pub key: Vec<u8>,
+    pub name: String,
+    /// Your chat's sigil, made from both keys.
+    pub sigil_key: Vec<u8>,
+    pub safety_number: String,
+    pub at: i64,
+}
+
+pub fn request_list() -> anyhow::Result<Vec<RequestView>> {
+    with(|s| {
+        let me = s.public_key();
+        Ok(s.requests()
+            .into_iter()
+            .map(|r| {
+                let sigil_key = pair_fingerprint(&me, &r.identity).to_vec();
+                RequestView {
+                    key: r.identity.to_vec(),
+                    name: r.name,
+                    safety_number: safety_number(&sigil_key),
+                    sigil_key,
+                    at: r.at as i64,
+                }
+            })
+            .collect())
+    })
+}
+
+/// Adds them; encryption is set up as soon as their phone is reached.
+pub fn request_accept(key: Vec<u8>) -> anyhow::Result<PairedView> {
+    let key = to_key(key)?;
+    let paired = with(|s| Ok(s.accept_request(&key)?))?;
+    poke(Some(key));
+    Ok(paired.into())
+}
+
+pub fn request_decline(key: Vec<u8>) -> anyhow::Result<()> {
+    let key = to_key(key)?;
+    with(|s| {
+        s.decline_request(&key);
+        Ok(())
+    })
+}
+
+fn to_key(key: Vec<u8>) -> anyhow::Result<[u8; 32]> {
+    key.try_into().map_err(|_| anyhow::anyhow!("keys are 32 bytes"))
 }
 
 pub struct FriendView {

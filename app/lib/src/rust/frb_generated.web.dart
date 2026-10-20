@@ -82,6 +82,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  List<RequestView> dco_decode_list_request_view(dynamic raw);
+
+  @protected
   List<StoredChat> dco_decode_list_stored_chat(dynamic raw);
 
   @protected
@@ -110,6 +113,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PairedView dco_decode_paired_view(dynamic raw);
+
+  @protected
+  RequestView dco_decode_request_view(dynamic raw);
 
   @protected
   SigilForm dco_decode_sigil_form(dynamic raw);
@@ -195,6 +201,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  List<RequestView> sse_decode_list_request_view(SseDeserializer deserializer);
+
+  @protected
   List<StoredChat> sse_decode_list_stored_chat(SseDeserializer deserializer);
 
   @protected
@@ -227,6 +236,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PairedView sse_decode_paired_view(SseDeserializer deserializer);
+
+  @protected
+  RequestView sse_decode_request_view(SseDeserializer deserializer);
 
   @protected
   SigilForm sse_decode_sigil_form(SseDeserializer deserializer);
@@ -328,6 +340,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_request_view(
+    List<RequestView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_stored_chat(
     List<StoredChat> self,
     SseSerializer serializer,
@@ -368,6 +386,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_paired_view(PairedView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_request_view(RequestView self, SseSerializer serializer);
 
   @protected
   void sse_encode_sigil_form(SigilForm self, SseSerializer serializer);

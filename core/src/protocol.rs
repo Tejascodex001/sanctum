@@ -44,6 +44,12 @@ pub enum Frame {
     Ack {
         id: MessageId,
     },
+    /// "Add me back": sent first to a friend we haven't set up encryption
+    /// with yet. A phone that doesn't know us shows it as a friend request;
+    /// the hello before it already proved who it's from.
+    FriendRequest {
+        name: String,
+    },
 }
 
 /// What is inside an MLS application message.

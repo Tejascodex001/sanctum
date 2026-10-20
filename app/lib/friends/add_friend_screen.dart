@@ -64,6 +64,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
 
   Future<void> _nameChanged(String name) async {
     await saveDisplayName(name);
+    await profileSetName(name: name);
     await _refreshCode();
   }
 
@@ -331,8 +332,8 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
         ),
         const SizedBox(height: Space.sm),
         Text(
-          'Your chat\'s sigil is made from both your keys. Once ${paired.friend} adds your code too, '
-          'their phone shows this same sigil and number.'
+          'Your chat\'s sigil is made from both your keys. ${paired.friend} gets a friend request '
+          'as soon as their phone can be reached; once they accept, it shows this same sigil and number.'
           '${paired.verified ? '' : ' Call them and compare the number: if it matches, nobody swapped your codes.'}',
           textAlign: TextAlign.center,
           style: AppText.caption,

@@ -22,6 +22,7 @@ Future<void> main() async {
       dir: (await getApplicationSupportDirectory()).path,
       storeKey: await loadOrCreateStoreKey(),
     );
+    await profileSetName(name: await loadDisplayName());
     NetBus.instance.start();
     await NetBus.instance.connect(
       stateDir: '${(await getApplicationSupportDirectory()).path}/tor-state',

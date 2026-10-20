@@ -168,6 +168,14 @@ impl Node {
         })
         .await??;
 
+        if !self.session.lock().unwrap().is_friend(&peer)? {
+            // A stranger: hear their friend request, then hang up.
+            let frame = timeout(HANDSHAKE_TIMEOUT, read_frame(&mut conn, &mut buf)).await??;
+            self.session.lock().unwrap().on_stranger_frame(&peer, frame)?;
+            self.emit_session_events();
+            return Ok(());
+        }
+
         let link = {
             let mut next = self.next_link.lock().unwrap();
             *next += 1;
@@ -414,6 +422,45 @@ mod tests {
                 .unwrap()[0]
                 .delivered
         );
+    }
+
+    #[tokio::test]
+    async fn one_code_is_enough_a_friend_request_does_the_rest() {
+        let book = Arc::default();
+        let (alice, mut bob) = (phone(&book).await, phone(&book).await);
+        alice.session.lock().unwrap().set_my_name("Alice");
+        let b_code = bob.session.lock().unwrap().my_code("Bob");
+        let ab = alice
+            .session
+            .lock()
+            .unwrap()
+            .add_friend(&b_code, false)
+            .unwrap()
+            .chat_id;
+        alice.session.lock().unwrap().send_text(ab, "add me?").unwrap();
+        alice.node.spawn_retry_loop(Duration::from_millis(200));
+        bob.node.spawn_retry_loop(Duration::from_millis(200));
+        alice.node.poke_pending();
+
+        expect(&mut bob.events, |e| *e == NetEvent::Session(Event::Request)).await;
+        let ba = {
+            let mut s = bob.session.lock().unwrap();
+            assert_eq!(s.requests()[0].name, "Alice");
+            s.accept_request(&alice.pk).unwrap().chat_id
+        };
+        bob.node.poke_pending();
+        let session = bob.session.clone();
+        until(move || {
+            session
+                .lock()
+                .unwrap()
+                .store
+                .messages(ba, None)
+                .unwrap()
+                .iter()
+                .any(|m| m.body == "add me?")
+        })
+        .await;
     }
 
     #[tokio::test]

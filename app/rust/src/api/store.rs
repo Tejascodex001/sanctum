@@ -20,6 +20,9 @@ pub struct StoredChat {
     /// Friends' chats: their key is confirmed (scanned in person or
     /// safety number compared).
     pub verified: bool,
+    /// Friends' chats: they haven't added us back yet (our friend request
+    /// is still going out).
+    pub waiting: bool,
 }
 
 pub struct MessageView {
@@ -51,6 +54,7 @@ pub fn chat_list() -> anyhow::Result<Vec<StoredChat>> {
                 pinned: m.pinned,
                 created_at: m.created_at as i64,
                 verified: m.peers.iter().all(|p| p.verified),
+                waiting: m.kind == ChatKind::Direct && m.group_id.is_empty(),
             })
             .collect())
     })

@@ -14,6 +14,7 @@ use crate::store::{
     ChatKind, ChatMeta, OutboxItem, OutboxState, Peer, Store, StoreError, StoredMessage,
 };
 use crate::temp_chat::{TempChats, TempMessage};
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -63,7 +64,22 @@ pub enum Event {
     Temp(u64),
     /// A temp chat was wiped (by the friend) or burned away.
     TempGone(u64),
+    /// A friend request arrived.
+    Request,
 }
+
+/// Someone who added your code and wants you to add them back. Held in
+/// memory only: they keep asking until you answer.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FriendRequest {
+    pub identity: [u8; 32],
+    pub name: String,
+    pub at: u64,
+}
+
+/// More pending requests than this and the oldest are dropped.
+const MAX_REQUESTS: usize = 20;
+const MAX_NAME: usize = 64;
 
 /// A temp message waiting for its friend's acknowledgement. Held in memory
 /// only, like everything about temp chats.
@@ -82,6 +98,11 @@ pub struct Session {
     pub temp: TempChats,
     temp_out: Vec<TempOut>,
     events: Vec<Event>,
+    /// Your name, sent with friend requests.
+    my_name: String,
+    requests: Vec<FriendRequest>,
+    /// Declined this run; not shown again until a restart.
+    declined: HashSet<[u8; 32]>,
 }
 
 impl Session {
@@ -100,11 +121,19 @@ impl Session {
             temp: TempChats::default(),
             temp_out: Vec::new(),
             events: Vec::new(),
+            my_name: String::new(),
+            requests: Vec::new(),
+            declined: HashSet::new(),
         })
     }
 
     pub fn public_key(&self) -> [u8; 32] {
         self.identity.public_key()
+    }
+
+    /// The name your friend requests carry.
+    pub fn set_my_name(&mut self, name: &str) {
+        self.my_name = clip(name.trim(), MAX_NAME);
     }
 
     /// Your friend code, to show as a QR or share.
@@ -262,6 +291,17 @@ impl Session {
     /// Friends with something waiting to be delivered.
     pub fn pending_peers(&self) -> Result<Vec<[u8; 32]>> {
         let mut peers = self.store.outbox_peers()?;
+        // Friends we haven't set up encryption with: our friend request
+        // goes out until they add us back.
+        for (_, meta) in self.store.chats()? {
+            if meta.kind == ChatKind::Direct && meta.group_id.is_empty() {
+                for p in meta.peers {
+                    if !peers.contains(&p.identity) {
+                        peers.push(p.identity);
+                    }
+                }
+            }
+        }
         for out in &self.temp_out {
             if !peers.contains(&out.peer) {
                 peers.push(out.peer);
@@ -410,10 +450,58 @@ impl Session {
         if !verify(from, &hello_message(&self.public_key(), nonce), &signature) {
             return Err(SessionError::Protocol);
         }
-        if self.direct_chat(from)?.is_none() {
-            return Err(SessionError::NotAFriend);
+        if *from == self.public_key() {
+            return Err(SessionError::Protocol);
         }
+        // Strangers get this far too: they may only send a friend request
+        // ([`Session::on_stranger_frame`]).
         Ok(*from)
+    }
+
+    pub fn is_friend(&self, peer: &[u8; 32]) -> Result<bool> {
+        Ok(self.direct_chat(peer)?.is_some())
+    }
+
+    /// The one frame a stranger may send: a friend request.
+    pub fn on_stranger_frame(&mut self, peer: &[u8; 32], frame: Frame) -> Result<()> {
+        let Frame::FriendRequest { name } = frame else {
+            return Err(SessionError::NotAFriend);
+        };
+        if self.is_friend(peer)? || self.declined.contains(peer) {
+            return Ok(());
+        }
+        let name = clip(name.trim(), MAX_NAME);
+        let name = if name.is_empty() { "Someone".into() } else { name };
+        self.requests.retain(|r| r.identity != *peer);
+        self.requests.push(FriendRequest { identity: *peer, name, at: now() });
+        if self.requests.len() > MAX_REQUESTS {
+            self.requests.remove(0);
+        }
+        self.events.push(Event::Request);
+        Ok(())
+    }
+
+    /// Pending friend requests, newest first.
+    pub fn requests(&self) -> Vec<FriendRequest> {
+        self.requests.iter().rev().cloned().collect()
+    }
+
+    /// Adds the friend who asked. Unverified: compare the safety number to
+    /// be sure. Returns the friend to reach so encryption gets set up.
+    pub fn accept_request(&mut self, identity: &[u8; 32]) -> Result<Paired> {
+        let i = self
+            .requests
+            .iter()
+            .position(|r| r.identity == *identity)
+            .ok_or(SessionError::NoSuchChat)?;
+        let request = self.requests.remove(i);
+        let code = FriendCode::new(request.identity, &request.name).encode();
+        self.add_friend(&code, false)
+    }
+
+    pub fn decline_request(&mut self, identity: &[u8; 32]) {
+        self.requests.retain(|r| r.identity != *identity);
+        self.declined.insert(*identity);
     }
 
     /// A connection with `peer` is ready: frames to send first.
@@ -423,7 +511,11 @@ impl Session {
             // The friend with the smaller key sets up the group. The other
             // asks too: if the friend still has a group from before (we
             // deleted and re-added them), that tells them to start over.
-            return Ok(vec![Frame::KeyPackageRequest]);
+            // The request comes first in case they haven't added us yet.
+            return Ok(vec![
+                Frame::FriendRequest { name: self.my_name.clone() },
+                Frame::KeyPackageRequest,
+            ]);
         }
         self.flush(peer)
     }
@@ -433,6 +525,8 @@ impl Session {
         let (chat_id, mut meta) = self.direct_chat(peer)?.ok_or(SessionError::NotAFriend)?;
         let initiator = self.public_key() < *peer;
         match frame {
+            // Already friends.
+            Frame::FriendRequest { .. } => Ok(Vec::new()),
             Frame::KeyPackageRequest if initiator => {
                 if meta.group_id.is_empty() {
                     // First contact: our own request is already on its way.
@@ -647,6 +741,10 @@ fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+fn clip(s: &str, max: usize) -> String {
+    s.chars().take(max).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -840,6 +938,84 @@ mod tests {
         }
     }
 
+    /// `dialer` reaches a phone that may not know it yet; returns whether
+    /// it was a stranger (and its friend request was handed over).
+    fn reach(dialer: &mut Phone, reached: &mut Phone) -> bool {
+        let (nonce, challenge) = reached.s.challenge();
+        let hello = dialer.s.hello(&reached.pk(), &challenge).unwrap();
+        let who = reached.s.accept_hello(&nonce, &hello).unwrap();
+        if reached.s.is_friend(&who).unwrap() {
+            connect(dialer, reached);
+            return false;
+        }
+        let first = dialer.s.on_link_up(&reached.pk()).unwrap().remove(0);
+        reached.s.on_stranger_frame(&who, first).unwrap();
+        true
+    }
+
+    #[test]
+    fn adding_one_code_sends_a_friend_request() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        alice.s.set_my_name("Alice");
+        // Only Alice enters a code.
+        let ab = alice.s.add_friend(&bob.s.my_code("Bob"), false).unwrap().chat_id;
+        assert_eq!(alice.s.pending_peers().unwrap(), vec![bob.pk()], "keeps asking");
+
+        assert!(reach(&mut alice, &mut bob));
+        assert!(reach(&mut alice, &mut bob), "asking again doesn't duplicate");
+        let requests = bob.s.requests();
+        assert_eq!(requests.len(), 1);
+        assert_eq!((requests[0].identity, requests[0].name.as_str()), (alice.pk(), "Alice"));
+        assert!(bob.s.take_events().contains(&Event::Request));
+        assert!(bob.s.friends().unwrap().is_empty());
+
+        let paired = bob.s.accept_request(&alice.pk()).unwrap();
+        assert!(!paired.verified);
+        assert!(bob.s.requests().is_empty());
+        // Bob's phone now reaches out to set up encryption.
+        assert_eq!(bob.s.pending_peers().unwrap(), vec![alice.pk()]);
+        assert!(!reach(&mut bob, &mut alice));
+        alice.s.send_text(ab, "you got my request").unwrap();
+        connect(&mut alice, &mut bob);
+        assert_eq!(bob.texts(paired.chat_id), [(false, "you got my request".into(), true)]);
+        assert_eq!(
+            alice.s.safety_number(ab).unwrap(),
+            bob.s.safety_number(paired.chat_id).unwrap()
+        );
+        assert!(alice.s.pending_peers().unwrap().is_empty());
+        assert!(bob.s.pending_peers().unwrap().is_empty());
+    }
+
+    #[test]
+    fn declined_requests_stay_away_until_restart() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        alice.s.add_friend(&bob.s.my_code("Bob"), false).unwrap();
+        reach(&mut alice, &mut bob);
+        let request = bob.s.requests()[0].clone();
+        assert_eq!(request.name, "Someone", "no name set");
+        bob.s.decline_request(&alice.pk());
+        reach(&mut alice, &mut bob);
+        assert!(bob.s.requests().is_empty());
+        assert!(bob.s.accept_request(&alice.pk()).is_err());
+        bob.restart();
+        reach(&mut alice, &mut bob);
+        assert_eq!(bob.s.requests().len(), 1);
+    }
+
+    #[test]
+    fn friend_requests_are_capped() {
+        let mut bob = Phone::new();
+        for _ in 0..MAX_REQUESTS + 5 {
+            let mut eve = Phone::new();
+            eve.s.set_my_name(&"e".repeat(500));
+            eve.s.add_friend(&bob.s.my_code("Bob"), false).unwrap();
+            reach(&mut eve, &mut bob);
+        }
+        let requests = bob.s.requests();
+        assert_eq!(requests.len(), MAX_REQUESTS);
+        assert!(requests.iter().all(|r| r.name.chars().count() == MAX_NAME));
+    }
+
     #[test]
     fn renaming_a_friend() {
         let (mut alice, bob) = (Phone::new(), Phone::new());
@@ -867,12 +1043,16 @@ mod tests {
         befriend(&mut alice, &mut bob);
         let eve = Phone::new();
         let (nonce, challenge) = bob.s.challenge();
-        // Eve is not bob's friend.
+        // Eve is not bob's friend: she may only ask to be one.
         let hello = eve.s.hello(&bob.pk(), &challenge).unwrap();
+        let who = bob.s.accept_hello(&nonce, &hello).unwrap();
+        assert!(!bob.s.is_friend(&who).unwrap());
+        assert!(matches!(bob.s.on_link_up(&who), Err(SessionError::NotAFriend)));
         assert!(matches!(
-            bob.s.accept_hello(&nonce, &hello),
+            bob.s.on_stranger_frame(&who, Frame::KeyPackageRequest),
             Err(SessionError::NotAFriend)
         ));
+        assert!(bob.s.requests().is_empty());
         // Eve claims to be alice but can't sign as her.
         let Frame::Hello { signature, .. } = hello else {
             unreachable!()

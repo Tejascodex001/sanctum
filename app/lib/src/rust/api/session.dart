@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `forward_events`, `panic_text`, `poke`, `session`, `set_status`, `with`
+// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `forward_events`, `panic_text`, `poke`, `session`, `set_status`, `to_key`, `with`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Opens the encrypted store at `dir` and restores MLS state. Call once at
@@ -60,6 +60,20 @@ Future<void> friendSetVerified({
 Future<String> friendSafetyNumber({required PlatformInt64 chatId}) =>
     RustLib.instance.api.crateApiSessionFriendSafetyNumber(chatId: chatId);
 
+/// The name your friend requests carry.
+Future<void> profileSetName({required String name}) =>
+    RustLib.instance.api.crateApiSessionProfileSetName(name: name);
+
+Future<List<RequestView>> requestList() =>
+    RustLib.instance.api.crateApiSessionRequestList();
+
+/// Adds them; encryption is set up as soon as their phone is reached.
+Future<PairedView> requestAccept({required List<int> key}) =>
+    RustLib.instance.api.crateApiSessionRequestAccept(key: key);
+
+Future<void> requestDecline({required List<int> key}) =>
+    RustLib.instance.api.crateApiSessionRequestDecline(key: key);
+
 /// Friends, for choosing whom to start a temp chat with.
 Future<List<FriendView>> friendList() =>
     RustLib.instance.api.crateApiSessionFriendList();
@@ -96,8 +110,11 @@ enum AppEventKind {
   /// A temp chat was wiped by the friend, or burned away.
   tempGone,
 
-  /// Network status changed; see `status`.
+  /// Network status changed; see `net`.
   status,
+
+  /// A friend request arrived.
+  request,
 }
 
 class FriendView {
@@ -200,4 +217,43 @@ class PairedView {
           verified == other.verified &&
           sigilKey == other.sigilKey &&
           safetyNumber == other.safetyNumber;
+}
+
+/// Someone who added your code and asks you to add them back.
+class RequestView {
+  /// Their identity key: their own sigil comes from it.
+  final Uint8List key;
+  final String name;
+
+  /// Your chat's sigil, made from both keys.
+  final Uint8List sigilKey;
+  final String safetyNumber;
+  final PlatformInt64 at;
+
+  const RequestView({
+    required this.key,
+    required this.name,
+    required this.sigilKey,
+    required this.safetyNumber,
+    required this.at,
+  });
+
+  @override
+  int get hashCode =>
+      key.hashCode ^
+      name.hashCode ^
+      sigilKey.hashCode ^
+      safetyNumber.hashCode ^
+      at.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RequestView &&
+          runtimeType == other.runtimeType &&
+          key == other.key &&
+          name == other.name &&
+          sigilKey == other.sigilKey &&
+          safetyNumber == other.safetyNumber &&
+          at == other.at;
 }

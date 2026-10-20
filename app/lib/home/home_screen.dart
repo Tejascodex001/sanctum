@@ -30,6 +30,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _chats = <ChatCard>[];
   final _temp = <ChatCard>[];
+  var _requests = <RequestView>[];
   final _pages = PageController();
   final _search = TextEditingController();
   final _sigils = <String, SigilSpec>{};
@@ -47,6 +48,24 @@ class _HomeScreenState extends State<HomeScreen> {
     _events = NetBus.instance.events.listen(_onEvent);
     _loadChats();
     _loadTemp();
+    _loadRequests();
+  }
+
+  Future<void> _loadRequests() async {
+    final requests = await requestList();
+    if (mounted) setState(() => _requests = requests);
+  }
+
+  Future<void> _showRequests() async {
+    HapticFeedback.selectionClick();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => _RequestsSheet(sigil: _sigil),
+    );
+    await _loadRequests();
+    await _loadChats();
   }
 
   @override
@@ -77,6 +96,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _loadTemp();
       case AppEventKind.status:
         if (mounted) setState(() {});
+      case AppEventKind.request:
+        HapticFeedback.mediumImpact();
+        _loadRequests();
     }
   }
 
@@ -98,7 +120,11 @@ class _HomeScreenState extends State<HomeScreen> {
         source: StoreSource(c.id),
         friend: !notes,
         verified: c.verified,
-        note: notes ? 'Only on this device' : 'End-to-end encrypted · over Tor',
+        note: notes
+            ? 'Only on this device'
+            : c.waiting
+                ? 'Request sent · waiting for them to accept'
+                : 'End-to-end encrypted · over Tor',
         updatedAt: DateTime.fromMillisecondsSinceEpoch(c.createdAt * 1000),
       )..pinned = c.pinned;
       await card.refresh();
@@ -378,6 +404,16 @@ class _HomeScreenState extends State<HomeScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
               child: _SearchField(controller: _search),
+            ),
+            AnimatedSize(
+              duration: Motion.medium,
+              curve: Motion.decelerate,
+              child: _requests.isEmpty
+                  ? const SizedBox(width: double.infinity)
+                  : Padding(
+                      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+                      child: _RequestsBanner(requests: _requests, sigil: _sigil, onTap: _showRequests),
+                    ),
             ),
             Expanded(
               child: PageView(
@@ -692,6 +728,204 @@ class _TempPicker extends StatelessWidget {
               subtitle: const Text('Only on this phone', style: AppText.caption),
               onTap: () => Navigator.pop(context, (true, null)),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "Riya wants to add you": friend requests waiting for an answer.
+class _RequestsBanner extends StatelessWidget {
+  const _RequestsBanner({required this.requests, required this.sigil, required this.onTap});
+
+  final List<RequestView> requests;
+  final Future<SigilSpec> Function(List<int>) sigil;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final first = requests.first;
+    final label = requests.length == 1 ? '${first.name} wants to add you' : '${requests.length} friend requests';
+    return Material(
+      color: Palette.surface,
+      borderRadius: BorderRadius.circular(Radii.md),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(Radii.md),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: Space.md, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(Radii.md),
+            border: Border.all(color: const Color(0xFFFFC145).withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 36 + 14.0 * (requests.length.clamp(1, 3) - 1),
+                height: 36,
+                child: Stack(
+                  children: [
+                    for (final (i, r) in requests.take(3).indexed)
+                      Positioned(
+                        left: 14.0 * i,
+                        child: _SigilDot(future: sigil(r.sigilKey), size: 36),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: Space.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, style: AppText.body.copyWith(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+                    const Text('Tap to accept or decline', style: AppText.caption),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: Palette.textFaint),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SigilDot extends StatelessWidget {
+  const _SigilDot({required this.future, required this.size});
+
+  final Future<SigilSpec> future;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: size,
+      child: DecoratedBox(
+        decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: Palette.bg, width: 2)),
+        child: ClipOval(
+          child: FutureBuilder<SigilSpec>(
+            future: future,
+            builder: (context, s) => s.hasData ? SigilView(spec: s.data!) : const ColoredBox(color: Palette.surface),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Each request: who, the sigil your chat will have, and the safety number
+/// to compare. Accepting adds them unverified.
+class _RequestsSheet extends StatefulWidget {
+  const _RequestsSheet({required this.sigil});
+
+  final Future<SigilSpec> Function(List<int>) sigil;
+
+  @override
+  State<_RequestsSheet> createState() => _RequestsSheetState();
+}
+
+class _RequestsSheetState extends State<_RequestsSheet> {
+  List<RequestView>? _requests;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final requests = await requestList();
+    if (!mounted) return;
+    if (requests.isEmpty && _requests != null) {
+      Navigator.pop(context);
+      return;
+    }
+    setState(() => _requests = requests);
+  }
+
+  Future<void> _accept(RequestView r) async {
+    HapticFeedback.heavyImpact();
+    await requestAccept(key: r.key);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('${r.name} added. Compare the safety number on a call to verify them.'),
+      ));
+    }
+    await _load();
+  }
+
+  Future<void> _decline(RequestView r) async {
+    HapticFeedback.selectionClick();
+    await requestDecline(key: r.key);
+    await _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final requests = _requests ?? const [];
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.75),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Space.sm, 0, Space.sm, Space.xs),
+              child: Text('Friend requests', style: AppText.title),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Space.sm, 0, Space.sm, Space.md),
+              child: Text(
+                'They added your code. Accept only people you know: if unsure, '
+                'call them and compare the safety number.',
+                style: AppText.caption,
+              ),
+            ),
+            for (final r in requests)
+              Container(
+                margin: const EdgeInsets.only(bottom: Space.sm),
+                padding: const EdgeInsets.all(Space.md),
+                decoration: BoxDecoration(
+                  color: Palette.surface,
+                  borderRadius: BorderRadius.circular(Radii.md),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        _SigilDot(future: widget.sigil(r.sigilKey), size: 44),
+                        const SizedBox(width: Space.md),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(r.name, style: AppText.body.copyWith(fontWeight: FontWeight.w600)),
+                              Text(r.safetyNumber, style: AppText.mono.copyWith(fontSize: 13, letterSpacing: 1.5)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: Space.md),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(onPressed: () => _decline(r), child: const Text('Decline')),
+                        ),
+                        const SizedBox(width: Space.sm),
+                        Expanded(
+                          child: FilledButton(onPressed: () => _accept(r), child: const Text('Accept')),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),

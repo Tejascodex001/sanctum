@@ -93,6 +93,10 @@ class StoredChat {
   /// safety number compared).
   final bool verified;
 
+  /// Friends' chats: they haven't added us back yet (our friend request
+  /// is still going out).
+  final bool waiting;
+
   const StoredChat({
     required this.id,
     required this.kind,
@@ -101,6 +105,7 @@ class StoredChat {
     required this.pinned,
     required this.createdAt,
     required this.verified,
+    required this.waiting,
   });
 
   @override
@@ -111,7 +116,8 @@ class StoredChat {
       sigilKey.hashCode ^
       pinned.hashCode ^
       createdAt.hashCode ^
-      verified.hashCode;
+      verified.hashCode ^
+      waiting.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -124,5 +130,6 @@ class StoredChat {
           sigilKey == other.sigilKey &&
           pinned == other.pinned &&
           createdAt == other.createdAt &&
-          verified == other.verified;
+          verified == other.verified &&
+          waiting == other.waiting;
 }
