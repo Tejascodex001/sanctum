@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `ensure_node`, `forward_events`, `minute`, `panic_text`, `poke`, `runtime`, `session`, `set_status`, `to_key`, `with`
+// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `ensure_node`, `forward_events`, `minute`, `panic_text`, `poke`, `real_session`, `runtime`, `session`, `set_status`, `to_key`, `with`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Opens the encrypted store at `dir` and restores MLS state. Call once at
@@ -124,6 +124,29 @@ Future<void> requestDecline({required List<int> key}) =>
 /// Friends, for choosing whom to start a temp chat with.
 Future<List<FriendView>> friendList() =>
     RustLib.instance.api.crateApiSessionFriendList();
+
+/// Opens the decoy profile's own database (`decoy.db` in `dir`).
+Future<void> decoyOpen({
+  required List<int> identitySecret,
+  required String dir,
+  required List<int> storeKey,
+}) => RustLib.instance.api.crateApiSessionDecoyOpen(
+  identitySecret: identitySecret,
+  dir: dir,
+  storeKey: storeKey,
+);
+
+/// Shows the decoy profile (or the real one again). Only what the app
+/// shows changes; the network always serves the real profile.
+Future<void> profileUse({required bool decoy}) =>
+    RustLib.instance.api.crateApiSessionProfileUse(decoy: decoy);
+
+Future<bool> profileIsDecoy() =>
+    RustLib.instance.api.crateApiSessionProfileIsDecoy();
+
+/// A slow (Argon2id) hash of an app PIN, for storing and checking it.
+Future<Uint8List> pinHash({required String pin, required List<int> salt}) =>
+    RustLib.instance.api.crateApiSessionPinHash(pin: pin, salt: salt);
 
 class AppEvent {
   final AppEventKind kind;

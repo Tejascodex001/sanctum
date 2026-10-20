@@ -8,6 +8,7 @@ import 'chat/media.dart';
 import 'net/net_bus.dart';
 import 'notify/notifier.dart';
 import 'security/app_lock.dart';
+import 'security/profile.dart';
 import 'sigil/sigil_painter.dart';
 import 'src/rust/api/identity.dart';
 import 'src/rust/api/session.dart';
@@ -41,10 +42,21 @@ Future<void> main() async {
         await NetBus.instance.setNearby(true);
       } catch (_) {}
     }
+    await Profile.prepareDecoy();
     final publicKey = await identityPublicKey(secret: secret);
     final mySigil = await sigilForKey(publicKey: publicKey);
     runApp(SanctumApp(
-      home: HomeScreen(publicKey: publicKey, mySigil: mySigil),
+      // The real profile, or the decoy after the decoy PIN.
+      home: ValueListenableBuilder<bool>(
+        valueListenable: Profile.decoy,
+        builder: (context, decoy, _) => decoy
+            ? HomeScreen(
+                key: const ValueKey('decoy'),
+                publicKey: Profile.decoyPublicKey!,
+                mySigil: Profile.decoySigil!,
+              )
+            : HomeScreen(key: const ValueKey('real'), publicKey: publicKey, mySigil: mySigil),
+      ),
       mySigil: mySigil,
     ));
   } catch (e) {
@@ -63,6 +75,7 @@ class SanctumApp extends StatelessWidget {
     return MaterialApp(
       title: 'Sanctum',
       debugShowCheckedModeBanner: false,
+      navigatorKey: AppLock.navigator,
       theme: sanctumTheme(accent: mySigil.accent.color),
       builder: (context, child) => AppLock(sigil: mySigil, child: child!),
       home: home,

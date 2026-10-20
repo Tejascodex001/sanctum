@@ -143,7 +143,11 @@ Photos, videos and files (`core/src/media.rs`).
   - It destroys the Keystore-held keys first (crypto-shredding, since flash storage can't be reliably overwritten).
   - Then it deletes the database and Tor's files, stops the service, clears notifications and exits. Temp chats die with the process.
 - **Background reliability:** one tap opens the phone maker's own "allow in background" page (Xiaomi Autostart, Oppo/Realme startup manager, Vivo, Samsung battery, Huawei, OnePlus), falling back to the app's settings.
-- Decoy PIN: later.
+- **Sanctum PIN and decoy PIN** (optional): both are stored only as Argon2id hashes (19 MiB, 2 passes). After 5 wrong tries, each further try waits 30 s, doubling.
+  - With a PIN set, the lock screen shows a number pad. Biometrics still open the real profile.
+  - The decoy PIN opens the **decoy profile**: its own identity and database (`decoy.db`), so it looks like a real, quiet Sanctum.
+  - The network keeps serving the real profile in the background. Its notifications are muted until a real unlock.
+  - In the decoy, the settings don't show that a decoy PIN exists.
 - Verification: both people see the same sigil for their chat. If the sigils match, the chat is secure.
 
 ## UI: Sigil design system

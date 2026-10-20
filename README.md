@@ -42,7 +42,7 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Over-the-air updates** | Checked and downloaded through Tor, with changelogs |
 | ✅ | **Media** | Photos, videos and files up to 50 MB, end-to-end encrypted and stored encrypted. Photos are resized and lose hidden metadata like location |
 | ✅ | **Voice notes** | Hold the mic to record, release to send, slide left to cancel. Encrypted like any attachment |
-| ⏳ | Decoy PIN | Opens a harmless, empty-looking Sanctum |
+| ✅ | **Sanctum PIN & decoy PIN** | An optional PIN of its own (fingerprint still works). A decoy PIN opens an empty-looking Sanctum with its own data, while your real chats stay hidden and silent |
 
 ### Milestone v2: more than messages
 ⏳ A Fediverse tab (Pixelfed, PeerTube, Reels-style) · ⏳ plans and date polls · ⏳ shared albums · ⏳ a daily moment · ⏳ on-device AI (catch-up summaries, transcription, search)

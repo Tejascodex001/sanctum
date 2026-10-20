@@ -13,6 +13,10 @@ use tokio::runtime::Runtime;
 use tokio::sync::broadcast;
 
 static SESSION: LazyLock<Mutex<Option<Arc<Mutex<Session>>>>> = LazyLock::new(Default::default);
+/// The decoy profile: its own identity and database, shown after the decoy
+/// PIN. The network keeps serving the real profile meanwhile.
+static DECOY: LazyLock<Mutex<Option<Arc<Mutex<Session>>>>> = LazyLock::new(Default::default);
+static USE_DECOY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static NODE: LazyLock<Mutex<Option<Arc<Node>>>> = LazyLock::new(Default::default);
 /// How friends are reached: directly when nearby, else over Tor once it's up.
 static REACH: LazyLock<Arc<Reach>> = LazyLock::new(Default::default);
@@ -141,7 +145,7 @@ pub fn net_start(
     if matches!(net_status().status, NetStatus::Connecting | NetStatus::Online) {
         return Ok(());
     }
-    let session = session()?;
+    let session = real_session()?;
     // The node runs from the start, so nearby friends work without Tor.
     let node = ensure_node(session);
     set_status(NetStatus::Connecting, 0, "Starting Tor");
@@ -207,7 +211,7 @@ fn ensure_node(session: Arc<Mutex<Session>>) -> Arc<Node> {
 /// Nearby on or off: friends on the same Wi-Fi or hotspot connect directly,
 /// without internet. They see this phone's local network address.
 pub fn nearby_set(enabled: bool) -> anyhow::Result<()> {
-    let session = session()?;
+    let session = real_session()?;
     let node = ensure_node(session.clone());
     let mut slot = REACH.nearby.write().unwrap();
     if enabled && slot.is_none() {
@@ -243,7 +247,9 @@ pub fn bt_my_id() -> anyhow::Result<Vec<u8>> {
 /// A Sanctum phone advertising `id` was seen as device `handle`: if it's a
 /// friend, connect.
 pub fn bt_seen(id: Vec<u8>, handle: u64) -> anyhow::Result<()> {
-    let Some(friend) = with(|s| Ok(s.nearby_friend(&id, minute())?))? else {
+    let real = real_session()?;
+    let friend = real.lock().unwrap().nearby_friend(&id, minute())?;
+    let Some(friend) = friend else {
         return Ok(());
     };
     let Some(bt) = REACH.bluetooth.read().unwrap().clone() else {
@@ -334,6 +340,7 @@ pub fn wipe_everything(paths: Vec<String>) -> anyhow::Result<()> {
         node.shutdown_links();
     }
     SESSION.lock().unwrap().take();
+    DECOY.lock().unwrap().take();
     set_status(NetStatus::Off, 0, "Wiped");
     let mut failed = Vec::new();
     for path in paths {
@@ -538,7 +545,50 @@ pub(crate) fn runtime() -> &'static Runtime {
     &RUNTIME
 }
 
+/// Opens the decoy profile's own database (`decoy.db` in `dir`).
+pub fn decoy_open(identity_secret: Vec<u8>, dir: String, store_key: Vec<u8>) -> anyhow::Result<()> {
+    let secret: [u8; 32] = identity_secret
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("identity secret must be 32 bytes"))?;
+    let key: [u8; 32] = store_key
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("store key must be 32 bytes"))?;
+    let decoy = Session::open(secret, PathBuf::from(&dir).join("decoy.db"), &key)?;
+    *DECOY.lock().unwrap() = Some(Arc::new(Mutex::new(decoy)));
+    Ok(())
+}
+
+/// Shows the decoy profile (or the real one again). Only what the app
+/// shows changes; the network always serves the real profile.
+pub fn profile_use(decoy: bool) {
+    let decoy = decoy && DECOY.lock().unwrap().is_some();
+    USE_DECOY.store(decoy, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn profile_is_decoy() -> bool {
+    USE_DECOY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A slow (Argon2id) hash of an app PIN, for storing and checking it.
+pub fn pin_hash(pin: String, salt: Vec<u8>) -> Vec<u8> {
+    sanctum_core::pin::pin_hash(&pin, &salt).to_vec()
+}
+
+/// The real profile, whatever the app shows: for the network.
+pub(crate) fn real_session() -> anyhow::Result<Arc<Mutex<Session>>> {
+    SESSION
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("session is not open"))
+}
+
 pub(crate) fn session() -> anyhow::Result<Arc<Mutex<Session>>> {
+    if profile_is_decoy() {
+        if let Some(decoy) = DECOY.lock().unwrap().clone() {
+            return Ok(decoy);
+        }
+    }
     SESSION
         .lock()
         .unwrap()

@@ -17,6 +17,7 @@ import '../net/net_bus.dart';
 import '../notify/notifier.dart';
 import '../security/app_lock.dart';
 import '../security/panic.dart';
+import '../security/pin_settings.dart';
 import '../update/release_notes.dart';
 import '../update/updater.dart';
 import '../sigil/sigil_painter.dart';
@@ -604,6 +605,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 textAlign: TextAlign.center,
                 style: AppText.caption,
               ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
+              child: PinSettings(),
             ),
             const Padding(
               padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),

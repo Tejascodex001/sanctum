@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import '../background/background.dart';
 import '../net/net_bus.dart';
+import '../security/profile.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/store.dart';
 import '../src/rust/api/temp_chat.dart';
@@ -86,13 +87,15 @@ class Notifier with WidgetsBindingObserver {
       case AppEventKind.tempGone:
         markRead(tempKey(e.id.toInt()));
       case AppEventKind.request:
-        if (!_foreground) await _notifyRequest();
+        if (!_foreground && !Profile.decoy.value) await _notifyRequest();
       default:
         break;
     }
   }
 
   Future<void> _arrived(String key) async {
+    // The decoy shows: the real profile stays silent.
+    if (Profile.decoy.value) return;
     if (_foreground && viewing == key) return;
     final count = (unread.value[key] ?? 0) + 1;
     unread.value = {...unread.value, key: count};

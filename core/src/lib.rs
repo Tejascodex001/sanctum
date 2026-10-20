@@ -8,6 +8,7 @@ pub mod invite;
 pub mod media;
 pub mod mls;
 pub mod nearby;
+pub mod pin;
 pub mod protocol;
 pub mod session;
 pub mod sigil;
