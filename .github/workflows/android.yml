@@ -29,13 +29,35 @@ jobs:
           flutter-version: "3.47.7"
           channel: stable
 
+      - name: Release signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::No signing key secrets; this APK is signed with a throwaway debug key."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > app/android/release.jks
+          printf 'storeFile=release.jks\nalias=sanctum\npassword=%s\n' "$KEYSTORE_PASSWORD" > app/android/key.properties
+
       - name: Analyze and build
         working-directory: app
         run: |
           flutter pub get
           flutter analyze
           flutter test
-          flutter build apk --release
+          flutter build apk --release --build-number=${{ github.run_number }}
+
+      - name: Verify signature
+        run: |
+          [ -f app/android/key.properties ] || exit 0
+          APKSIGNER=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)apksigner
+          $APKSIGNER verify --print-certs app/build/app/outputs/flutter-apk/app-release.apk | grep -i "SHA-256"
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f app/android/release.jks app/android/key.properties
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
