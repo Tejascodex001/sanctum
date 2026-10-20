@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../deck/chat_card.dart';
+import '../net/net_bus.dart';
 import '../sigil/sigil_painter.dart';
+import '../src/rust/api/session.dart';
 import '../theme/tokens.dart';
 import 'message_source.dart';
 
@@ -28,6 +30,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   late List<ChatMessage> _messages = widget.card.preloaded ?? const [];
   late final int _initialCount = _messages.length;
   Timer? _tick;
+  StreamSubscription<AppEvent>? _events;
   bool _hasText = false;
   late final _wipe = AnimationController(vsync: this, duration: Motion.slow);
 
@@ -39,6 +42,19 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       if (has != _hasText) setState(() => _hasText = has);
     });
     if (widget.card.preloaded == null) _reload();
+    // Friends' messages and delivery receipts arrive live.
+    _events = NetBus.instance.events.listen((e) {
+      if (e.id.toInt() != widget.card.id) return;
+      final temp = widget.card.temp;
+      if (temp && e.kind == AppEventKind.tempGone) {
+        if (!mounted) return;
+        ScaffoldMessenger.maybeOf(context)
+            ?.showSnackBar(const SnackBar(content: Text('This temp chat was wiped.')));
+        widget.close();
+      } else if ((temp && e.kind == AppEventKind.temp) || (!temp && e.kind == AppEventKind.chat)) {
+        _reload();
+      }
+    });
     // Temp messages count down and disappear while the chat is open.
     if (widget.card.temp) {
       _tick = Timer.periodic(const Duration(seconds: 30), (_) => _reload());
@@ -48,6 +64,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   @override
   void dispose() {
     _tick?.cancel();
+    _events?.cancel();
     _input.dispose();
     _wipe.dispose();
     super.dispose();
@@ -142,6 +159,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           message: m,
           accent: accent,
           showTime: !grouped,
+          showTicks: widget.card.friend,
           animate: index >= _initialCount,
         );
       },
@@ -335,12 +353,16 @@ class _Bubble extends StatefulWidget {
     required this.message,
     required this.accent,
     required this.showTime,
+    required this.showTicks,
     required this.animate,
   });
 
   final ChatMessage message;
   final Color accent;
   final bool showTime;
+
+  /// Sent / delivered marks on our messages to friends.
+  final bool showTicks;
   final bool animate;
 
   @override
@@ -393,11 +415,31 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(m.body, style: AppText.body.copyWith(color: fg)),
-          if (widget.showTime) ...[
+          if (widget.showTime || (mine && widget.showTicks)) ...[
             const SizedBox(height: 3),
-            Text(
-              m.expiresAt == null ? _time(m.sentAt) : '${_time(m.sentAt)} · ${_burnsIn(m.expiresAt!)}',
-              style: AppText.micro.copyWith(color: fg.withValues(alpha: 0.6)),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.showTime)
+                  Text(
+                    m.expiresAt == null ? _time(m.sentAt) : '${_time(m.sentAt)} · ${_burnsIn(m.expiresAt!)}',
+                    style: AppText.micro.copyWith(color: fg.withValues(alpha: 0.6)),
+                  ),
+                if (mine && widget.showTicks) ...[
+                  const SizedBox(width: 4),
+                  AnimatedSwitcher(
+                    duration: Motion.medium,
+                    transitionBuilder: (child, a) => ScaleTransition(scale: a, child: child),
+                    child: Icon(
+                      m.delivered ? Icons.done_all_rounded : Icons.done_rounded,
+                      key: ValueKey(m.delivered),
+                      size: 14,
+                      color: fg.withValues(alpha: m.delivered ? 0.9 : 0.5),
+                      semanticLabel: m.delivered ? 'Delivered' : 'Sent',
+                    ),
+                  ),
+                ],
+              ],
             ),
           ],
         ],

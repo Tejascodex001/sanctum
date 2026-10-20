@@ -9,6 +9,7 @@ class ChatCard {
     required this.sigil,
     required this.source,
     this.temp = false,
+    this.friend = false,
     this.note,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
@@ -18,6 +19,9 @@ class ChatCard {
   final SigilSpec sigil;
   final MessageSource source;
   final bool temp;
+
+  /// With a friend (messages travel over Tor and get delivery ticks).
+  final bool friend;
 
   /// Shown under the title inside the chat.
   final String? note;

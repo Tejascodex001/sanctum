@@ -12,6 +12,9 @@ anyhow = "1"
 flutter_rust_bridge = "=2.12.0"
 rand = "0.8"
 sanctum-core = { path = "../../core" }
+sanctum-net = { path = "../../net" }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+blake3 = "1"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

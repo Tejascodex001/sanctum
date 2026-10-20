@@ -1,12 +1,21 @@
-//! Temp chats live only in this process's memory: never on disk, gone after
-//! 24 hours, on wipe, or when the app is killed.
+//! Temp chats: in memory only (never on disk, on either phone), gone 24
+//! hours after each message, on wipe, or when the app is closed. With a
+//! friend they travel over Tor and appear on both phones.
 
-use sanctum_core::temp_chat::{TempChats, TempMessage};
-use sanctum_core::transport::TransportKind;
-use std::sync::{LazyLock, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use super::session::{poke, with};
 
-static TEMP: LazyLock<Mutex<TempChats>> = LazyLock::new(Default::default);
+pub struct TempChatView {
+    pub id: i64,
+    pub title: String,
+    /// The friend's chat id, or none for a temp chat with yourself.
+    pub friend_chat_id: Option<i64>,
+    /// Both phones derive the same sigil from this.
+    pub sigil_key: Vec<u8>,
+    pub last_body: Option<String>,
+    pub last_at: Option<i64>,
+    /// When the oldest message burns, if any.
+    pub next_burn: Option<i64>,
+}
 
 pub struct TempMessageView {
     pub from_me: bool,
@@ -14,41 +23,55 @@ pub struct TempMessageView {
     /// Unix seconds.
     pub sent_at: i64,
     pub expires_at: i64,
+    pub delivered: bool,
 }
 
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+/// Starts a temp chat with a friend (their chat id) or with yourself.
+pub fn temp_new(friend_chat_id: Option<i64>) -> anyhow::Result<i64> {
+    let (id, peer) = with(|s| {
+        let id = s.temp_new(friend_chat_id)?;
+        Ok((id, s.temp.get(id).and_then(|c| c.peer)))
+    })?;
+    poke(peer);
+    Ok(id as i64)
 }
 
-fn with<T>(f: impl FnOnce(&mut TempChats) -> T) -> T {
-    let mut temp = TEMP.lock().unwrap_or_else(|e| e.into_inner());
-    temp.purge_expired(now());
-    f(&mut temp)
+pub fn temp_list() -> anyhow::Result<Vec<TempChatView>> {
+    with(|s| {
+        s.purge();
+        let friends = s.friends()?;
+        Ok(s.temp
+            .all()
+            .iter()
+            .map(|c| TempChatView {
+                id: c.id as i64,
+                title: c.title.clone(),
+                friend_chat_id: c.peer.and_then(|p| {
+                    friends
+                        .iter()
+                        .find(|(_, f)| f.identity == p)
+                        .map(|(id, _)| *id)
+                }),
+                sigil_key: blake3::derive_key("sanctum temp sigil v1", &c.remote).to_vec(),
+                last_body: c.messages.last().map(|m| m.body.clone()),
+                last_at: c.messages.last().map(|m| m.sent_at as i64),
+                next_burn: c.messages.first().map(|m| m.expires_at() as i64),
+            })
+            .collect())
+    })
 }
 
-pub fn temp_open(id: i64) {
-    with(|t| {
-        t.open(id as u64, TransportKind::Internet);
-    });
+pub fn temp_send(id: i64, body: String) -> anyhow::Result<()> {
+    let peer = with(|s| Ok(s.temp_send(id as u64, &body)?))?;
+    poke(peer);
+    Ok(())
 }
 
-pub fn temp_send(id: i64, body: String) {
-    with(|t| {
-        t.open(id as u64, TransportKind::Internet)
-            .messages
-            .push(TempMessage {
-                from_me: true,
-                body,
-                sent_at: now(),
-            });
-    });
-}
-
-pub fn temp_messages(id: i64) -> Vec<TempMessageView> {
-    with(|t| {
-        t.get(id as u64)
+pub fn temp_messages(id: i64) -> anyhow::Result<Vec<TempMessageView>> {
+    with(|s| {
+        s.purge();
+        Ok(s.temp
+            .get(id as u64)
             .map(|c| {
                 c.messages
                     .iter()
@@ -57,22 +80,25 @@ pub fn temp_messages(id: i64) -> Vec<TempMessageView> {
                         body: m.body.clone(),
                         sent_at: m.sent_at as i64,
                         expires_at: m.expires_at() as i64,
+                        delivered: m.delivered,
                     })
                     .collect()
             })
-            .unwrap_or_default()
+            .unwrap_or_default())
     })
 }
 
-/// Live temp chat ids, after purging anything expired.
-pub fn temp_chat_ids() -> Vec<i64> {
-    with(|t| t.ids().into_iter().map(|id| id as i64).collect())
+/// Wipes the temp chat here and on the friend's phone.
+pub fn temp_wipe(id: i64) -> anyhow::Result<()> {
+    let peer = with(|s| Ok(s.temp_wipe(id as u64)))?;
+    poke(peer);
+    Ok(())
 }
 
-pub fn temp_wipe(id: i64) {
-    with(|t| t.wipe(id as u64));
-}
-
-pub fn temp_wipe_all() {
-    with(|t| t.wipe_all());
+pub fn temp_wipe_all() -> anyhow::Result<()> {
+    let peers = with(|s| Ok(s.temp_wipe_all()))?;
+    for peer in peers {
+        poke(Some(peer));
+    }
+    Ok(())
 }

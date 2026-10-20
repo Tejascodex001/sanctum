@@ -1,0 +1,24 @@
+[package]
+name = "sanctum-net"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Sanctum's network engine: connections between friends over Tor"
+
+[dependencies]
+anyhow = "1"
+arti-client = { version = "0.47", default-features = false, features = ["tokio", "rustls", "compression", "onion-service-service", "onion-service-client", "experimental-api", "static-sqlite"] }
+async-trait = "0.1"
+futures = "0.3"
+sanctum-core = { path = "../core" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+tor-hscrypto = "0.47"
+tor-hsservice = "0.47"
+tor-llcrypto = "0.47"
+tor-cell = "0.47"
+tor-rtcompat = "0.47"
+safelog = "0.10"
+
+[dev-dependencies]
+rand = "0.8"
+tempfile = "3"

@@ -6,8 +6,8 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `lock`, `with`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `from`
+// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `forward_events`, `poke`, `session`, `set_status`, `with`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Opens the encrypted store at `dir` and restores MLS state. Call once at
 /// startup, before anything else that touches chats.
@@ -21,6 +21,24 @@ Future<void> sessionOpen({
   storeKey: storeKey,
 );
 
+/// Streams [`AppEvent`]s to the UI for as long as the app runs.
+Stream<AppEvent> appEvents() => RustLib.instance.api.crateApiSessionAppEvents();
+
+Future<NetStatus> netStatus() =>
+    RustLib.instance.api.crateApiSessionNetStatus();
+
+/// Connects to Tor and starts this phone's onion service, in the
+/// background. Progress arrives as `Status` events.
+Future<void> netStart({
+  required String stateDir,
+  required String cacheDir,
+  required List<int> identitySecret,
+}) => RustLib.instance.api.crateApiSessionNetStart(
+  stateDir: stateDir,
+  cacheDir: cacheDir,
+  identitySecret: identitySecret,
+);
+
 /// Your friend code, to show as a QR or share.
 Future<String> myCode({required String myName}) =>
     RustLib.instance.api.crateApiSessionMyCode(myName: myName);
@@ -28,6 +46,72 @@ Future<String> myCode({required String myName}) =>
 /// Adds the friend whose code was scanned, pasted or typed.
 Future<PairedView> friendAdd({required String code}) =>
     RustLib.instance.api.crateApiSessionFriendAdd(code: code);
+
+/// Friends, for choosing whom to start a temp chat with.
+Future<List<FriendView>> friendList() =>
+    RustLib.instance.api.crateApiSessionFriendList();
+
+class AppEvent {
+  final AppEventKind kind;
+
+  /// The chat or temp chat concerned.
+  final PlatformInt64 id;
+  final NetStatus status;
+
+  const AppEvent({required this.kind, required this.id, required this.status});
+
+  @override
+  int get hashCode => kind.hashCode ^ id.hashCode ^ status.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AppEvent &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          id == other.id &&
+          status == other.status;
+}
+
+enum AppEventKind {
+  /// A chat got a message or a delivery receipt.
+  chat,
+
+  /// A temp chat appeared or changed.
+  temp,
+
+  /// A temp chat was wiped by the friend, or burned away.
+  tempGone,
+
+  /// Network status changed; see `status`.
+  status,
+}
+
+class FriendView {
+  final PlatformInt64 chatId;
+  final String name;
+  final Uint8List sigilKey;
+
+  const FriendView({
+    required this.chatId,
+    required this.name,
+    required this.sigilKey,
+  });
+
+  @override
+  int get hashCode => chatId.hashCode ^ name.hashCode ^ sigilKey.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FriendView &&
+          runtimeType == other.runtimeType &&
+          chatId == other.chatId &&
+          name == other.name &&
+          sigilKey == other.sigilKey;
+}
+
+enum NetStatus { off, connecting, online, failed }
 
 class PairedView {
   final PlatformInt64 chatId;

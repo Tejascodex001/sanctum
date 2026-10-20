@@ -7,12 +7,16 @@ class ChatMessage {
     required this.fromMe,
     required this.sentAt,
     this.expiresAt,
+    this.delivered = false,
   });
 
   final String body;
   final bool fromMe;
   final DateTime sentAt;
   final DateTime? expiresAt;
+
+  /// Our messages: the friend's phone has it.
+  final bool delivered;
 }
 
 DateTime _fromUnix(int s) => DateTime.fromMillisecondsSinceEpoch(s * 1000);
@@ -32,14 +36,15 @@ class StoreSource implements MessageSource {
   @override
   Future<List<ChatMessage>> load({int? limit}) async => [
         for (final m in await messageList(chatId: chatId, limit: limit))
-          ChatMessage(body: m.body, fromMe: m.fromMe, sentAt: _fromUnix(m.sentAt)),
+          ChatMessage(body: m.body, fromMe: m.fromMe, sentAt: _fromUnix(m.sentAt), delivered: m.delivered),
       ];
 
   @override
   Future<void> send(String body) => messageSend(chatId: chatId, body: body);
 }
 
-/// A temp chat held in Rust memory; messages burn after 24 hours.
+/// A temp chat held in Rust memory (on both phones, never on disk);
+/// messages burn after 24 hours.
 class TempSource implements MessageSource {
   TempSource(this.id);
 
@@ -54,6 +59,7 @@ class TempSource implements MessageSource {
           fromMe: m.fromMe,
           sentAt: _fromUnix(m.sentAt),
           expiresAt: _fromUnix(m.expiresAt),
+          delivered: m.delivered,
         ),
     ];
     return limit == null || all.length <= limit ? all : all.sublist(all.length - limit);

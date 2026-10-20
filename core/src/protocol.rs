@@ -94,20 +94,24 @@ pub fn encode_frame(frame: &Frame) -> Vec<u8> {
     out
 }
 
+/// The peer sent something that isn't a valid frame; drop the connection.
+#[derive(Debug, thiserror::Error)]
+#[error("malformed frame")]
+pub struct BadFrame;
+
 /// Takes one complete frame off the front of `buf`, if there is one.
-/// `Err` means the peer is sending garbage; drop the connection.
-pub fn take_frame(buf: &mut Vec<u8>) -> Result<Option<Frame>, ()> {
+pub fn take_frame(buf: &mut Vec<u8>) -> Result<Option<Frame>, BadFrame> {
     if buf.len() < 4 {
         return Ok(None);
     }
     let len = u32::from_be_bytes(buf[..4].try_into().unwrap()) as usize;
     if len > MAX_FRAME {
-        return Err(());
+        return Err(BadFrame);
     }
     if buf.len() < 4 + len {
         return Ok(None);
     }
-    let frame = postcard::from_bytes(&buf[4..4 + len]).map_err(|_| ())?;
+    let frame = postcard::from_bytes(&buf[4..4 + len]).map_err(|_| BadFrame)?;
     buf.drain(..4 + len);
     Ok(Some(frame))
 }

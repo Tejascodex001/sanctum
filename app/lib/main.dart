@@ -3,6 +3,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'home/home_screen.dart';
 import 'identity/secrets.dart';
+import 'net/net_bus.dart';
 import 'security/app_lock.dart';
 import 'sigil/sigil_painter.dart';
 import 'src/rust/api/identity.dart';
@@ -20,6 +21,13 @@ Future<void> main() async {
       identitySecret: secret,
       dir: (await getApplicationSupportDirectory()).path,
       storeKey: await loadOrCreateStoreKey(),
+    );
+    NetBus.instance.start();
+    // Tor starts in the background; chats work offline meanwhile.
+    await netStart(
+      stateDir: '${(await getApplicationSupportDirectory()).path}/tor-state',
+      cacheDir: '${(await getApplicationCacheDirectory()).path}/tor-cache',
+      identitySecret: secret,
     );
     final publicKey = await identityPublicKey(secret: secret);
     final mySigil = await sigilForKey(publicKey: publicKey);

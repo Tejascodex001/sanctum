@@ -26,10 +26,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AnyhowException dco_decode_AnyhowException(dynamic raw);
 
   @protected
+  RustStreamSink<AppEvent> dco_decode_StreamSink_app_event_Sse(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
 
   @protected
+  AppEvent dco_decode_app_event(dynamic raw);
+
+  @protected
+  AppEventKind dco_decode_app_event_kind(dynamic raw);
+
+  @protected
   bool dco_decode_bool(dynamic raw);
+
+  @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
 
   @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
@@ -41,6 +53,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double dco_decode_f_64(dynamic raw);
 
   @protected
+  FriendView dco_decode_friend_view(dynamic raw);
+
+  @protected
   HslColor dco_decode_hsl_color(dynamic raw);
 
   @protected
@@ -50,13 +65,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 dco_decode_i_64(dynamic raw);
 
   @protected
+  List<FriendView> dco_decode_list_friend_view(dynamic raw);
+
+  @protected
   List<HslColor> dco_decode_list_hsl_color(dynamic raw);
 
   @protected
   List<MessageView> dco_decode_list_message_view(dynamic raw);
-
-  @protected
-  Int64List dco_decode_list_prim_i_64_strict(dynamic raw);
 
   @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
@@ -68,10 +83,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<StoredChat> dco_decode_list_stored_chat(dynamic raw);
 
   @protected
+  List<TempChatView> dco_decode_list_temp_chat_view(dynamic raw);
+
+  @protected
   List<TempMessageView> dco_decode_list_temp_message_view(dynamic raw);
 
   @protected
   MessageView dco_decode_message_view(dynamic raw);
+
+  @protected
+  NetStatus dco_decode_net_status(dynamic raw);
+
+  @protected
+  String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
 
   @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
@@ -89,6 +116,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   StoredChat dco_decode_stored_chat(dynamic raw);
 
   @protected
+  TempChatView dco_decode_temp_chat_view(dynamic raw);
+
+  @protected
   TempMessageView dco_decode_temp_message_view(dynamic raw);
 
   @protected
@@ -104,10 +134,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
 
   @protected
+  RustStreamSink<AppEvent> sse_decode_StreamSink_app_event_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
 
   @protected
+  AppEvent sse_decode_app_event(SseDeserializer deserializer);
+
+  @protected
+  AppEventKind sse_decode_app_event_kind(SseDeserializer deserializer);
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
@@ -119,6 +163,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
+  FriendView sse_decode_friend_view(SseDeserializer deserializer);
+
+  @protected
   HslColor sse_decode_hsl_color(SseDeserializer deserializer);
 
   @protected
@@ -128,13 +175,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PlatformInt64 sse_decode_i_64(SseDeserializer deserializer);
 
   @protected
+  List<FriendView> sse_decode_list_friend_view(SseDeserializer deserializer);
+
+  @protected
   List<HslColor> sse_decode_list_hsl_color(SseDeserializer deserializer);
 
   @protected
   List<MessageView> sse_decode_list_message_view(SseDeserializer deserializer);
-
-  @protected
-  Int64List sse_decode_list_prim_i_64_strict(SseDeserializer deserializer);
 
   @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
@@ -146,12 +193,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<StoredChat> sse_decode_list_stored_chat(SseDeserializer deserializer);
 
   @protected
+  List<TempChatView> sse_decode_list_temp_chat_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<TempMessageView> sse_decode_list_temp_message_view(
     SseDeserializer deserializer,
   );
 
   @protected
   MessageView sse_decode_message_view(SseDeserializer deserializer);
+
+  @protected
+  NetStatus sse_decode_net_status(SseDeserializer deserializer);
+
+  @protected
+  String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
@@ -167,6 +228,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   StoredChat sse_decode_stored_chat(SseDeserializer deserializer);
+
+  @protected
+  TempChatView sse_decode_temp_chat_view(SseDeserializer deserializer);
 
   @protected
   TempMessageView sse_decode_temp_message_view(SseDeserializer deserializer);
@@ -187,10 +251,28 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_StreamSink_app_event_Sse(
+    RustStreamSink<AppEvent> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer);
 
   @protected
+  void sse_encode_app_event(AppEvent self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_app_event_kind(AppEventKind self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_i_64(
+    PlatformInt64 self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
@@ -202,6 +284,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
+  void sse_encode_friend_view(FriendView self, SseSerializer serializer);
+
+  @protected
   void sse_encode_hsl_color(HslColor self, SseSerializer serializer);
 
   @protected
@@ -211,17 +296,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_friend_view(
+    List<FriendView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_hsl_color(List<HslColor> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_message_view(
     List<MessageView> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_prim_i_64_strict(
-    Int64List self,
     SseSerializer serializer,
   );
 
@@ -241,6 +326,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_temp_chat_view(
+    List<TempChatView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_temp_message_view(
     List<TempMessageView> self,
     SseSerializer serializer,
@@ -248,6 +339,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_message_view(MessageView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_net_status(NetStatus self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_i_64(
+    PlatformInt64? self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
@@ -263,6 +366,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_stored_chat(StoredChat self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_temp_chat_view(TempChatView self, SseSerializer serializer);
 
   @protected
   void sse_encode_temp_message_view(

@@ -31,6 +31,8 @@ Future<void> chatSetPinned({required PlatformInt64 id, required bool pinned}) =>
 Future<void> chatDelete({required PlatformInt64 id}) =>
     RustLib.instance.api.crateApiStoreChatDelete(id: id);
 
+/// Saves a message and sends it to the friend (over Tor) if this is a
+/// friend's chat.
 Future<void> messageSend({
   required PlatformInt64 chatId,
   required String body,
@@ -50,14 +52,19 @@ class MessageView {
   final String body;
   final PlatformInt64 sentAt;
 
+  /// Our messages: the friend's phone has it.
+  final bool delivered;
+
   const MessageView({
     required this.fromMe,
     required this.body,
     required this.sentAt,
+    required this.delivered,
   });
 
   @override
-  int get hashCode => fromMe.hashCode ^ body.hashCode ^ sentAt.hashCode;
+  int get hashCode =>
+      fromMe.hashCode ^ body.hashCode ^ sentAt.hashCode ^ delivered.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -66,7 +73,8 @@ class MessageView {
           runtimeType == other.runtimeType &&
           fromMe == other.fromMe &&
           body == other.body &&
-          sentAt == other.sentAt;
+          sentAt == other.sentAt &&
+          delivered == other.delivered;
 }
 
 class StoredChat {

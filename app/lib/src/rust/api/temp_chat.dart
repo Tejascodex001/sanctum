@@ -6,10 +6,12 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `now`, `with`
+/// Starts a temp chat with a friend (their chat id) or with yourself.
+Future<PlatformInt64> tempNew({PlatformInt64? friendChatId}) =>
+    RustLib.instance.api.crateApiTempChatTempNew(friendChatId: friendChatId);
 
-Future<void> tempOpen({required PlatformInt64 id}) =>
-    RustLib.instance.api.crateApiTempChatTempOpen(id: id);
+Future<List<TempChatView>> tempList() =>
+    RustLib.instance.api.crateApiTempChatTempList();
 
 Future<void> tempSend({required PlatformInt64 id, required String body}) =>
     RustLib.instance.api.crateApiTempChatTempSend(id: id, body: body);
@@ -17,15 +19,61 @@ Future<void> tempSend({required PlatformInt64 id, required String body}) =>
 Future<List<TempMessageView>> tempMessages({required PlatformInt64 id}) =>
     RustLib.instance.api.crateApiTempChatTempMessages(id: id);
 
-/// Live temp chat ids, after purging anything expired.
-Future<Int64List> tempChatIds() =>
-    RustLib.instance.api.crateApiTempChatTempChatIds();
-
+/// Wipes the temp chat here and on the friend's phone.
 Future<void> tempWipe({required PlatformInt64 id}) =>
     RustLib.instance.api.crateApiTempChatTempWipe(id: id);
 
 Future<void> tempWipeAll() =>
     RustLib.instance.api.crateApiTempChatTempWipeAll();
+
+class TempChatView {
+  final PlatformInt64 id;
+  final String title;
+
+  /// The friend's chat id, or none for a temp chat with yourself.
+  final PlatformInt64? friendChatId;
+
+  /// Both phones derive the same sigil from this.
+  final Uint8List sigilKey;
+  final String? lastBody;
+  final PlatformInt64? lastAt;
+
+  /// When the oldest message burns, if any.
+  final PlatformInt64? nextBurn;
+
+  const TempChatView({
+    required this.id,
+    required this.title,
+    this.friendChatId,
+    required this.sigilKey,
+    this.lastBody,
+    this.lastAt,
+    this.nextBurn,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      title.hashCode ^
+      friendChatId.hashCode ^
+      sigilKey.hashCode ^
+      lastBody.hashCode ^
+      lastAt.hashCode ^
+      nextBurn.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TempChatView &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          title == other.title &&
+          friendChatId == other.friendChatId &&
+          sigilKey == other.sigilKey &&
+          lastBody == other.lastBody &&
+          lastAt == other.lastAt &&
+          nextBurn == other.nextBurn;
+}
 
 class TempMessageView {
   final bool fromMe;
@@ -34,17 +82,23 @@ class TempMessageView {
   /// Unix seconds.
   final PlatformInt64 sentAt;
   final PlatformInt64 expiresAt;
+  final bool delivered;
 
   const TempMessageView({
     required this.fromMe,
     required this.body,
     required this.sentAt,
     required this.expiresAt,
+    required this.delivered,
   });
 
   @override
   int get hashCode =>
-      fromMe.hashCode ^ body.hashCode ^ sentAt.hashCode ^ expiresAt.hashCode;
+      fromMe.hashCode ^
+      body.hashCode ^
+      sentAt.hashCode ^
+      expiresAt.hashCode ^
+      delivered.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -54,5 +108,6 @@ class TempMessageView {
           fromMe == other.fromMe &&
           body == other.body &&
           sentAt == other.sentAt &&
-          expiresAt == other.expiresAt;
+          expiresAt == other.expiresAt &&
+          delivered == other.delivered;
 }

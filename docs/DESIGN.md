@@ -23,6 +23,14 @@ Rust core (sanctum-core)
                  Nearby: Wi-Fi Direct + Bluetooth LE (temp chats)        [todo]
 ```
 
+### Talking to friends (implemented)
+- `sanctum-net` runs connections over any transport: **Tor** (Arti) in the app, loopback TCP in tests. Every phone is an onion service whose key is its identity key; `onion_address(key)` is computed locally (checked against Arti).
+- **Handshake:** the reached phone sends a random challenge; the connecting phone signs it together with the reached phone's key. Tor already authenticates the reached side (its address is its key). Strangers are cut off.
+- **First contact** sets up the pair's MLS group automatically (the smaller key sends a key-package request and the welcome). Messages written before that wait in the outbox.
+- **Outbox:** sealed on disk, resent on every connection and every 30 s until acknowledged; receivers recognise resends after a lost ack. Acks mark messages delivered (✓ sent, ✓✓ delivered).
+- **Temp chats with friends:** opened, written and wiped through the friend's MLS group; held only in memory on both phones; a wipe wipes both. Both phones derive the temp chat's sigil from its shared id.
+- The session engine is I/O-free and tested by passing frames between two phones; the network engine is tested over real loopback connections.
+
 ### Delivery without a server
 - Each phone runs its own Tor onion service; its onion address is derived from its identity key.
 - A foreground service keeps it reachable (no Google push, so Google never sees activity).

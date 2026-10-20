@@ -1,7 +1,7 @@
 //! Persistent chats, encrypted at rest. See `sanctum_core::store`.
 
 use super::session;
-use sanctum_core::store::{ChatKind, ChatMeta, Store, StoredMessage};
+use sanctum_core::store::{ChatKind, ChatMeta, Store};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub enum ChatKindView {
@@ -23,6 +23,8 @@ pub struct MessageView {
     pub from_me: bool,
     pub body: String,
     pub sent_at: i64,
+    /// Our messages: the friend's phone has it.
+    pub delivered: bool,
 }
 
 /// A fresh 32-byte storage key; Dart keeps it in Keystore-backed storage.
@@ -85,18 +87,12 @@ pub fn chat_delete(id: i64) -> anyhow::Result<()> {
     with(|s| Ok(s.delete_chat(id)?))
 }
 
+/// Saves a message and sends it to the friend (over Tor) if this is a
+/// friend's chat.
 pub fn message_send(chat_id: i64, body: String) -> anyhow::Result<()> {
-    with(|s| {
-        s.add_message(
-            chat_id,
-            &StoredMessage {
-                from_me: true,
-                body,
-                sent_at: now(),
-            },
-        )?;
-        Ok(())
-    })
+    let peer = session::with(|s| Ok(s.send_text(chat_id, &body)?))?;
+    session::poke(peer);
+    Ok(())
 }
 
 /// Messages in order; `limit` keeps only the newest.
@@ -108,6 +104,7 @@ pub fn message_list(chat_id: i64, limit: Option<u32>) -> anyhow::Result<Vec<Mess
                 from_me: m.from_me,
                 body: m.body,
                 sent_at: m.sent_at as i64,
+                delivered: m.delivered,
             })
             .collect())
     })

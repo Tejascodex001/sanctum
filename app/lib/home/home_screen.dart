@@ -8,13 +8,14 @@ import '../chat/message_source.dart';
 import '../deck/chat_card.dart';
 import '../deck/chat_stack.dart';
 import '../friends/add_friend_screen.dart';
+import '../net/net_bus.dart';
 import '../sigil/sigil_painter.dart';
+import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
 import '../src/rust/api/store.dart';
 import '../src/rust/api/temp_chat.dart';
 import '../theme/tokens.dart';
 
-const _tempNames = ['Ember', 'Spark', 'Flare', 'Cinder', 'Ash', 'Blaze', 'Flicker', 'Glow'];
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.publicKey, required this.mySigil});
@@ -31,17 +32,52 @@ class _HomeScreenState extends State<HomeScreen> {
   final _temp = <ChatCard>[];
   final _pages = PageController();
   final _search = TextEditingController();
+  final _sigils = <String, SigilSpec>{};
   double _page = 0;
-  int _tempCount = 0;
   Timer? _purge;
+  StreamSubscription<AppEvent>? _events;
 
   @override
   void initState() {
     super.initState();
     _pages.addListener(() => setState(() => _page = _pages.page ?? 0));
     _search.addListener(() => setState(() {}));
-    _purge = Timer.periodic(const Duration(minutes: 1), (_) => _syncTemp());
+    // Temp messages burn on their own; refresh the countdowns.
+    _purge = Timer.periodic(const Duration(minutes: 1), (_) => _loadTemp());
+    _events = NetBus.instance.events.listen(_onEvent);
     _loadChats();
+    _loadTemp();
+  }
+
+  @override
+  void dispose() {
+    _purge?.cancel();
+    _events?.cancel();
+    _pages.dispose();
+    _search.dispose();
+    super.dispose();
+  }
+
+  Future<SigilSpec> _sigil(List<int> key) async =>
+      _sigils[key.join(',')] ??= await sigilForKey(publicKey: key);
+
+  void _onEvent(AppEvent e) {
+    switch (e.kind) {
+      case AppEventKind.chat:
+        final card = _chats.where((c) => c.id == e.id.toInt()).firstOrNull;
+        if (card == null) {
+          _loadChats();
+        } else {
+          card.refresh().then((_) {
+            if (mounted) setState(() {});
+          });
+        }
+      case AppEventKind.temp:
+      case AppEventKind.tempGone:
+        _loadTemp();
+      case AppEventKind.status:
+        if (mounted) setState(() {});
+    }
   }
 
   /// Loads persistent chats from the encrypted store, creating "Notes to
@@ -54,14 +90,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final cards = <ChatCard>[];
     for (final c in stored) {
+      final notes = c.kind == ChatKindView.notes;
       final card = ChatCard(
         id: c.id,
         title: c.title,
-        sigil: await sigilForKey(publicKey: c.sigilKey),
+        sigil: await _sigil(c.sigilKey),
         source: StoreSource(c.id),
-        note: c.kind == ChatKindView.notes
-            ? 'Only on this device'
-            : 'End-to-end encrypted · delivery arrives with Tor',
+        friend: !notes,
+        note: notes ? 'Only on this device' : 'End-to-end encrypted · over Tor',
         updatedAt: DateTime.fromMillisecondsSinceEpoch(c.createdAt * 1000),
       )..pinned = c.pinned;
       await card.refresh();
@@ -70,44 +106,51 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => _chats..clear()..addAll(cards));
   }
 
-  @override
-  void dispose() {
-    _purge?.cancel();
-    _pages.dispose();
-    _search.dispose();
-    super.dispose();
+  /// Temp chats live in Rust memory; friends' new temp chats show up here
+  /// as they arrive.
+  Future<void> _loadTemp() async {
+    final views = await tempList();
+    final pinned = {for (final c in _temp) if (c.pinned) c.id};
+    final cards = <ChatCard>[];
+    for (final v in views) {
+      final id = v.id.toInt();
+      final card = ChatCard(
+        id: id,
+        title: v.title,
+        sigil: await _sigil(v.sigilKey),
+        source: TempSource(id),
+        temp: true,
+        friend: v.friendChatId != null,
+        note: v.friendChatId != null ? 'Temp · burns after 24h · on both phones' : 'Temp · only on this phone',
+        updatedAt: v.lastAt == null ? null : DateTime.fromMillisecondsSinceEpoch(v.lastAt!.toInt() * 1000),
+      )
+        ..pinned = pinned.contains(id)
+        ..preview = v.lastBody
+        ..nextBurn = v.nextBurn == null ? null : DateTime.fromMillisecondsSinceEpoch(v.nextBurn!.toInt() * 1000);
+      cards.add(card);
+    }
+    if (mounted) setState(() => _temp..clear()..addAll(cards));
   }
 
   bool get _onTemp => _page > 0.5;
 
-  /// Drops cards whose temp chat Rust has burned and refreshes countdowns.
-  Future<void> _syncTemp() async {
-    final live = {for (final id in await tempChatIds()) id.toInt()};
-    for (final c in _temp) {
-      if (live.contains(c.id)) await c.refresh();
-    }
-    if (!mounted) return;
-    setState(() => _temp.removeWhere((c) => !live.contains(c.id)));
-  }
-
   Future<void> _newTemp() async {
-    HapticFeedback.mediumImpact();
-    final id = DateTime.now().microsecondsSinceEpoch;
-    await tempOpen(id: id);
-    final card = ChatCard(
-      id: id,
-      title: '${_tempNames[_tempCount % _tempNames.length]} ${_tempCount ~/ _tempNames.length + 1}',
-      sigil: await sigilRandom(),
-      source: TempSource(id),
-      temp: true,
+    HapticFeedback.selectionClick();
+    final friends = await friendList();
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<(bool, int?)>(
+      context: context,
+      builder: (context) => _TempPicker(friends: friends, sigil: _sigil),
     );
-    _tempCount++;
-    setState(() => _temp.add(card));
+    if (picked == null) return;
+    HapticFeedback.mediumImpact();
+    await tempNew(friendChatId: picked.$2);
+    await _loadTemp();
   }
 
   Future<void> _wipe(ChatCard card) async {
     await tempWipe(id: card.id);
-    if (mounted) setState(() => _temp.remove(card));
+    await _loadTemp();
   }
 
   Future<void> _wipeAll() async {
@@ -115,12 +158,12 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Wipe all temp chats?'),
-        content: const Text('They are erased from memory immediately.'),
+        content: const Text('They are erased here, and on your friends\' phones as soon as they can be reached.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Wipe all', style: TextStyle(color: Colors.redAccent)),
+            child: const Text('Wipe all', style: TextStyle(color: Palette.danger)),
           ),
         ],
       ),
@@ -128,7 +171,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (ok != true) return;
     HapticFeedback.heavyImpact();
     await tempWipeAll();
-    setState(_temp.clear);
+    await _loadTemp();
   }
 
   void _actions(ChatCard card) {
@@ -172,11 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
   Future<void> _closed(ChatCard card) async {
-    if (card.temp && !(await tempChatIds()).map((id) => id.toInt()).contains(card.id)) {
-      // Wiped from inside the chat.
-      if (mounted) setState(() => _temp.remove(card));
-      return;
-    }
+    if (card.temp) return _loadTemp();
     await card.refresh();
     if (mounted) setState(() {});
   }
@@ -244,6 +283,8 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Row(
                 children: [
                   const Text('Sanctum', style: AppText.display),
+                  const SizedBox(width: Space.md),
+                  const _NetPill(),
                   const Spacer(),
                   AnimatedSwitcher(
                     duration: Motion.fast,
@@ -308,8 +349,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     onDismiss: _wipe,
                     empty: const _Empty(
                       text: 'No temp chats',
-                      detail: 'Temp chats live only in memory. Every message burns 24 hours '
-                          'after it is sent, and you can wipe them any time.',
+                      detail: 'Start one with a friend. Temp chats live only in memory on both '
+                          'phones, every message burns 24 hours after it is sent, and either of '
+                          'you can wipe it for both at any time.',
                     ),
                   ),
                 ],
@@ -444,6 +486,99 @@ class _Empty extends StatelessWidget {
               const SizedBox(height: 10),
               Text(detail!, textAlign: TextAlign.center, style: AppText.caption),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Tor connection status, beside the wordmark.
+class _NetPill extends StatelessWidget {
+  const _NetPill();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<NetStatus>(
+      valueListenable: NetBus.instance.status,
+      builder: (context, status, _) {
+        final (color, label) = switch (status) {
+          NetStatus.online => (const Color(0xFF3DDC97), 'Tor'),
+          NetStatus.connecting => (const Color(0xFFFFC145), 'Connecting'),
+          NetStatus.failed => (Palette.danger, 'Offline'),
+          NetStatus.off => (Palette.textFaint, 'Offline'),
+        };
+        return AnimatedContainer(
+          duration: Motion.medium,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(Radii.sm),
+            border: Border.all(color: color.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+              const SizedBox(width: 6),
+              Text(label, style: AppText.micro.copyWith(color: color, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Whom to start a temp chat with.
+class _TempPicker extends StatelessWidget {
+  const _TempPicker({required this.friends, required this.sigil});
+
+  final List<FriendView> friends;
+  final Future<SigilSpec> Function(List<int>) sigil;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.7),
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Space.sm, 0, Space.sm, Space.md),
+              child: Text('New temp chat', style: AppText.title),
+            ),
+            for (final f in friends)
+              ListTile(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
+                leading: SizedBox.square(
+                  dimension: 40,
+                  child: FutureBuilder<SigilSpec>(
+                    future: sigil(f.sigilKey),
+                    builder: (_, snap) => snap.data == null
+                        ? const SizedBox.shrink()
+                        : ClipOval(child: SigilView(spec: snap.data!)),
+                  ),
+                ),
+                title: Text(f.name, style: AppText.heading),
+                subtitle: const Text('Both phones · burns after 24h', style: AppText.caption),
+                onTap: () => Navigator.pop(context, (true, f.chatId.toInt())),
+              ),
+            if (friends.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(Space.sm),
+                child: Text('Add a friend to start temp chats with them.', style: AppText.caption),
+              ),
+            const Divider(height: Space.xl),
+            ListTile(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
+              leading: const SizedBox.square(dimension: 40, child: Icon(Icons.person_outline_rounded)),
+              title: const Text('Just me', style: AppText.heading),
+              subtitle: const Text('Only on this phone', style: AppText.caption),
+              onTap: () => Navigator.pop(context, (true, null)),
+            ),
           ],
         ),
       ),

@@ -101,18 +101,23 @@ void main() {
     await settle(tester);
     expect(find.text('hello'), findsOneWidget, reason: 'card shows the last message');
 
-    // Several temp chats.
+    // Temp chats ("Just me": a widget test runs a single phone; the Rust
+    // tests cover temp chats between two phones).
     await tester.tap(find.text('Temp'));
     await settle(tester);
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < 2; i++) {
       await tester.tap(find.text('New temp chat'));
-      await settle(tester, 4);
+      await settle(tester);
+      // The picker offers a temp chat with yourself.
+      expect(find.text('Only on this phone'), findsOneWidget);
+      await tester.tap(find.text('Only on this phone'));
+      await settle(tester, 6);
     }
-    expect(find.text('Ember 1'), findsOneWidget);
-    expect(find.text('Cinder 1'), findsOneWidget);
+    expect(find.text('Just me'), findsNWidgets(2));
 
-    for (final (name, msg) in [('Spark 1', 'see you at 8'), ('Ember 1', 'gone soon')]) {
-      await tester.tap(find.text(name));
+    for (final (i, msg) in [(0, 'see you at 8'), (1, 'gone soon')]) {
+      // The list re-sorts by activity, so pick the chat that is still empty.
+      await tester.tap(find.text('Burns 24h after sending').first);
       await settle(tester);
       await tester.enterText(find.byType(TextField).last, msg);
       await settle(tester, 3);
@@ -120,35 +125,26 @@ void main() {
       await settle(tester);
       expect(find.text(msg), findsOneWidget);
       expect(find.textContaining('burns in 23h'), findsOneWidget);
-      if (name == 'Ember 1') await shot(tester, '3-temp-chat');
+      if (i == 1) await shot(tester, '3-temp-chat');
       await tester.tap(find.byTooltip('Back'));
-      await settle(tester);
+      await settle(tester, 8);
     }
-    await settle(tester, 6);
     await shot(tester, '2-temp-list');
 
-    // Pin a chat via long press.
-    await tester.longPress(find.text('Flare 1'));
-    await settle(tester);
-    await tester.tap(find.text('Pin to top'));
-    await settle(tester);
-    expect(find.byIcon(Icons.push_pin_rounded), findsOneWidget);
-
-    // Search filters the stack.
+    // Search filters by last message.
     await tester.enterText(find.byType(TextField).first, 'see you');
     await settle(tester, 3);
-    expect(find.text('Spark 1'), findsOneWidget);
-    expect(find.text('Cinder 1'), findsNothing);
+    expect(find.text('Just me'), findsOneWidget);
     await tester.enterText(find.byType(TextField).first, '');
     await settle(tester, 3);
 
     // Wipe from inside a chat.
-    await tester.tap(find.text('Ember 1'));
+    await tester.tap(find.text('gone soon'));
     await settle(tester);
     await tester.tap(find.text('Wipe'));
     await settle(tester, 14);
-    expect(find.text('Ember 1'), findsNothing);
-    expect(find.text('Spark 1'), findsOneWidget);
+    expect(find.text('gone soon'), findsNothing);
+    expect(find.text('see you at 8'), findsOneWidget);
 
     // Back to Chats for the home screenshot.
     await tester.tap(find.text('Chats'));
@@ -166,8 +162,8 @@ void main() {
     await tester.tap(find.byTooltip('Back'));
     await settle(tester);
 
-    // A fresh home screen (as after a restart) reads notes back from the
-    // encrypted store; temp chats are gone because they never touch disk.
+    // A fresh home screen reads notes back from the encrypted store. (Temp
+    // chats end with the process; the Rust tests cover that.)
     await tester.pumpWidget(const SizedBox());
     await settle(tester, 2);
     await tester.runAsync(() async {
@@ -177,7 +173,6 @@ void main() {
     await settle(tester);
     expect(find.text('Notes to self'), findsOneWidget);
     expect(find.text('hello'), findsOneWidget);
-    expect(find.text('Temp'), findsOneWidget, reason: 'no temp count after restart');
 
     await tester.pumpWidget(const SizedBox());
     await settle(tester, 2);

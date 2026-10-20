@@ -54,6 +54,34 @@ pub fn pair_fingerprint(a: &[u8; 32], b: &[u8; 32]) -> Fingerprint {
     blake3::derive_key("sanctum pair fingerprint v1", &buf)
 }
 
+/// The Tor onion address for an identity key: a v3 onion service whose
+/// key is the identity key, so a friend code is all it takes to reach you.
+/// `base32(key || checksum || 0x03).onion`, checksum = first two bytes of
+/// SHA3-256(".onion checksum" || key || 0x03).
+pub fn onion_address(public_key: &[u8; 32]) -> String {
+    use sha3::{Digest, Sha3_256};
+    let mut hasher = Sha3_256::new();
+    hasher.update(b".onion checksum");
+    hasher.update(public_key);
+    hasher.update([3]);
+    let sum = hasher.finalize();
+    let mut bytes = public_key.to_vec();
+    bytes.extend_from_slice(&sum[..2]);
+    bytes.push(3);
+    // RFC 4648 base32, lowercase, no padding (35 bytes -> 56 characters).
+    const ALPHABET: &[u8; 32] = b"abcdefghijklmnopqrstuvwxyz234567";
+    let (mut out, mut acc, mut bits) = (String::with_capacity(62), 0u32, 0u32);
+    for b in bytes {
+        acc = (acc << 8) | b as u32;
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(ALPHABET[((acc >> bits) & 31) as usize] as char);
+        }
+    }
+    out + ".onion"
+}
+
 /// A 12-digit number two friends read to each other (e.g. on a call) to
 /// confirm nobody swapped their codes. Derived from the pair fingerprint,
 /// so it is the same on both phones. Formatted as "1234 5678 9012".
