@@ -1117,6 +1117,7 @@ fn wire__crate__api__store__media_send_impl(
             let api_height = <u32>::sse_decode(&mut deserializer);
             let api_duration_ms = <u32>::sse_decode(&mut deserializer);
             let api_reply_to = <Option<i64>>::sse_decode(&mut deserializer);
+            let api_album = <Option<crate::api::store::AlbumView>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1133,6 +1134,7 @@ fn wire__crate__api__store__media_send_impl(
                             api_height,
                             api_duration_ms,
                             api_reply_to,
+                            api_album,
                         )?;
                         Ok(output_ok)
                     })(),
@@ -2487,6 +2489,18 @@ impl SseDecode for String {
     }
 }
 
+impl SseDecode for crate::api::store::AlbumView {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <Vec<u8>>::sse_decode(deserializer);
+        let mut var_title = <String>::sse_decode(deserializer);
+        return crate::api::store::AlbumView {
+            id: var_id,
+            title: var_title,
+        };
+    }
+}
+
 impl SseDecode for crate::api::session::AppEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2840,6 +2854,7 @@ impl SseDecode for crate::api::store::MessageView {
         let mut var_senderName = <Option<String>>::sse_decode(deserializer);
         let mut var_media = <Option<crate::api::store::MediaView>>::sse_decode(deserializer);
         let mut var_poll = <Option<crate::api::poll::PollView>>::sse_decode(deserializer);
+        let mut var_album = <Option<crate::api::store::AlbumView>>::sse_decode(deserializer);
         return crate::api::store::MessageView {
             seq: var_seq,
             from_me: var_fromMe,
@@ -2850,6 +2865,7 @@ impl SseDecode for crate::api::store::MessageView {
             sender_name: var_senderName,
             media: var_media,
             poll: var_poll,
+            album: var_album,
         };
     }
 }
@@ -2887,6 +2903,17 @@ impl SseDecode for Option<String> {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         if (<bool>::sse_decode(deserializer)) {
             return Some(<String>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::store::AlbumView> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::store::AlbumView>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -3370,6 +3397,24 @@ fn pde_ffi_dispatcher_sync_impl(
 // Section: rust2dart
 
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::store::AlbumView {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.title.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::store::AlbumView {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::store::AlbumView>
+    for crate::api::store::AlbumView
+{
+    fn into_into_dart(self) -> crate::api::store::AlbumView {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::session::AppEvent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -3588,6 +3633,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::store::MessageView {
             self.sender_name.into_into_dart().into_dart(),
             self.media.into_into_dart().into_dart(),
             self.poll.into_into_dart().into_dart(),
+            self.album.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -3966,6 +4012,14 @@ impl SseEncode for String {
     }
 }
 
+impl SseEncode for crate::api::store::AlbumView {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Vec<u8>>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.title, serializer);
+    }
+}
+
 impl SseEncode for crate::api::session::AppEvent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4258,6 +4312,7 @@ impl SseEncode for crate::api::store::MessageView {
         <Option<String>>::sse_encode(self.sender_name, serializer);
         <Option<crate::api::store::MediaView>>::sse_encode(self.media, serializer);
         <Option<crate::api::poll::PollView>>::sse_encode(self.poll, serializer);
+        <Option<crate::api::store::AlbumView>>::sse_encode(self.album, serializer);
     }
 }
 
@@ -4294,6 +4349,16 @@ impl SseEncode for Option<String> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <String>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::store::AlbumView> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::store::AlbumView>::sse_encode(value, serializer);
         }
     }
 }

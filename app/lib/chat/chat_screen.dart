@@ -10,6 +10,7 @@ import '../deck/chat_card.dart';
 import '../deck/chat_tile.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
+import 'albums.dart';
 import 'media.dart';
 import 'poll.dart';
 import '../security/screenshots.dart';
@@ -339,6 +340,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           onQuoteTap: () => _jumpTo(m.reply?.seq),
           onLongPress: () => _actions(m),
           onChanged: _reload,
+          onAlbumTap: _openAlbums,
           chatId: widget.card.id,
           accent: accent,
           showTime: !grouped,
@@ -419,10 +421,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// What to tell the user when an attachment can't be sent.
-  String _sendError(Object e) => '$e'.contains('too large')
-      ? 'That\'s too big to send. Photos can be up to 10 MB, videos 20 MB, voice notes 10 MB and files 50 MB.'
-      : 'Couldn\'t send that. Please try again.';
+  Future<void> _openAlbums([AlbumView? album]) async {
+    final accent = widget.card.sigil.accent.color;
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => album == null
+          ? AlbumsScreen(chatId: widget.card.id, title: widget.card.title, accent: accent)
+          : AlbumScreen(chatId: widget.card.id, album: album, accent: accent),
+    ));
+    await _reload();
+  }
 
   /// Picks a photo, video or file and sends it (with the typed text as
   /// its caption).
@@ -448,6 +455,12 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
               onTap: () => Navigator.pop(sheet, 'file'),
             ),
             ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Shared albums'),
+              subtitle: const Text('Photos and videos everyone here can add to'),
+              onTap: () => Navigator.pop(sheet, 'albums'),
+            ),
+            ListTile(
               leading: const Icon(Icons.poll_outlined),
               title: const Text('Poll or plan'),
               subtitle: const Text('Ask a question, find a date that works, or plan something together'),
@@ -458,6 +471,10 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       ),
     );
     if (kind == null || !mounted) return;
+    if (kind == 'albums') {
+      await _openAlbums();
+      return;
+    }
     if (kind == 'poll') {
       final sent = await showPollComposer(context, chatId: widget.card.id, accent: widget.card.sigil.accent.color);
       if (sent) await _reload();
@@ -465,7 +482,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     }
     final picked = await Background.pickMedia(kind);
     if (picked == null || !mounted) return;
-    final path = picked['path']! as String;
     final caption = _input.text.trim();
     final replyTo = _replyTo;
     HapticFeedback.lightImpact();
@@ -474,33 +490,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       _replyTo = null;
     });
     try {
-      await mediaSend(
-        chatId: widget.card.id,
-        path: path,
-        kind: switch (picked['kind']) {
-          'image' => MediaKindView.image,
-          'video' => MediaKindView.video,
-          'audio' => MediaKindView.audio,
-          _ => MediaKindView.file,
-        },
-        mime: picked['mime']! as String,
-        name: picked['name']! as String,
-        caption: caption,
-        thumb: picked['thumb']! as Uint8List,
-        width: picked['width']! as int,
-        height: picked['height']! as int,
-        durationMs: picked['durationMs']! as int,
-        replyTo: replyTo?.seq,
-      );
+      await sendPicked(widget.card.id, picked, caption: caption, replyTo: replyTo?.seq);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_sendError(e))));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(sendErrorText(e))));
       }
-    } finally {
-      // Sanctum keeps its own encrypted copy.
-      try {
-        File(path).deleteSync();
-      } catch (_) {}
     }
     await _reload();
   }
@@ -566,7 +560,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         replyTo: replyTo?.seq,
       );
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_sendError(e))));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(sendErrorText(e))));
     } finally {
       try {
         File(path).deleteSync();
@@ -965,6 +959,7 @@ class _Bubble extends StatefulWidget {
     this.onQuoteTap,
     this.onLongPress,
     this.onChanged,
+    this.onAlbumTap,
     required this.chatId,
   });
 
@@ -989,6 +984,9 @@ class _Bubble extends StatefulWidget {
 
   /// A poll in it was answered.
   final VoidCallback? onChanged;
+
+  /// Its album label was tapped.
+  final void Function(AlbumView)? onAlbumTap;
 
   @override
   State<_Bubble> createState() => _BubbleState();
@@ -1053,6 +1051,28 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
                   snippet: m.reply!.snippet,
                   color: mine ? fg : accent,
                   fg: fg,
+                ),
+              ),
+            ),
+          if (m.album != null)
+            GestureDetector(
+              onTap: () => widget.onAlbumTap?.call(m.album!),
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: Space.xs),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.photo_library_rounded, size: 13, color: fg.withValues(alpha: 0.7)),
+                    const SizedBox(width: Space.xs),
+                    Flexible(
+                      child: Text(
+                        m.album!.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.micro.copyWith(color: fg.withValues(alpha: 0.85), fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

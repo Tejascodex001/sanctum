@@ -119,6 +119,12 @@ Polls, date polls and plans (`core/src/poll.rs`), in friends' chats and groups.
 - In groups an answer can arrive before its poll. It waits in the sealed key-value table (up to 200 per poll) until the poll comes.
 - Choices are checked on every phone: unknown ones are dropped, and only the first counts when a poll allows one answer.
 
+## Shared albums
+- An album is the photos and videos in a chat that carry its id and name (`Album`, on `StoredMessage::album`). Whoever adds the first photo creates it: there's no separate album record to keep in step.
+- Album photos travel as `Content::AlbumMedia`, which is otherwise exactly like `Content::Media` (same encryption, chunks and limits). They show in the chat too, labelled with the album's name.
+- The app builds the album list from the chat's messages. Up to 30 photos and videos can be picked at once.
+- Deleting a photo removes it from the album; clearing the chat clears its albums.
+
 ## Deleting
 - **Delete a message:** for me, or (your own messages only) for everyone (`Content::DeleteMessage`, by the shared message id). Works in groups too.
 - **Clear chat:** for me, or (friends' chats) for everyone (`Content::ClearChat`). The friendship stays.
@@ -173,5 +179,5 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 ## Roadmap
 Status per feature is tracked in the README's feature table. In short:
 - **v1, private messaging:** done. Only nearby over Wi-Fi Direct remains, and hotspot mode mostly covers it.
-- **v2:** plans and date polls (done); a Fediverse tab (Pixelfed, PeerTube, Reels-style), shared albums, a daily moment, on-device AI (catch-up summaries, transcription, search).
+- **v2:** plans and date polls, shared albums (done); a Fediverse tab (Pixelfed, PeerTube, Reels-style), a daily moment, on-device AI (catch-up summaries, transcription, search).
 - **v3:** voice and video calls, with no IP exposure.

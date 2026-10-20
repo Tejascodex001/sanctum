@@ -22,6 +22,7 @@ Future<void> mediaSend({
   required int height,
   required int durationMs,
   PlatformInt64? replyTo,
+  AlbumView? album,
 }) => RustLib.instance.api.crateApiStoreMediaSend(
   chatId: chatId,
   path: path,
@@ -34,6 +35,7 @@ Future<void> mediaSend({
   height: height,
   durationMs: durationMs,
   replyTo: replyTo,
+  album: album,
 );
 
 /// A message's file, decrypted (None until it has arrived).
@@ -134,6 +136,26 @@ Future<List<MessageView>> messageList({
 }) =>
     RustLib.instance.api.crateApiStoreMessageList(chatId: chatId, limit: limit);
 
+/// A shared album: every photo and video in the chat with its id.
+class AlbumView {
+  /// 16 random bytes, made by whoever starts it.
+  final Uint8List id;
+  final String title;
+
+  const AlbumView({required this.id, required this.title});
+
+  @override
+  int get hashCode => id.hashCode ^ title.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AlbumView &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          title == other.title;
+}
+
 enum ChatKindView { notes, direct, group }
 
 enum MediaKindView { image, video, audio, file }
@@ -215,6 +237,9 @@ class MessageView {
   /// A poll, date poll or plan, with everyone's answers.
   final PollView? poll;
 
+  /// The shared album a photo or video is in.
+  final AlbumView? album;
+
   const MessageView({
     required this.seq,
     required this.fromMe,
@@ -225,6 +250,7 @@ class MessageView {
     this.senderName,
     this.media,
     this.poll,
+    this.album,
   });
 
   @override
@@ -237,7 +263,8 @@ class MessageView {
       reply.hashCode ^
       senderName.hashCode ^
       media.hashCode ^
-      poll.hashCode;
+      poll.hashCode ^
+      album.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -252,7 +279,8 @@ class MessageView {
           reply == other.reply &&
           senderName == other.senderName &&
           media == other.media &&
-          poll == other.poll;
+          poll == other.poll &&
+          album == other.album;
 }
 
 class ReplyView {

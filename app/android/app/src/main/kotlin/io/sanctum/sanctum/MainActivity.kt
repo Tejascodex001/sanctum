@@ -46,6 +46,19 @@ class MainActivity : FlutterFragmentActivity() {
     private val pickVisual = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { finishPick(it) }
     private val pickFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { finishPick(it) }
 
+    /** Several photos and videos at once (for albums), prepared in order. */
+    private var pendingPickMany: MethodChannel.Result? = null
+    private val pickVisualMany =
+        registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { uris ->
+            val result = pendingPickMany ?: return@registerForActivityResult
+            pendingPickMany = null
+            val main = Handler(Looper.getMainLooper())
+            thread(isDaemon = true) {
+                val prepared = uris.mapNotNull { runCatching { MediaPrep.prepare(applicationContext, it) }.getOrNull() }
+                main.post { result.success(prepared) }
+            }
+        }
+
     /** Copies and prepares the pick off the main thread (photos are shrunk). */
     private fun finishPick(uri: Uri?) {
         val result = pendingPick ?: return
@@ -151,6 +164,11 @@ class MainActivity : FlutterFragmentActivity() {
                         } else {
                             pickVisual.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                         }
+                    }
+                    "pickMediaMany" -> {
+                        pendingPickMany?.success(emptyList<Any>())
+                        pendingPickMany = result
+                        pickVisualMany.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                     }
                     "openFile" -> {
                         // Another app opens a decrypted copy, through a

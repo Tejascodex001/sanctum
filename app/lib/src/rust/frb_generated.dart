@@ -212,6 +212,7 @@ abstract class RustLibApi extends BaseApi {
     required int height,
     required int durationMs,
     PlatformInt64? replyTo,
+    AlbumView? album,
   });
 
   Future<void> crateApiStoreMessageDelete({
@@ -1281,6 +1282,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required int height,
     required int durationMs,
     PlatformInt64? replyTo,
+    AlbumView? album,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -1297,6 +1299,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_u_32(height, serializer);
           sse_encode_u_32(durationMs, serializer);
           sse_encode_opt_box_autoadd_i_64(replyTo, serializer);
+          sse_encode_opt_box_autoadd_album_view(album, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -1321,6 +1324,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           height,
           durationMs,
           replyTo,
+          album,
         ],
         apiImpl: this,
       ),
@@ -1341,6 +1345,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       "height",
       "durationMs",
       "replyTo",
+      "album",
     ],
   );
 
@@ -2481,6 +2486,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AlbumView dco_decode_album_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return AlbumView(
+      id: dco_decode_list_prim_u_8_strict(arr[0]),
+      title: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
   AppEvent dco_decode_app_event(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2503,6 +2520,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   bool dco_decode_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
+  }
+
+  @protected
+  AlbumView dco_decode_box_autoadd_album_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_album_view(raw);
   }
 
   @protected
@@ -2747,8 +2770,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   MessageView dco_decode_message_view(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return MessageView(
       seq: dco_decode_i_64(arr[0]),
       fromMe: dco_decode_bool(arr[1]),
@@ -2759,6 +2782,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       senderName: dco_decode_opt_String(arr[6]),
       media: dco_decode_opt_box_autoadd_media_view(arr[7]),
       poll: dco_decode_opt_box_autoadd_poll_view(arr[8]),
+      album: dco_decode_opt_box_autoadd_album_view(arr[9]),
     );
   }
 
@@ -2785,6 +2809,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
+  }
+
+  @protected
+  AlbumView? dco_decode_opt_box_autoadd_album_view(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_album_view(raw);
   }
 
   @protected
@@ -3086,6 +3116,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AlbumView sse_decode_album_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_title = sse_decode_String(deserializer);
+    return AlbumView(id: var_id, title: var_title);
+  }
+
+  @protected
   AppEvent sse_decode_app_event(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_kind = sse_decode_app_event_kind(deserializer);
@@ -3105,6 +3143,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   bool sse_decode_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8() != 0;
+  }
+
+  @protected
+  AlbumView sse_decode_box_autoadd_album_view(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_album_view(deserializer));
   }
 
   @protected
@@ -3445,6 +3489,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_senderName = sse_decode_opt_String(deserializer);
     var var_media = sse_decode_opt_box_autoadd_media_view(deserializer);
     var var_poll = sse_decode_opt_box_autoadd_poll_view(deserializer);
+    var var_album = sse_decode_opt_box_autoadd_album_view(deserializer);
     return MessageView(
       seq: var_seq,
       fromMe: var_fromMe,
@@ -3455,6 +3500,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       senderName: var_senderName,
       media: var_media,
       poll: var_poll,
+      album: var_album,
     );
   }
 
@@ -3484,6 +3530,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_String(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  AlbumView? sse_decode_opt_box_autoadd_album_view(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_album_view(deserializer));
     } else {
       return null;
     }
@@ -3869,6 +3928,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_album_view(AlbumView self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_prim_u_8_strict(self.id, serializer);
+    sse_encode_String(self.title, serializer);
+  }
+
+  @protected
   void sse_encode_app_event(AppEvent self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_app_event_kind(self.kind, serializer);
@@ -3886,6 +3952,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self ? 1 : 0);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_album_view(
+    AlbumView self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_album_view(self, serializer);
   }
 
   @protected
@@ -4214,6 +4289,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.senderName, serializer);
     sse_encode_opt_box_autoadd_media_view(self.media, serializer);
     sse_encode_opt_box_autoadd_poll_view(self.poll, serializer);
+    sse_encode_opt_box_autoadd_album_view(self.album, serializer);
   }
 
   @protected
@@ -4237,6 +4313,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_String(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_album_view(
+    AlbumView? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_album_view(self, serializer);
     }
   }
 

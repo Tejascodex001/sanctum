@@ -49,7 +49,7 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | | Feature | Notes |
 |---|---|---|
 | ✅ | **Polls, date polls and plans** | Ask a question, find a day that works for everyone, or plan something (when and where) and see who's going. In friends' chats and groups |
-| ⏳ | Shared albums | |
+| ✅ | **Shared albums** | Albums in any chat or group. Everyone can add photos and videos, up to 30 at a time |
 | ⏳ | A daily moment | |
 | ⏳ | A Fediverse tab | Pixelfed and PeerTube, Reels-style, through Tor |
 | ⏳ | On-device AI | Catch-up summaries, transcription, search |

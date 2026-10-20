@@ -681,6 +681,7 @@ mod tests {
             width: 1,
             height: 1,
             duration_ms: 0,
+            album: None,
         };
         let reach = alice.session.lock().unwrap().send_media(ab, out, None).unwrap();
         for p in reach {

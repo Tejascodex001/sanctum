@@ -14,6 +14,7 @@ class ChatMessage {
     this.senderName,
     this.media,
     this.poll,
+    this.album,
   });
 
   final String body;
@@ -38,6 +39,9 @@ class ChatMessage {
 
   /// A poll, date poll or plan, with everyone's answers.
   final PollView? poll;
+
+  /// The shared album a photo or video is in.
+  final AlbumView? album;
 }
 
 /// The part of a message a reply shows.
@@ -83,6 +87,7 @@ class StoreSource implements MessageSource {
             senderName: m.senderName,
             media: m.media,
             poll: m.poll,
+            album: m.album,
             reply: m.reply == null
                 ? null
                 : ChatQuote(

@@ -428,7 +428,14 @@ impl Session {
                 sent_at,
                 quote,
                 media,
-            } => self.receive_media(chat_id, peer, id, body, sent_at, quote, media)?,
+            } => self.receive_media(chat_id, peer, id, body, sent_at, quote, media, None)?,
+            Content::AlbumMedia {
+                id,
+                body,
+                sent_at,
+                media,
+                album,
+            } => self.receive_media(chat_id, peer, id, body, sent_at, None, media, Some(album))?,
             Content::Poll { id, sent_at, poll } => self.on_poll(chat_id, peer, id, sent_at, poll)?,
             Content::Vote { poll, choices, at } => self.on_vote(chat_id, peer, poll, choices, at)?,
             // Delete for everyone: only the sender's own message.

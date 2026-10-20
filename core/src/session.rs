@@ -866,7 +866,14 @@ impl Session {
                 sent_at,
                 quote,
                 media,
-            } => self.receive_media(chat_id, peer, id, body, sent_at, quote, media)?,
+            } => self.receive_media(chat_id, peer, id, body, sent_at, quote, media, None)?,
+            Content::AlbumMedia {
+                id,
+                body,
+                sent_at,
+                media,
+                album,
+            } => self.receive_media(chat_id, peer, id, body, sent_at, None, media, Some(album))?,
             Content::Poll { id, sent_at, poll } => self.on_poll(chat_id, peer, id, sent_at, poll)?,
             Content::Vote { poll, choices, at } => self.on_vote(chat_id, peer, poll, choices, at)?,
             Content::TempWipe { temp } => {
@@ -1684,7 +1691,38 @@ mod tests {
             width: 4000,
             height: 3000,
             duration_ms: 0,
+            album: None,
         }
+    }
+
+    #[test]
+    fn shared_albums_collect_everyones_photos() {
+        use crate::protocol::Album;
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        let album = Album { id: [7; 16], title: "  Goa trip ".into() };
+        let (path, bytes) = photo(&alice, 70_000);
+        let out = crate::media::Outgoing { album: Some(album.clone()), ..outgoing(&path) };
+        alice.s.send_media(ab, out, None).unwrap();
+        connect(&mut alice, &mut bob);
+        // Bob adds one of his own.
+        let (path, _) = photo(&bob, 1000);
+        bob.s.send_media(ba, crate::media::Outgoing { album: Some(album), ..outgoing(&path) }, None).unwrap();
+        connect(&mut bob, &mut alice);
+        for (phone, chat) in [(&alice, ab), (&bob, ba)] {
+            let in_album: Vec<_> = phone
+                .s
+                .store
+                .messages(chat, None)
+                .unwrap()
+                .into_iter()
+                .filter_map(|m| m.album.map(|a| (a.id, a.title, m.from_me)))
+                .collect();
+            assert_eq!(in_album.len(), 2);
+            assert!(in_album.iter().all(|(id, title, _)| *id == [7; 16] && title == "Goa trip"));
+        }
+        assert_eq!(bob.s.media_bytes(ba, 0).unwrap(), Some(bytes));
     }
 
     #[test]

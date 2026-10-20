@@ -3,7 +3,7 @@
 use super::poll::PollView;
 use super::session;
 use sanctum_core::media::Outgoing;
-use sanctum_core::protocol::MediaKind;
+use sanctum_core::protocol::{Album, MediaKind};
 use sanctum_core::store::{ChatKind, ChatMeta, Store};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -50,6 +50,15 @@ pub struct MessageView {
     pub media: Option<MediaView>,
     /// A poll, date poll or plan, with everyone's answers.
     pub poll: Option<PollView>,
+    /// The shared album a photo or video is in.
+    pub album: Option<AlbumView>,
+}
+
+/// A shared album: every photo and video in the chat with its id.
+pub struct AlbumView {
+    /// 16 random bytes, made by whoever starts it.
+    pub id: Vec<u8>,
+    pub title: String,
 }
 
 pub enum MediaKindView {
@@ -96,7 +105,15 @@ pub fn media_send(
     height: u32,
     duration_ms: u32,
     reply_to: Option<i64>,
+    album: Option<AlbumView>,
 ) -> anyhow::Result<()> {
+    let album = match album {
+        Some(a) => Some(Album {
+            id: a.id.try_into().map_err(|_| anyhow::anyhow!("bad album id"))?,
+            title: a.title,
+        }),
+        None => None,
+    };
     let out = Outgoing {
         path: std::path::Path::new(&path),
         kind: media_kind(kind),
@@ -107,6 +124,7 @@ pub fn media_send(
         width,
         height,
         duration_ms,
+        album,
     };
     reach(session::with(|s| Ok(s.send_media(chat_id, out, reply_to)?))?);
     Ok(())
@@ -292,6 +310,10 @@ pub fn message_list(chat_id: i64, limit: Option<u32>) -> anyhow::Result<Vec<Mess
                     thumb: media.thumb,
                 }),
                 poll: m.poll.map(|p| super::poll::view(p, &m.votes, &me, |k| name_of(k))),
+                album: m.album.map(|a| AlbumView {
+                    id: a.id.to_vec(),
+                    title: a.title,
+                }),
                 body: m.body,
             })
             .collect())

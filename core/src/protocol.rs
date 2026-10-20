@@ -204,6 +204,22 @@ pub enum Content {
         choices: Vec<u8>,
         at: u64,
     },
+    /// A photo or video added to one of the chat's shared albums.
+    AlbumMedia {
+        id: MessageId,
+        body: String,
+        sent_at: u64,
+        media: Media,
+        album: Album,
+    },
+}
+
+/// A shared album: the photos and videos in a chat that carry its id.
+/// Whoever adds the first one creates it.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Album {
+    pub id: MessageId,
+    pub title: String,
 }
 
 /// A question with choices. A date poll's choices are times (`dates`); a

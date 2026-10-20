@@ -7,7 +7,7 @@
 //! between chats. SQLite only ever sees random ids, sequence numbers and
 //! ciphertext; `secure_delete` zeroes deleted pages.
 
-use crate::protocol::{BlobId, Media, MessageId, Poll, Quote};
+use crate::protocol::{Album, BlobId, Media, MessageId, Poll, Quote};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -188,6 +188,23 @@ pub struct StoredMessage {
     pub poll: Option<Poll>,
     /// Polls: everyone's latest answer (ours under our own key).
     pub votes: Vec<Vote>,
+    /// The shared album a photo or video is in.
+    pub album: Option<Album>,
+}
+
+/// The fifth message format, before shared albums.
+#[derive(Deserialize)]
+struct StoredMessageV4 {
+    from_me: bool,
+    body: String,
+    sent_at: u64,
+    delivered: bool,
+    id: Option<MessageId>,
+    reply: Option<Quote>,
+    sender: Option<[u8; 32]>,
+    media: Option<Media>,
+    poll: Option<Poll>,
+    votes: Vec<Vote>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -618,6 +635,21 @@ impl Store {
         if let Ok(m) = postcard::from_bytes::<StoredMessage>(&plain) {
             return Ok(m);
         }
+        if let Ok(v4) = postcard::from_bytes::<StoredMessageV4>(&plain) {
+            return Ok(StoredMessage {
+                from_me: v4.from_me,
+                body: v4.body,
+                sent_at: v4.sent_at,
+                delivered: v4.delivered,
+                id: v4.id,
+                reply: v4.reply,
+                sender: v4.sender,
+                media: v4.media,
+                poll: v4.poll,
+                votes: v4.votes,
+                album: None,
+            });
+        }
         if let Ok(v3) = postcard::from_bytes::<StoredMessageV3>(&plain) {
             return Ok(StoredMessage {
                 from_me: v3.from_me,
@@ -897,6 +929,54 @@ mod tests {
         hidden.admin = Some([5; 32]);
         s.update_chat(7, &hidden).unwrap();
         assert_eq!(s.chats().unwrap().remove(0).1, hidden);
+    }
+
+    #[test]
+    fn messages_from_before_albums_upgrade() {
+        #[derive(Serialize)]
+        struct V4 {
+            from_me: bool,
+            body: String,
+            sent_at: u64,
+            delivered: bool,
+            id: Option<MessageId>,
+            reply: Option<Quote>,
+            sender: Option<[u8; 32]>,
+            media: Option<Media>,
+            poll: Option<Poll>,
+            votes: Vec<Vote>,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[7; 32]).unwrap();
+        let chat = s.create_chat(&meta("Bob")).unwrap();
+        let old = V4 {
+            from_me: false,
+            body: "Lunch?".into(),
+            sent_at: 4,
+            delivered: true,
+            id: Some([1; 16]),
+            reply: None,
+            sender: Some([3; 32]),
+            media: None,
+            poll: Some(Poll { question: "Lunch?".into(), options: vec!["Yes".into(), "No".into()], ..Default::default() }),
+            votes: vec![Vote { voter: [2; 32], choices: vec![1], at: 5 }],
+        };
+        s.db.execute(
+            "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, 0, ?2)",
+            params![chat, s.seal(&message_aad(chat, 0), &old).unwrap()],
+        )
+        .unwrap();
+        let m = s.message(chat, 0).unwrap().unwrap();
+        assert_eq!(m.poll.unwrap().question, "Lunch?");
+        assert_eq!(m.votes[0].choices, vec![1]);
+        assert!(m.album.is_none());
+        let photo = StoredMessage {
+            media: Some(Media { name: "a.jpg".into(), ..Default::default() }),
+            album: Some(Album { id: [9; 16], title: "Goa".into() }),
+            ..Default::default()
+        };
+        let seq = s.add_message(chat, &photo).unwrap();
+        assert_eq!(s.message(chat, seq).unwrap().unwrap(), photo);
     }
 
     #[test]

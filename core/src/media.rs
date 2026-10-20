@@ -8,7 +8,7 @@
 //! ([`Frame::BlobChunk`]), useless without the key. A receiver checks every
 //! chunk as it arrives and shows the file once the last one is in.
 
-use crate::protocol::{BlobId, Content, Frame, Media, MediaKind, MessageId};
+use crate::protocol::{Album, BlobId, Content, Frame, Media, MediaKind, MessageId};
 use crate::session::{clip, now, Event, Result, Session, SessionError};
 use crate::store::{ChatKind, OutboxItem, OutboxState, StoredMessage};
 use chacha20poly1305::aead::{Aead, KeyInit};
@@ -57,6 +57,8 @@ pub struct Outgoing<'a> {
     pub width: u32,
     pub height: u32,
     pub duration_ms: u32,
+    /// Adds it to this shared album (photos and videos).
+    pub album: Option<Album>,
 }
 
 fn nonce(blob: &BlobId, index: u32) -> XNonce {
@@ -132,6 +134,7 @@ impl Session {
         };
         let id: MessageId = rand::random();
         let sent_at = now();
+        let album = out.album.map(tidy_album);
         let quote = match reply_to {
             Some(seq) => self.quote(&meta, chat_id, seq)?,
             None => None,
@@ -147,16 +150,26 @@ impl Session {
                 reply: quote.clone(),
                 sender: None,
                 media: Some(media.clone()),
+                album: album.clone(),
                 ..Default::default()
             },
         )?;
         self.events.push(Event::Chat(chat_id));
-        let content = Content::Media {
-            id,
-            body: out.caption.into(),
-            sent_at,
-            quote,
-            media,
+        let content = match album {
+            Some(album) => Content::AlbumMedia {
+                id,
+                body: out.caption.into(),
+                sent_at,
+                media,
+                album,
+            },
+            None => Content::Media {
+                id,
+                body: out.caption.into(),
+                sent_at,
+                quote,
+                media,
+            },
         };
         let recipients = self.send_to_members(&meta, id, &content, (chat_id, seq))?;
         // The file itself, to each of them (after the message, in order).
@@ -327,6 +340,7 @@ impl Session {
         sent_at: u64,
         quote: Option<crate::protocol::Quote>,
         media: Media,
+        album: Option<Album>,
     ) -> Result<()> {
         // Bigger than its kind allows: refused, its chunks ignored.
         if media.size > max_size(media.kind) {
@@ -344,12 +358,20 @@ impl Session {
                 reply: quote,
                 sender: Some(*peer),
                 media: Some(media),
+                album: album.map(tidy_album),
                 ..Default::default()
             },
         )?;
         self.events.push(Event::Chat(chat_id));
         self.events.push(Event::Message(chat_id));
         Ok(())
+    }
+}
+
+fn tidy_album(album: Album) -> Album {
+    Album {
+        title: clip(album.title.trim(), 64),
+        ..album
     }
 }
 

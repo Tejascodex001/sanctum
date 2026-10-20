@@ -210,6 +210,100 @@ class _FileRow extends StatelessWidget {
   }
 }
 
+/// What to tell the user when an attachment can't be sent.
+String sendErrorText(Object e) => '$e'.contains('too large')
+    ? 'That\'s too big to send. Photos can be up to 10 MB, videos 20 MB, voice notes 10 MB and files 50 MB.'
+    : 'Couldn\'t send that. Please try again.';
+
+/// Sends something [Background.pickMedia] returned, then deletes the
+/// picked copy (Sanctum keeps its own encrypted one).
+Future<void> sendPicked(
+  int chatId,
+  Map<Object?, Object?> picked, {
+  String caption = '',
+  int? replyTo,
+  AlbumView? album,
+}) async {
+  final path = picked['path']! as String;
+  try {
+    await mediaSend(
+      chatId: chatId,
+      path: path,
+      kind: switch (picked['kind']) {
+        'image' => MediaKindView.image,
+        'video' => MediaKindView.video,
+        'audio' => MediaKindView.audio,
+        _ => MediaKindView.file,
+      },
+      mime: picked['mime']! as String,
+      name: picked['name']! as String,
+      caption: caption,
+      thumb: picked['thumb']! as Uint8List,
+      width: picked['width']! as int,
+      height: picked['height']! as int,
+      durationMs: picked['durationMs']! as int,
+      replyTo: replyTo,
+      album: album,
+    );
+  } finally {
+    try {
+      File(path).deleteSync();
+    } catch (_) {}
+  }
+}
+
+/// A square photo or video tile (albums). Tap to open it.
+class MediaTile extends StatelessWidget {
+  const MediaTile({super.key, required this.media, required this.chatId, required this.seq});
+
+  final MediaView media;
+  final int chatId;
+  final int seq;
+
+  bool get _video => media.kind == MediaKindView.video;
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = media.thumb.isEmpty
+        ? const ColoredBox(color: Palette.surfaceHigh)
+        : ImageFiltered(
+            imageFilter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+            child: Image.memory(Uint8List.fromList(media.thumb), fit: BoxFit.cover, gaplessPlayback: true),
+          );
+    final picture = !_video && media.ready
+        ? FutureBuilder<Uint8List?>(
+            future: _ImageCache.load(chatId, seq),
+            builder: (context, snap) => snap.data == null
+                ? preview
+                : Hero(
+                    tag: 'media-$chatId-$seq',
+                    child: Image.memory(snap.data!, fit: BoxFit.cover, gaplessPlayback: true, cacheWidth: 400),
+                  ),
+          )
+        : preview;
+    return GestureDetector(
+      onTap: () {
+        if (!media.ready) return;
+        Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => _video
+              ? VideoScreen(chatId: chatId, seq: seq, media: media)
+              : ImageScreen(chatId: chatId, seq: seq, heroTag: 'media-$chatId-$seq'),
+        ));
+      },
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          picture,
+          if (!media.ready)
+            const Center(child: SizedBox.square(dimension: 22, child: CircularProgressIndicator(strokeWidth: 2))),
+          if (_video && media.ready)
+            const Center(child: Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 30)),
+        ],
+      ),
+    );
+  }
+}
+
 /// A photo, full screen: pinch to zoom.
 class ImageScreen extends StatelessWidget {
   const ImageScreen({super.key, required this.chatId, required this.seq, required this.heroTag});
