@@ -30,7 +30,7 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ⏳ | Nearby over Bluetooth / Wi-Fi Direct | |
 | ✅ | **Replies** | Swipe a message right; tap the quote to jump to the original |
 | ⏳ | Thread view | A dedicated view for long reply chains |
-| ✅ | **Delete & clear** | Delete a message (for me / for everyone), clear a chat (for me / for everyone), remove a friend (from my phone / from both phones) |
+| ✅ | **Delete & clear** | Delete a message (for me / for everyone), clear a chat (for me / for everyone), remove a friend (it's removed on both phones) |
 | ✅ | **Background delivery** | A foreground service keeps you reachable while the app is closed. A one-tap shortcut opens your phone maker's battery page |
 | ✅ | **Notifications** | Posted on the phone itself, never through Google. They say who wrote, never what. On the lock screen they say only "New message" |
 | ✅ | **App lock** | Fingerprint, face or PIN, every time the app opens |

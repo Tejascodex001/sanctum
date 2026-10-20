@@ -481,18 +481,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _loadChats();
   }
 
-  /// Removes a friend from this phone, or from both phones.
+  /// Removes a friend: from this phone and theirs.
   Future<void> _removeFriend(ChatCard card) async {
-    final both = await _choose(
-      title: 'Remove ${card.title}?',
-      body: 'Your chat with them is deleted. From both phones also deletes it on theirs '
-          '(as soon as their phone is reached). Either way, you\'d need to add each other again.',
-      mine: 'From my phone',
-      everyone: 'From both phones',
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Remove ${card.title}?'),
+        content: const Text(
+          'Your chat is deleted from both phones (theirs as soon as it\'s reached). '
+          'To talk again, you\'d add each other again.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove', style: TextStyle(color: Palette.danger)),
+          ),
+        ],
+      ),
     );
-    if (both == null) return;
+    if (ok != true) return;
     HapticFeedback.heavyImpact();
-    await friendRemove(chatId: card.id, bothPhones: both);
+    await friendRemove(chatId: card.id, bothPhones: true);
     await _loadChats();
   }
 
@@ -851,11 +861,9 @@ class _Tabs extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              AnimatedScale(
-                                scale: badge > 0 ? 1 : 0,
-                                duration: Motion.medium,
-                                curve: Motion.emphasized,
-                                child: Container(
+                              // Only takes space when shown, so labels stay centred.
+                              if (badge > 0)
+                                Container(
                                   margin: const EdgeInsets.only(left: 6),
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                                   decoration: BoxDecoration(
@@ -867,7 +875,6 @@ class _Tabs extends StatelessWidget {
                                     style: AppText.micro.copyWith(color: Palette.bg, fontWeight: FontWeight.w700),
                                   ),
                                 ),
-                              ),
                             ],
                           ),
                         ),

@@ -92,7 +92,7 @@ Peer to peer, with no server (`core/src/group.rs`).
 ## Deleting
 - **Delete a message:** for me, or (your own messages only) for everyone (`Content::DeleteMessage`, by the shared message id). Works in groups too.
 - **Clear chat:** for me, or (friends' chats) for everyone (`Content::ClearChat`). The friendship stays.
-- **Remove friend:** from my phone, or from both phones (`Content::Unfriend`).
+- **Remove friend** always applies to both phones (`Content::Unfriend`).
   - The goodbye is encrypted before the chat is deleted, then sent from the outbox. The network still connects to the former friend to deliver it.
   - Their phone then deletes its chat with us.
 - **Safety:** these instructions travel inside MLS, so only the chat's other phone can act on them, and only on messages its sender wrote.
