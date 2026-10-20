@@ -20,6 +20,19 @@ class AppLock extends StatefulWidget {
 
   @override
   State<AppLock> createState() => _AppLockState();
+
+  static int _away = 0;
+
+  /// Runs [f] (e.g. opening the camera scanner) without locking when the
+  /// app briefly goes to the background for it.
+  static Future<T> whileAway<T>(Future<T> Function() f) async {
+    _away++;
+    try {
+      return await f();
+    } finally {
+      _away--;
+    }
+  }
 }
 
 class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerProviderStateMixin {
@@ -48,7 +61,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // The system auth sheet itself pauses the app, so ignore that cycle.
-    if (state == AppLifecycleState.hidden && !_authenticating) {
+    if (state == AppLifecycleState.hidden && !_authenticating && AppLock._away == 0) {
       _lock.value = 1;
     }
   }

@@ -34,13 +34,12 @@ Rust core (sanctum-core)
 - **At rest:** every chat, message and MLS secret is sealed before SQLite sees it, with the row's identity bound as associated data so rows can't be swapped. Lookup keys for MLS state are keyed hashes, so group ids never appear on disk. `secure_delete` zeroes deleted data. Temp chats never touch disk.
 - MLS state is persisted after every operation; a crash before persisting just rolls back to the last saved state.
 
-## Pairing (in person, no network)
-1. Bob shows a QR **offer**: identity key, name, a one-time MLS key package, signed.
-2. Alice scans it, creates the chat's MLS group with Bob in it, and shows a QR **reply**: her identity, name and the MLS welcome, signed and bound to Bob's offer.
-3. Bob scans the reply and joins. Both phones derive the same **pair sigil**; if they match on screen, no code was swapped.
-QRs carry the codes as raw bytes (QR version ~14 for the offer, ~22 for the reply); the scanner analyses 85% of a high-resolution frame. QR scanning uses ZXing on-device (no Google ML Kit, which reports usage to Google).
-
-**Far away:** the same two codes are shared through any app and pasted instead of scanned. Because that app could in theory swap them, both phones show a 12-digit **safety number** derived from the pair fingerprint, read aloud on a call to confirm. (With Tor, short spoken invite words over a direct onion connection can replace copy-paste.)
+## Adding friends
+- A **friend code** holds your identity key and name: `SANCTUM1:` + Crockford Base32 (digits and letters, no I/L/O/U), about 70–85 characters, with a 16-bit checksum that catches typos. It fits a QR version 4, encoded in alphanumeric mode, so it scans instantly and is easy to read out or type (case-insensitive; prefix optional; O/I/L forgiven).
+- Each friend reads the other's code: **together** by scanning each other's QR; **far away** by sharing their code and typing or pasting the other's.
+- Both phones derive the same **pair sigil** and **12-digit safety number** from the two keys. Compare sigils in person, or read the number aloud on a call. A swapped code changes both.
+- The identity key is also the Tor onion service key (as in Cwtch), so a code is everything needed to reach a friend. The MLS session is set up over Tor on first contact, authenticated by these keys; messages wait on the phone until then.
+- Scanning uses ZXing's native Android scanner (on-device, no Google ML Kit, which reports usage to Google). Verified in tests by decoding generated QRs with both Java ZXing and zxing-cpp, including blurred, rotated and tiny images.
 
 ## Security features
 - App lock with biometric or PIN; locks again when the app goes to the background.

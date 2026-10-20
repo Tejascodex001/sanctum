@@ -36,37 +36,20 @@ impl From<Paired> for PairedView {
         Self {
             chat_id: p.chat_id,
             friend: p.friend,
-            safety_number: sanctum_core::identity::safety_number(&p.sigil_key),
             sigil_key: p.sigil_key,
+            safety_number: p.safety_number,
         }
     }
 }
 
-/// Step 1: the code to show a friend.
-pub fn invite_create(my_name: String) -> anyhow::Result<String> {
-    with(|s| Ok(s.create_offer(&my_name)?))
+/// Your friend code, to show as a QR or share.
+pub fn my_code(my_name: String) -> anyhow::Result<String> {
+    with(|s| Ok(s.my_code(&my_name)))
 }
 
-pub struct AcceptView {
-    pub paired: PairedView,
-    /// The reply code to show the friend.
-    pub reply: String,
-}
-
-/// Step 2: scanned a friend's code; returns the chat and the reply to show.
-pub fn invite_accept(code: String, my_name: String) -> anyhow::Result<AcceptView> {
-    with(|s| {
-        let (paired, reply) = s.accept_offer(&code, &my_name)?;
-        Ok(AcceptView {
-            paired: paired.into(),
-            reply,
-        })
-    })
-}
-
-/// Step 3: scanned the friend's reply; joins the chat.
-pub fn invite_complete(code: String) -> anyhow::Result<PairedView> {
-    with(|s| Ok(s.complete(&code)?.into()))
+/// Adds the friend whose code was scanned, pasted or typed.
+pub fn friend_add(code: String) -> anyhow::Result<PairedView> {
+    with(|s| Ok(s.add_friend(&code)?.into()))
 }
 
 pub(crate) fn lock() -> MutexGuard<'static, Option<Session>> {

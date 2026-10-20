@@ -70,4 +70,8 @@ flutter {
 dependencies {
     // AppCompat theme for the biometric prompt (local_auth).
     implementation("androidx.appcompat:appcompat:1.7.1")
+    // QR scanner: ZXing (pure Java, on-device). Not Google ML Kit, which
+    // reports usage to Google.
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("com.google.zxing:core:3.5.3")
 }

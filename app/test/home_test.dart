@@ -151,14 +151,13 @@ void main() {
     await settle(tester);
     await shot(tester, '1-chats');
 
-    // Add a friend: name, then show my code.
+    // Add a friend: the screen shows our code and a way to read theirs.
     await tester.tap(find.byTooltip('Add a friend'));
     await settle(tester);
     await tester.enterText(find.byType(TextField).first, 'Tejas');
-    await settle(tester, 3);
-    await tester.tap(find.text('Show my code'));
-    await settle(tester, 12);
-    expect(find.text('Let your friend scan this'), findsOneWidget);
+    await settle(tester, 8);
+    expect(find.text('YOUR CODE'), findsOneWidget);
+    expect(find.text('Scan their QR'), findsOneWidget);
     await shot(tester, '4-add-friend');
     await tester.tap(find.byTooltip('Back'));
     await settle(tester);

@@ -1,38 +1,28 @@
-import 'dart:convert';
-import 'dart:typed_data';
+import 'package:qr/qr.dart';
 
-/// Pairing codes travel as raw bytes in QR byte mode rather than base64
-/// text, which makes each QR about a quarter less dense and much easier to
-/// scan off another phone's screen.
-///
-/// Bytes on the wire: "SNC1" + the code's binary envelope. The Rust side
-/// keeps using the text form `sanctum1:<base64url>`.
-const _prefix = 'sanctum1:';
-final _magic = ascii.encode('SNC1');
+/// Friend codes are `SANCTUM1:` plus Crockford Base32 (digits and letters
+/// only), so QR encodes them in its compact alphanumeric mode and every
+/// scanner returns them exactly. Parsing and validation happen in Rust.
+const codePrefix = 'SANCTUM1:';
 
-Uint8List codeToQrBytes(String code) {
-  final body = base64Url.decode(base64Url.normalize(code.substring(_prefix.length)));
-  return Uint8List.fromList([..._magic, ...body]);
-}
-
-/// The code inside a scanned QR or pasted text, or null if there is none.
-String? codeFromScan({Uint8List? rawBytes, String? text}) {
-  if (rawBytes != null && rawBytes.length > _magic.length) {
-    final head = rawBytes.sublist(0, _magic.length);
-    if (_listEquals(head, _magic)) {
-      return _prefix + base64Url.encode(rawBytes.sublist(_magic.length)).replaceAll('=', '');
+/// The smallest QR (medium error correction, as codes are short) for [code].
+QrCode qrForCode(String code) {
+  for (var type = 1; type <= 40; type++) {
+    final qr = QrCode(type, QrErrorCorrectLevel.M)..addAlphaNumeric(code);
+    try {
+      QrImage(qr);
+      return qr;
+    } on InputTooLongException {
+      continue;
     }
   }
-  // Shared messages carry an intro line, so find the code anywhere in the
-  // text: it runs from the prefix to the next whitespace.
-  final match = text == null ? null : RegExp(r'sanctum1:[A-Za-z0-9_-]+').firstMatch(text);
-  return match?.group(0);
+  throw ArgumentError('code too long for a QR');
 }
 
-bool _listEquals(List<int> a, List<int> b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
+/// The code without its prefix, in groups of four, for reading or typing.
+String codeGroups(String code) {
+  final body = code.startsWith(codePrefix) ? code.substring(codePrefix.length) : code;
+  return [
+    for (var i = 0; i < body.length; i += 4) body.substring(i, i + 4 > body.length ? body.length : i + 4),
+  ].join(' ');
 }

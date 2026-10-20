@@ -21,42 +21,13 @@ Future<void> sessionOpen({
   storeKey: storeKey,
 );
 
-/// Step 1: the code to show a friend.
-Future<String> inviteCreate({required String myName}) =>
-    RustLib.instance.api.crateApiSessionInviteCreate(myName: myName);
+/// Your friend code, to show as a QR or share.
+Future<String> myCode({required String myName}) =>
+    RustLib.instance.api.crateApiSessionMyCode(myName: myName);
 
-/// Step 2: scanned a friend's code; returns the chat and the reply to show.
-Future<AcceptView> inviteAccept({
-  required String code,
-  required String myName,
-}) => RustLib.instance.api.crateApiSessionInviteAccept(
-  code: code,
-  myName: myName,
-);
-
-/// Step 3: scanned the friend's reply; joins the chat.
-Future<PairedView> inviteComplete({required String code}) =>
-    RustLib.instance.api.crateApiSessionInviteComplete(code: code);
-
-class AcceptView {
-  final PairedView paired;
-
-  /// The reply code to show the friend.
-  final String reply;
-
-  const AcceptView({required this.paired, required this.reply});
-
-  @override
-  int get hashCode => paired.hashCode ^ reply.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is AcceptView &&
-          runtimeType == other.runtimeType &&
-          paired == other.paired &&
-          reply == other.reply;
-}
+/// Adds the friend whose code was scanned, pasted or typed.
+Future<PairedView> friendAdd({required String code}) =>
+    RustLib.instance.api.crateApiSessionFriendAdd(code: code);
 
 class PairedView {
   final PlatformInt64 chatId;
