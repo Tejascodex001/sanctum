@@ -66,6 +66,11 @@ pub enum Event {
     TempGone(u64),
     /// A friend request arrived.
     Request,
+    /// A friend's message arrived in this chat (also sent as `Chat`):
+    /// worth a notification, unlike a delivery receipt.
+    Message(i64),
+    /// A friend's message arrived in this temp chat.
+    TempMessage(u64),
 }
 
 /// Someone who added your code and wants you to add them back. Held in
@@ -647,6 +652,7 @@ impl Session {
                     },
                 )?;
                 self.events.push(Event::Chat(chat_id));
+                self.events.push(Event::Message(chat_id));
             }
             Content::TempOpen { temp } => {
                 let id = self.temp.for_remote(*peer, temp, &name).id;
@@ -668,6 +674,7 @@ impl Session {
                 let id = chat.id;
                 self.purge();
                 self.events.push(Event::Temp(id));
+                self.events.push(Event::TempMessage(id));
             }
             Content::TempWipe { temp } => {
                 if let Some(id) = self.temp.wipe_remote(*peer, temp) {
@@ -872,7 +879,9 @@ mod tests {
             "delivered tick"
         );
         assert!(alice.s.pending_peers().unwrap().is_empty());
-        assert!(bob.s.take_events().contains(&Event::Chat(ba)));
+        let events = bob.s.take_events();
+        assert!(events.contains(&Event::Chat(ba)) && events.contains(&Event::Message(ba)));
+        assert!(!alice.s.take_events().iter().any(|e| matches!(e, Event::Message(_))), "a receipt is no message");
         assert!(!alice.s.chat(ab).unwrap().group_id.is_empty());
         assert_eq!(
             alice.s.chat(ab).unwrap().group_id,

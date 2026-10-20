@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../net/net_bus.dart';
+import '../notify/notifier.dart';
 import '../sigil/sigil_painter.dart';
 import '../theme/tokens.dart';
 import 'chat_card.dart';
@@ -139,6 +140,28 @@ class _Trailing extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         if (card.preview != null) Text(_ago(card.updatedAt), style: AppText.micro),
+        ValueListenableBuilder<Map<String, int>>(
+          valueListenable: Notifier.instance.unread,
+          builder: (context, unread, _) {
+            final n = unread[card.temp ? Notifier.tempKey(card.id) : Notifier.chatKey(card.id)] ?? 0;
+            return AnimatedScale(
+              scale: n > 0 ? 1 : 0,
+              duration: Motion.medium,
+              curve: Motion.emphasized,
+              child: Container(
+                margin: const EdgeInsets.only(top: Space.xs),
+                constraints: const BoxConstraints(minWidth: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(Radii.sm)),
+                child: Text(
+                  n > 99 ? '99+' : '$n',
+                  textAlign: TextAlign.center,
+                  style: AppText.micro.copyWith(color: Palette.onColor(accent), fontWeight: FontWeight.w700),
+                ),
+              ),
+            );
+          },
+        ),
         if (card.temp && card.nextBurn != null) ...[
           const SizedBox(height: Space.xs + 2),
           _BurnRing(burnsAt: card.nextBurn!, color: accent),

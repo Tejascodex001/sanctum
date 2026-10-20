@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use sanctum_core::protocol::{encode_frame, take_frame, Frame};
 use sanctum_core::session::{Event, Session};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -45,6 +46,10 @@ const BACKOFF_MIN: Duration = Duration::from_secs(4);
 /// ...up to this, or this while messages are waiting for them.
 const BACKOFF_MAX: Duration = Duration::from_secs(120);
 const BACKOFF_MAX_PENDING: Duration = Duration::from_secs(20);
+/// While the app is closed, unreachable friends are retried less often to
+/// save battery. A friend coming online dials us anyway.
+const BACKOFF_MAX_BACKGROUND: Duration = Duration::from_secs(600);
+const BACKOFF_MAX_PENDING_BACKGROUND: Duration = Duration::from_secs(120);
 /// Tor circuits are expensive; don't build too many at once.
 const MAX_DIALS: usize = 6;
 
@@ -74,6 +79,7 @@ pub struct Node {
     dialing: Mutex<HashSet<[u8; 32]>>,
     /// When to next try a friend we couldn't reach, and the current delay.
     backoff: Mutex<HashMap<[u8; 32], (Instant, Duration)>>,
+    background: AtomicBool,
     next_link: Mutex<u64>,
 }
 
@@ -91,6 +97,7 @@ impl Node {
             links: Mutex::default(),
             dialing: Mutex::default(),
             backoff: Mutex::default(),
+            background: AtomicBool::new(false),
             next_link: Mutex::new(0),
         })
     }
@@ -147,6 +154,12 @@ impl Node {
         }
     }
 
+    /// The app was closed (or opened): retry unreachable friends less (or
+    /// more) often.
+    pub fn set_background(&self, background: bool) {
+        self.background.store(background, Ordering::Relaxed);
+    }
+
     /// Pull to refresh: try every friend not connected now, skipping backoff.
     pub fn reconnect_now(self: &Arc<Self>) {
         self.backoff.lock().unwrap().clear();
@@ -162,7 +175,12 @@ impl Node {
             .pending_peers()
             .unwrap_or_default()
             .contains(peer);
-        let cap = if pending { BACKOFF_MAX_PENDING } else { BACKOFF_MAX };
+        let cap = match (pending, self.background.load(Ordering::Relaxed)) {
+            (true, false) => BACKOFF_MAX_PENDING,
+            (false, false) => BACKOFF_MAX,
+            (true, true) => BACKOFF_MAX_PENDING_BACKGROUND,
+            (false, true) => BACKOFF_MAX_BACKGROUND,
+        };
         let mut backoff = self.backoff.lock().unwrap();
         let delay = backoff.get(peer).map_or(BACKOFF_MIN, |(_, d)| (*d * 2).min(cap));
         backoff.insert(*peer, (Instant::now() + delay, delay));

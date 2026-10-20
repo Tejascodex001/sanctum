@@ -30,6 +30,15 @@ Rust core (sanctum-core)
 - **Re-pairing heals itself.** A side with no group always sends a key-package request on connect. If the friend still has a group (one of you deleted the chat and you paired again), it rebuilds the group. Messages already encrypted for the old group are dropped and stay unticked, never falsely marked delivered.
 - **Live links.** While the app is open it keeps one Tor link open to every friend, pinged every 40 seconds, so messages arrive in about a second instead of waiting for a new circuit. Dropped links reconnect on their own, with backoff for friends who can't be reached: 4 seconds doubling up to 2 minutes, or up to 20 seconds while messages wait. At most 6 dials run at once. If both phones dial at once, both keep the link dialed by the smaller key, so neither closes the other's. Being connected is the online indicator. Pull to refresh, or reopening the app, retries everyone now.
 - **Nothing is lost when a link drops mid-setup.** Queued messages keep their plaintext, sealed in the store, until acknowledged. If the pair's group has to be rebuilt, they are encrypted again instead of being dropped.
+- **Background delivery** is on by default and can be turned off in your sigil sheet.
+  - One Flutter engine lives for the whole process and is owned by `SanctumApplication`; the activity only attaches to it.
+  - A `remoteMessaging` foreground service ("Connected privately", silent and minimal) keeps the process, and with it Tor and the friend links, alive while the app is closed.
+  - While closed, offline friends are retried every 10 minutes at most (2 minutes when messages wait) to save battery. Opening the app reconnects everyone at once.
+  - The user can grant a battery-optimization exemption for phones with aggressive battery savers.
+- **Notifications** are posted natively on the phone, never through Google or any push service.
+  - They say who wrote and how many messages ("3 new messages"), never what. On the lock screen even the name is hidden ("New message").
+  - Tapping one opens that chat. Chat cards show unread badges.
+  - Rust emits a separate `Message` event for an incoming message, so a delivery receipt never notifies.
 - **Tor startup** reports bootstrap progress to the UI, gives up after 3 minutes, and turns any crash into a visible failure with a retry. rustls uses the `ring` crypto backend.
 - **Outbox:** sealed on disk, resent on every connection and every 30 s until acknowledged; receivers recognise resends after a lost ack. Acks mark messages delivered (✓ sent, ✓✓ delivered).
 - **Temp chats with friends:** opened, written and wiped through the friend's MLS group; held only in memory on both phones; a wipe wipes both. Both phones derive the temp chat's sigil from its shared id.

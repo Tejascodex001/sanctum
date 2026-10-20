@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../deck/chat_card.dart';
 import '../deck/chat_tile.dart';
 import '../net/net_bus.dart';
+import '../notify/notifier.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
 import '../theme/tokens.dart';
@@ -43,6 +44,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       if (has != _hasText) setState(() => _hasText = has);
     });
     if (widget.card.preloaded == null) _reload();
+    Notifier.instance
+      ..viewing = _key
+      ..markRead(_key);
     // Friends' messages and delivery receipts arrive live.
     _events = NetBus.instance.events.listen((e) {
       if (e.id.toInt() != widget.card.id) return;
@@ -62,8 +66,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     }
   }
 
+  String get _key => widget.card.temp ? Notifier.tempKey(widget.card.id) : Notifier.chatKey(widget.card.id);
+
   @override
   void dispose() {
+    if (Notifier.instance.viewing == _key) Notifier.instance.viewing = null;
     _tick?.cancel();
     _events?.cancel();
     _input.dispose();

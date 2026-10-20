@@ -2,9 +2,16 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <!-- Tor. Sanctum never connects anywhere else. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Staying reachable while closed: a foreground service, notifications
+         posted on the phone itself, and (if the user agrees) an exemption
+         from battery optimization. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <application
         android:label="Sanctum"
-        android:name="${applicationName}"
+        android:name=".SanctumApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -34,6 +41,10 @@
             android:stateNotNeeded="true"
             android:theme="@style/zxing_CaptureTheme"
             android:windowSoftInputMode="stateAlwaysHidden" />
+        <service
+            android:name=".ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

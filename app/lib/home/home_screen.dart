@@ -9,7 +9,9 @@ import '../deck/chat_card.dart';
 import '../deck/chat_stack.dart';
 import '../deck/chat_tile.dart';
 import '../friends/add_friend_screen.dart';
+import '../background/background.dart';
 import '../net/net_bus.dart';
+import '../notify/notifier.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
@@ -40,6 +42,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   double _page = 0;
   Timer? _purge;
   StreamSubscription<AppEvent>? _events;
+  StreamSubscription<String>? _opens;
 
   @override
   void initState() {
@@ -49,6 +52,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Temp messages burn on their own; refresh the countdowns.
     _purge = Timer.periodic(const Duration(minutes: 1), (_) => _loadTemp());
     _events = NetBus.instance.events.listen(_onEvent);
+    _opens = Notifier.instance.opens.listen(_openFromNotification);
     WidgetsBinding.instance.addObserver(this);
     _loadChats();
     _loadTemp();
@@ -102,6 +106,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await NetBus.instance.refreshOnline();
   }
 
+  /// A notification was tapped: show that chat (or the requests).
+  Future<void> _openFromNotification(String key) async {
+    if (!mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    if (key == 'friends') return _goTo(2);
+    final temp = key.startsWith('t:');
+    final id = int.tryParse(key.substring(2));
+    if (temp) await _loadTemp();
+    ChatCard? find() => (temp ? _temp : _chats).where((c) => c.id == id).firstOrNull;
+    var card = find();
+    if (card == null && !temp) {
+      await _loadChats();
+      card = find();
+    }
+    if (card == null) return;
+    _goTo(temp ? 1 : 0);
+    await _open(card);
+  }
+
   /// Opens a chat from outside the deck (the Friends tab).
   Future<void> _open(ChatCard card) async {
     HapticFeedback.selectionClick();
@@ -117,6 +140,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _purge?.cancel();
     _events?.cancel();
+    _opens?.cancel();
     _pages.dispose();
     _search.dispose();
     super.dispose();
@@ -143,8 +167,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       case AppEventKind.request:
         HapticFeedback.mediumImpact();
         _loadRequests();
-      // Dots update themselves (NetBus.online).
-      case AppEventKind.presence:
+      // Dots, badges and notifications update themselves (NetBus, Notifier).
+      case AppEventKind.presence || AppEventKind.message || AppEventKind.tempMessage:
         break;
     }
   }
@@ -386,7 +410,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       backgroundColor: widget.mySigil.background.color,
       showDragHandle: true,
       builder: (_) => SizedBox(
-        height: 440,
+        height: 600,
         child: Column(
           children: [
             const Text('YOUR SIGIL', style: AppText.overline),
@@ -400,13 +424,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             const Padding(
-              padding: EdgeInsets.fromLTRB(32, 0, 32, 32),
+              padding: EdgeInsets.fromLTRB(32, 0, 32, Space.md),
               child: Text(
                 'Made from your key. When you and a friend add each other, '
                 'you both see the same sigil for your chat.',
                 textAlign: TextAlign.center,
                 style: AppText.caption,
               ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
+              child: _BackgroundSettings(),
             ),
           ],
         ),
@@ -1213,6 +1241,100 @@ class _FriendRow extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Whether Sanctum stays reachable while closed, and the battery exemption
+/// that keeps it reliable on phones with aggressive battery savers.
+class _BackgroundSettings extends StatefulWidget {
+  const _BackgroundSettings();
+
+  @override
+  State<_BackgroundSettings> createState() => _BackgroundSettingsState();
+}
+
+class _BackgroundSettingsState extends State<_BackgroundSettings> with WidgetsBindingObserver {
+  bool? _on;
+  bool _unrestricted = true;
+  bool _canNotify = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Back from the system battery dialog.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _load();
+  }
+
+  Future<void> _load() async {
+    final on = await Background.enabled();
+    final unrestricted = await Background.batteryUnrestricted();
+    final canNotify = await Background.canNotify();
+    if (!mounted) return;
+    setState(() {
+      _on = on;
+      _unrestricted = unrestricted;
+      _canNotify = canNotify;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final on = _on;
+    if (on == null) return const SizedBox(height: 64);
+    return Container(
+      decoration: BoxDecoration(
+        color: Palette.bg.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(Radii.md),
+      ),
+      child: Column(
+        children: [
+          SwitchListTile(
+            value: on,
+            title: const Text('Stay connected when closed'),
+            subtitle: Text(
+              on
+                  ? 'Messages and requests arrive and notify you. A quiet "Connected privately" notice stays while it runs.'
+                  : 'Messages wait on your friends\' phones until you open Sanctum.',
+              style: AppText.caption,
+            ),
+            onChanged: (v) async {
+              HapticFeedback.selectionClick();
+              setState(() => _on = v);
+              await Background.setEnabled(v);
+              if (v) await Background.requestNotifications();
+              await _load();
+            },
+          ),
+          if (on && !_canNotify)
+            const ListTile(
+              dense: true,
+              leading: Icon(Icons.notifications_off_outlined),
+              title: Text('Notifications are off'),
+              subtitle: Text('Turn them on for Sanctum in Android settings to hear about new messages.'),
+            ),
+          if (on && !_unrestricted)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.battery_alert_rounded, color: _amber),
+              title: const Text('Allow unrestricted battery'),
+              subtitle: const Text('Some phones cut background connections to save battery. Tap to allow.'),
+              onTap: Background.requestUnrestricted,
+            ),
+        ],
       ),
     );
   }

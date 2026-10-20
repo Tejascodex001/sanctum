@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'home/home_screen.dart';
 import 'identity/secrets.dart';
 import 'net/net_bus.dart';
+import 'notify/notifier.dart';
 import 'security/app_lock.dart';
 import 'sigil/sigil_painter.dart';
 import 'src/rust/api/identity.dart';
@@ -24,6 +25,7 @@ Future<void> main() async {
     );
     await profileSetName(name: await loadDisplayName());
     NetBus.instance.start();
+    Notifier.instance.start();
     await NetBus.instance.connect(
       stateDir: '${(await getApplicationSupportDirectory()).path}/tor-state',
       cacheDir: '${(await getApplicationCacheDirectory()).path}/tor-cache',

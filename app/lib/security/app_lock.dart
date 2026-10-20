@@ -40,6 +40,11 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
   final _auth = LocalAuthentication();
   bool _authenticating = false;
 
+  /// Ask for unlock as soon as the app is on screen. The engine can start
+  /// before any screen exists (it outlives the activity, see
+  /// SanctumApplication.kt), and the system prompt needs one.
+  bool _promptWhenVisible = true;
+
   /// 1 = fully locked, 0 = unlocked. Drives the unlock animation.
   late final _lock = AnimationController(vsync: this, duration: const Duration(milliseconds: 650), value: 1);
   late final _pulse = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
@@ -48,7 +53,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _unlock());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybePrompt());
   }
 
   @override
@@ -64,7 +69,17 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
     // The system auth sheet itself pauses the app, so ignore that cycle.
     if (state == AppLifecycleState.hidden && !_authenticating && AppLock._away == 0) {
       _lock.value = 1;
+      _promptWhenVisible = true;
     }
+    if (state == AppLifecycleState.resumed) _maybePrompt();
+  }
+
+  /// Once per lock: after a cancel, the user taps to try again.
+  void _maybePrompt() {
+    if (!_promptWhenVisible || _lock.value < 1) return;
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;
+    _promptWhenVisible = false;
+    _unlock();
   }
 
   Future<void> _unlock() async {

@@ -67,6 +67,10 @@ pub enum AppEventKind {
     Request,
     /// A friend came online or went offline (`id`: their chat).
     Presence,
+    /// A friend's message arrived (`id`: the chat). Also sent as `Chat`.
+    Message,
+    /// A friend's message arrived in a temp chat. Also sent as `Temp`.
+    TempMessage,
 }
 
 /// Where the connection to Tor stands.
@@ -209,6 +213,18 @@ fn forward_events(node: &Arc<Node>) {
     });
 }
 
+/// The app went to the background (or came back): pace reconnects for
+/// battery. Coming back also reconnects everyone now.
+pub fn net_set_background(background: bool) {
+    if let Some(node) = NODE.lock().unwrap().clone() {
+        node.set_background(background);
+        if !background {
+            let _guard = RUNTIME.enter();
+            node.reconnect_now();
+        }
+    }
+}
+
 /// Pull to refresh: reconnects to every friend not connected, now.
 pub fn net_refresh() {
     if let Some(node) = NODE.lock().unwrap().clone() {
@@ -240,6 +256,8 @@ fn emit_session(e: Event) {
         Event::Temp(id) => emit(AppEventKind::Temp, id as i64),
         Event::TempGone(id) => emit(AppEventKind::TempGone, id as i64),
         Event::Request => emit(AppEventKind::Request, 0),
+        Event::Message(id) => emit(AppEventKind::Message, id),
+        Event::TempMessage(id) => emit(AppEventKind::TempMessage, id as i64),
     }
 }
 

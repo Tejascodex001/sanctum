@@ -28,3 +28,11 @@ Future<Uint8List> loadOrCreateStoreKey() => _loadOrCreate('store_key_v1', storeN
 Future<String> loadDisplayName() async => await _storage.read(key: 'display_name') ?? '';
 
 Future<void> saveDisplayName(String name) => _storage.write(key: 'display_name', value: name.trim());
+
+/// On/off settings, kept with the rest of the profile.
+Future<bool> loadFlag(String key, {required bool fallback}) async {
+  final v = await _storage.read(key: 'flag_$key');
+  return v == null ? fallback : v == '1';
+}
+
+Future<void> saveFlag(String key, bool on) => _storage.write(key: 'flag_$key', value: on ? '1' : '0');

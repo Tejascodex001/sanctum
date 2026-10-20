@@ -39,6 +39,13 @@ Future<void> netStart({
   identitySecret: identitySecret,
 );
 
+/// The app went to the background (or came back): pace reconnects for
+/// battery. Coming back also reconnects everyone now.
+Future<void> netSetBackground({required bool background}) => RustLib
+    .instance
+    .api
+    .crateApiSessionNetSetBackground(background: background);
+
 /// Pull to refresh: reconnects to every friend not connected, now.
 Future<void> netRefresh() => RustLib.instance.api.crateApiSessionNetRefresh();
 
@@ -125,6 +132,12 @@ enum AppEventKind {
 
   /// A friend came online or went offline (`id`: their chat).
   presence,
+
+  /// A friend's message arrived (`id`: the chat). Also sent as `Chat`.
+  message,
+
+  /// A friend's message arrived in a temp chat. Also sent as `Temp`.
+  tempMessage,
 }
 
 class FriendView {
