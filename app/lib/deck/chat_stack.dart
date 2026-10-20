@@ -92,7 +92,7 @@ class _ChatStackState extends State<ChatStack> {
         // Each card tucks under the next, like a fanned deck.
         item = Align(
           alignment: Alignment.topCenter,
-          heightFactor: i == cards.length - 1 ? 1 : 0.9,
+          heightFactor: i == cards.length - 1 ? 1 : 0.92,
           child: item,
         );
         return animate
@@ -117,14 +117,14 @@ class _StackedCard extends StatelessWidget {
   final VoidCallback? onLongPress;
 
   static const _shape = RoundedRectangleBorder(
-    borderRadius: BorderRadius.all(Radius.circular(26)),
+    borderRadius: BorderRadius.all(Radius.circular(22)),
   );
 
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: const BoxDecoration(
-        borderRadius: BorderRadius.all(Radius.circular(26)),
+        borderRadius: BorderRadius.all(Radius.circular(22)),
         boxShadow: [
           BoxShadow(color: Colors.black54, blurRadius: 24, offset: Offset(0, -4)),
         ],
@@ -163,7 +163,7 @@ class _WipeBackground extends StatelessWidget {
       alignment: Alignment.centerRight,
       padding: const EdgeInsets.only(right: 28),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(22),
         gradient: LinearGradient(
           colors: [Colors.transparent, Colors.redAccent.withValues(alpha: 0.6)],
         ),

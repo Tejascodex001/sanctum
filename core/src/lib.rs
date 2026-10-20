@@ -3,5 +3,6 @@
 
 pub mod identity;
 pub mod sigil;
+pub mod store;
 pub mod temp_chat;
 pub mod transport;

@@ -5,6 +5,7 @@
 
 import 'api/identity.dart';
 import 'api/sigil.dart';
+import 'api/store.dart';
 import 'api/temp_chat.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -30,6 +31,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw);
+
+  @protected
+  ChatKindView dco_decode_chat_kind_view(dynamic raw);
+
+  @protected
   double dco_decode_f_64(dynamic raw);
 
   @protected
@@ -45,6 +52,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<HslColor> dco_decode_list_hsl_color(dynamic raw);
 
   @protected
+  List<MessageView> dco_decode_list_message_view(dynamic raw);
+
+  @protected
   Int64List dco_decode_list_prim_i_64_strict(dynamic raw);
 
   @protected
@@ -54,13 +64,25 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  List<StoredChat> dco_decode_list_stored_chat(dynamic raw);
+
+  @protected
   List<TempMessageView> dco_decode_list_temp_message_view(dynamic raw);
+
+  @protected
+  MessageView dco_decode_message_view(dynamic raw);
+
+  @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
   SigilForm dco_decode_sigil_form(dynamic raw);
 
   @protected
   SigilSpec dco_decode_sigil_spec(dynamic raw);
+
+  @protected
+  StoredChat dco_decode_stored_chat(dynamic raw);
 
   @protected
   TempMessageView dco_decode_temp_message_view(dynamic raw);
@@ -84,6 +106,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
+  ChatKindView sse_decode_chat_kind_view(SseDeserializer deserializer);
+
+  @protected
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
@@ -99,6 +127,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<HslColor> sse_decode_list_hsl_color(SseDeserializer deserializer);
 
   @protected
+  List<MessageView> sse_decode_list_message_view(SseDeserializer deserializer);
+
+  @protected
   Int64List sse_decode_list_prim_i_64_strict(SseDeserializer deserializer);
 
   @protected
@@ -108,15 +139,27 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  List<StoredChat> sse_decode_list_stored_chat(SseDeserializer deserializer);
+
+  @protected
   List<TempMessageView> sse_decode_list_temp_message_view(
     SseDeserializer deserializer,
   );
+
+  @protected
+  MessageView sse_decode_message_view(SseDeserializer deserializer);
+
+  @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
   SigilForm sse_decode_sigil_form(SseDeserializer deserializer);
 
   @protected
   SigilSpec sse_decode_sigil_spec(SseDeserializer deserializer);
+
+  @protected
+  StoredChat sse_decode_stored_chat(SseDeserializer deserializer);
 
   @protected
   TempMessageView sse_decode_temp_message_view(SseDeserializer deserializer);
@@ -143,6 +186,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_chat_kind_view(ChatKindView self, SseSerializer serializer);
+
+  @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
@@ -156,6 +205,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_hsl_color(List<HslColor> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_message_view(
+    List<MessageView> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_prim_i_64_strict(
@@ -173,16 +228,31 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_stored_chat(
+    List<StoredChat> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_temp_message_view(
     List<TempMessageView> self,
     SseSerializer serializer,
   );
 
   @protected
+  void sse_encode_message_view(MessageView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_sigil_form(SigilForm self, SseSerializer serializer);
 
   @protected
   void sse_encode_sigil_spec(SigilSpec self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_stored_chat(StoredChat self, SseSerializer serializer);
 
   @protected
   void sse_encode_temp_message_view(

@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sanctum/home/home_screen.dart';
 import 'package:sanctum/src/rust/api/identity.dart';
 import 'package:sanctum/src/rust/api/sigil.dart';
+import 'package:sanctum/src/rust/api/store.dart';
 import 'package:sanctum/src/rust/frb_generated.dart';
 import 'package:sanctum/sigil/sigil_painter.dart';
 import 'package:sanctum/theme/sigil_theme.dart';
@@ -58,6 +59,8 @@ void main() {
       externalLibrary: ExternalLibrary.open('../target/debug/librust_lib_sanctum.so'),
     );
     await loadFonts();
+    final dir = Directory.systemTemp.createTempSync('sanctum_test');
+    await storeOpen(dir: dir.path, key: await storeNewKey());
   });
 
   testWidgets('notes, temp chats, pinning and wipe work end to end', (tester) async {
@@ -144,6 +147,19 @@ void main() {
     await tester.tap(find.text('Chats'));
     await settle(tester);
     await shot(tester, '1-chats');
+
+    // A fresh home screen (as after a restart) reads notes back from the
+    // encrypted store; temp chats are gone because they never touch disk.
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester, 2);
+    await tester.runAsync(() async {
+      home = HomeScreen(publicKey: home.publicKey, mySigil: mine);
+    });
+    await tester.pumpWidget(MaterialApp(theme: sanctumTheme(accent: mine.accent.color), home: home));
+    await settle(tester);
+    expect(find.text('Notes to self'), findsOneWidget);
+    expect(find.text('hello'), findsOneWidget);
+    expect(find.text('Temp'), findsOneWidget, reason: 'no temp count after restart');
 
     await tester.pumpWidget(const SizedBox());
     await settle(tester, 2);

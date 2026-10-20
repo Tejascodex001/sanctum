@@ -10,7 +10,7 @@ class ChatTile extends StatelessWidget {
 
   final ChatCard card;
 
-  static const height = 104.0;
+  static const height = 82.0;
 
   @override
   Widget build(BuildContext context) {
@@ -32,10 +32,10 @@ class ChatTile extends StatelessWidget {
         child: Stack(
           children: [
             Positioned(
-              right: -36,
-              top: -38,
-              width: 180,
-              height: 180,
+              right: -30,
+              top: -34,
+              width: 150,
+              height: 150,
               child: SigilView(spec: card.sigil, opacity: 0.35, background: false),
             ),
             // Keeps text readable over the watermark.
@@ -54,7 +54,7 @@ class ChatTile extends StatelessWidget {
               child: Row(
                 children: [
                   _Emblem(card: card),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 12),
                   Expanded(child: _Text(card: card)),
                   const SizedBox(width: 8),
                   _Trailing(card: card),
@@ -92,8 +92,8 @@ class _Emblem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 60,
-      height: 60,
+      width: 48,
+      height: 48,
       padding: const EdgeInsets.all(1.5),
       decoration: BoxDecoration(
         shape: BoxShape.circle,
@@ -140,7 +140,7 @@ class _Text extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Text(
           card.preview ?? (card.temp ? 'Nothing yet · burns 24h after sending' : 'No messages yet'),
           maxLines: 1,
@@ -179,7 +179,7 @@ class _Trailing extends StatelessWidget {
           Text(_ago(card.updatedAt),
               style: const TextStyle(fontSize: 12, color: Colors.white54)),
         if (card.temp && card.nextBurn != null) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _BurnRing(burnsAt: card.nextBurn!, color: accent),
         ],
       ],

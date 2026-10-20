@@ -1,3 +1,4 @@
+import '../src/rust/api/store.dart';
 import '../src/rust/api/temp_chat.dart';
 
 class ChatMessage {
@@ -14,21 +15,28 @@ class ChatMessage {
   final DateTime? expiresAt;
 }
 
+DateTime _fromUnix(int s) => DateTime.fromMillisecondsSinceEpoch(s * 1000);
+
 abstract interface class MessageSource {
-  Future<List<ChatMessage>> load();
+  /// Messages oldest first; [limit] keeps only the newest.
+  Future<List<ChatMessage>> load({int? limit});
   Future<void> send(String body);
 }
 
-/// Notes to self, kept in memory until encrypted storage lands.
-class MemorySource implements MessageSource {
-  final _messages = <ChatMessage>[];
+/// A persistent chat in the encrypted store.
+class StoreSource implements MessageSource {
+  StoreSource(this.chatId);
+
+  final int chatId;
 
   @override
-  Future<List<ChatMessage>> load() async => List.of(_messages);
+  Future<List<ChatMessage>> load({int? limit}) async => [
+        for (final m in await messageList(chatId: chatId, limit: limit))
+          ChatMessage(body: m.body, fromMe: m.fromMe, sentAt: _fromUnix(m.sentAt)),
+      ];
 
   @override
-  Future<void> send(String body) async => _messages
-      .add(ChatMessage(body: body, fromMe: true, sentAt: DateTime.now()));
+  Future<void> send(String body) => messageSend(chatId: chatId, body: body);
 }
 
 /// A temp chat held in Rust memory; messages burn after 24 hours.
@@ -38,17 +46,17 @@ class TempSource implements MessageSource {
   final int id;
 
   @override
-  Future<List<ChatMessage>> load() async {
-    DateTime t(int s) => DateTime.fromMillisecondsSinceEpoch(s * 1000);
-    return [
+  Future<List<ChatMessage>> load({int? limit}) async {
+    final all = [
       for (final m in await tempMessages(id: id))
         ChatMessage(
           body: m.body,
           fromMe: m.fromMe,
-          sentAt: t(m.sentAt),
-          expiresAt: t(m.expiresAt),
+          sentAt: _fromUnix(m.sentAt),
+          expiresAt: _fromUnix(m.expiresAt),
         ),
     ];
+    return limit == null || all.length <= limit ? all : all.sublist(all.length - limit);
   }
 
   @override

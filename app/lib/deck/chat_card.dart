@@ -27,7 +27,9 @@ class ChatCard {
 
   /// Refreshes preview, activity time and burn time from the source.
   Future<void> refresh() async {
-    final messages = await source.load();
+    // Persistent chats only need the newest message; temp chats are in
+    // memory and also need the oldest, which burns first.
+    final messages = await source.load(limit: temp ? null : 1);
     if (messages.isEmpty) {
       preview = null;
       nextBurn = null;

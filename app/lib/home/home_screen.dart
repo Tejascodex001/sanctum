@@ -9,6 +9,7 @@ import '../deck/chat_card.dart';
 import '../deck/chat_stack.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/sigil.dart';
+import '../src/rust/api/store.dart';
 import '../src/rust/api/temp_chat.dart';
 
 const _tempNames = ['Ember', 'Spark', 'Flare', 'Cinder', 'Ash', 'Blaze', 'Flicker', 'Glow'];
@@ -24,9 +25,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  late final _chats = [
-    ChatCard(id: 0, title: 'Notes to self', sigil: widget.mySigil, source: MemorySource()),
-  ];
+  final _chats = <ChatCard>[];
   final _temp = <ChatCard>[];
   final _pages = PageController();
   final _search = TextEditingController();
@@ -40,6 +39,30 @@ class _HomeScreenState extends State<HomeScreen> {
     _pages.addListener(() => setState(() => _page = _pages.page ?? 0));
     _search.addListener(() => setState(() {}));
     _purge = Timer.periodic(const Duration(minutes: 1), (_) => _syncTemp());
+    _loadChats();
+  }
+
+  /// Loads persistent chats from the encrypted store, creating "Notes to
+  /// self" on first launch.
+  Future<void> _loadChats() async {
+    var stored = await chatList();
+    if (!stored.any((c) => c.kind == ChatKindView.notes)) {
+      await chatCreate(kind: ChatKindView.notes, title: 'Notes to self', sigilKey: widget.publicKey);
+      stored = await chatList();
+    }
+    final cards = <ChatCard>[];
+    for (final c in stored) {
+      final card = ChatCard(
+        id: c.id,
+        title: c.title,
+        sigil: await sigilForKey(publicKey: c.sigilKey),
+        source: StoreSource(c.id),
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(c.createdAt * 1000),
+      )..pinned = c.pinned;
+      await card.refresh();
+      cards.add(card);
+    }
+    if (mounted) setState(() => _chats..clear()..addAll(cards));
   }
 
   @override
@@ -118,6 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () {
                 Navigator.pop(context);
                 setState(() => card.pinned = !card.pinned);
+                if (!card.temp) chatSetPinned(id: card.id, pinned: card.pinned);
               },
             ),
             if (card.temp)
