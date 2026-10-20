@@ -10,6 +10,7 @@ class ChatCard {
     required this.source,
     this.temp = false,
     this.friend = false,
+    this.verified = false,
     this.note,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
@@ -22,6 +23,9 @@ class ChatCard {
 
   /// With a friend (messages travel over Tor and get delivery ticks).
   final bool friend;
+
+  /// Friends' chats: their key is confirmed. Can change in the chat.
+  bool verified;
 
   /// Shown under the title inside the chat.
   final String? note;

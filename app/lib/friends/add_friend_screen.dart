@@ -32,6 +32,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
   String? _myCode;
   PairedView? _paired;
   SigilSpec? _pairSigil;
+  SigilSpec? _friendSigil;
   bool _busy = false;
 
   @override
@@ -60,12 +61,13 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
     await _refreshCode();
   }
 
-  Future<void> _add(String text) async {
+  Future<void> _add(String text, {required bool scanned}) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final paired = await friendAdd(code: text);
+      final paired = await friendAdd(code: text, scanned: scanned);
       final sigil = await sigilForKey(publicKey: paired.sigilKey);
+      _friendSigil = await sigilForKey(publicKey: paired.friendKey);
       HapticFeedback.heavyImpact();
       setState(() {
         _paired = paired;
@@ -82,7 +84,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
   Future<void> _scan() async {
     try {
       final text = await scanQr(prompt: "Point at your friend's Sanctum code");
-      if (text != null) await _add(text);
+      if (text != null) await _add(text, scanned: true);
     } on PlatformException catch (e) {
       _toast('Camera unavailable: ${e.message ?? e.code}');
     }
@@ -281,7 +283,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
               ),
               const SizedBox(height: 10),
               FilledButton.tonal(
-                onPressed: _busy || _typed.text.trim().isEmpty ? null : () => _add(_typed.text),
+                onPressed: _busy || _typed.text.trim().isEmpty ? null : () => _add(_typed.text, scanned: false),
                 child: _busy
                     ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Text('Add friend'),
@@ -295,56 +297,152 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
 
   Widget _confirm() {
     final paired = _paired!;
+    final accent = widget.mySigil.accent.color;
+    const verifiedColor = Color(0xFF3DDC97);
+    const pendingColor = Color(0xFFFFC145);
     return ListView(
       key: const ValueKey('confirm'),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(Space.xl),
       children: [
-        const SizedBox(height: 8),
+        _SigilEquation(mine: widget.mySigil, theirs: _friendSigil!, shared: _pairSigil!, friend: paired.friend),
+        const SizedBox(height: Space.xl),
         Center(
-          child: TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0, end: 1),
-            duration: const Duration(milliseconds: 900),
-            curve: Curves.easeOutCubic,
-            builder: (_, v, child) => Opacity(opacity: v, child: Transform.scale(scale: 0.7 + 0.3 * v, child: child)),
-            child: SizedBox.square(dimension: 200, child: ClipOval(child: LivingSigil(spec: _pairSigil!, period: 40))),
+          child: _Badge(
+            color: paired.verified ? verifiedColor : pendingColor,
+            icon: paired.verified ? Icons.verified_user_rounded : Icons.shield_outlined,
+            label: paired.verified ? 'Verified in person' : 'Not verified yet',
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: Space.lg),
         Text(
-          'Is this really ${paired.friend}?',
+          paired.verified ? '${paired.friend} is added' : 'Is this really ${paired.friend}?',
           textAlign: TextAlign.center,
           style: AppText.title,
         ),
-        const SizedBox(height: 10),
-        const Text(
-          'Once they have added your code too, their phone shows this same sigil and number. '
-          'Together, compare the sigils. Far away, read the number to each other on a call.',
+        const SizedBox(height: Space.sm),
+        Text(
+          'Your chat\'s sigil is made from both your keys. Once ${paired.friend} adds your code too, '
+          'their phone shows this same sigil and number.'
+          '${paired.verified ? '' : ' Call them and compare the number: if it matches, nobody swapped your codes.'}',
           textAlign: TextAlign.center,
           style: AppText.caption,
         ),
-        const SizedBox(height: 20),
+        const SizedBox(height: Space.xl),
         const Text('SAFETY NUMBER', textAlign: TextAlign.center, style: AppText.overline),
         const SizedBox(height: 6),
         SelectableText(
           paired.safetyNumber,
           textAlign: TextAlign.center,
-          style: AppText.mono.copyWith(fontSize: 30, letterSpacing: 3, color: widget.mySigil.accent.color),
+          style: AppText.mono.copyWith(fontSize: 30, letterSpacing: 3, color: accent),
         ),
-        const SizedBox(height: 28),
-        FilledButton(
-          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-          onPressed: () {
-            HapticFeedback.heavyImpact();
-            Navigator.pop(context, true);
-          },
-          child: const Text('Yes, they match'),
-        ),
-        const SizedBox(height: 8),
+        const SizedBox(height: Space.xl),
+        if (paired.verified)
+          FilledButton(onPressed: _done, child: const Text('Done'))
+        else ...[
+          FilledButton(
+            onPressed: () async {
+              await friendSetVerified(chatId: paired.chatId, verified: true);
+              _done();
+            },
+            child: const Text('Numbers match'),
+          ),
+          const SizedBox(height: Space.sm),
+          OutlinedButton(onPressed: _done, child: const Text('Verify later')),
+        ],
+        const SizedBox(height: Space.sm),
         TextButton(
           onPressed: _reject,
-          child: const Text("They don't match", style: TextStyle(color: Colors.redAccent)),
+          child: const Text("They don't match", style: TextStyle(color: Palette.danger)),
         ),
       ],
+    );
+  }
+
+  void _done() {
+    HapticFeedback.heavyImpact();
+    Navigator.pop(context, true);
+  }
+}
+
+/// You + friend = your chat: shows that the shared sigil comes from both
+/// keys, which is why it differs from either person's own sigil.
+class _SigilEquation extends StatelessWidget {
+  const _SigilEquation({required this.mine, required this.theirs, required this.shared, required this.friend});
+
+  final SigilSpec mine;
+  final SigilSpec theirs;
+  final SigilSpec shared;
+  final String friend;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget appear(double from, Widget child) => TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: Duration(milliseconds: (from * 1000).round() + 500),
+          curve: Interval(from / (from + 0.5), 1, curve: Motion.decelerate),
+          builder: (_, v, c) => Opacity(opacity: v, child: Transform.scale(scale: 0.8 + 0.2 * v, child: c)),
+          child: child,
+        );
+    Widget small(SigilSpec spec, String label) => Column(
+          children: [
+            SizedBox.square(dimension: 60, child: ClipOval(child: SigilView(spec: spec))),
+            const SizedBox(height: 6),
+            Text(label, style: AppText.micro, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ],
+        );
+    const op = TextStyle(fontFamily: 'SpaceGrotesk', fontSize: 22, color: Palette.textFaint);
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            appear(0, small(mine, 'You')),
+            const Padding(padding: EdgeInsets.fromLTRB(14, 0, 14, 18), child: Text('+', style: op)),
+            appear(0.25, small(theirs, friend)),
+          ],
+        ),
+        const SizedBox(height: Space.sm),
+        appear(0.5, const Icon(Icons.keyboard_double_arrow_down_rounded, color: Palette.textFaint)),
+        const SizedBox(height: Space.sm),
+        appear(
+          0.75,
+          Column(
+            children: [
+              SizedBox.square(dimension: 170, child: ClipOval(child: LivingSigil(spec: shared, period: 40))),
+              const SizedBox(height: 8),
+              const Text('YOUR CHAT\'S SIGIL', style: AppText.overline),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  const _Badge({required this.color, required this.icon, required this.label});
+
+  final Color color;
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(Radii.sm),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(label, style: AppText.micro.copyWith(color: color, fontWeight: FontWeight.w600)),
+        ],
+      ),
     );
   }
 }

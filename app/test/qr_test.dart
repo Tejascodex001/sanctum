@@ -33,7 +33,7 @@ void main() {
     // It is our own code, so a correct parse is reported as "own code".
     for (final typed in [code, codeGroups(code), codeGroups(code).toLowerCase(), 'Add me on Sanctum:\n\n$code']) {
       await expectLater(
-        friendAdd(code: typed),
+        friendAdd(code: typed, scanned: false),
         throwsA(predicate((e) => e.toString().contains('own code'))),
         reason: typed,
       );

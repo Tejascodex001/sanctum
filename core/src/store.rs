@@ -58,6 +58,51 @@ pub struct Peer {
     pub name: String,
     /// Where to reach them over Tor, once known.
     pub onion: Option<String>,
+    /// Their key is confirmed: their QR was scanned in person, or the
+    /// safety number was compared (like Threema's green level).
+    pub verified: bool,
+}
+
+/// The second on-disk format, before friends could be verified.
+#[derive(Deserialize)]
+struct ChatMetaV1 {
+    kind: ChatKind,
+    title: String,
+    sigil_key: Vec<u8>,
+    pinned: bool,
+    created_at: u64,
+    group_id: Vec<u8>,
+    peers: Vec<PeerV1>,
+}
+
+#[derive(Deserialize)]
+struct PeerV1 {
+    identity: [u8; 32],
+    name: String,
+    onion: Option<String>,
+}
+
+impl From<ChatMetaV1> for ChatMeta {
+    fn from(v: ChatMetaV1) -> Self {
+        Self {
+            kind: v.kind,
+            title: v.title,
+            sigil_key: v.sigil_key,
+            pinned: v.pinned,
+            created_at: v.created_at,
+            group_id: v.group_id,
+            peers: v
+                .peers
+                .into_iter()
+                .map(|p| Peer {
+                    identity: p.identity,
+                    name: p.name,
+                    onion: p.onion,
+                    verified: false,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// The first on-disk format, before chats carried groups and peers.
@@ -465,10 +510,13 @@ impl Store {
     /// Reads a chat in the current format, upgrading older records.
     fn decode_chat(&self, id: i64, sealed: &[u8]) -> Result<ChatMeta> {
         let plain = self.open_bytes(&chat_aad(id), sealed)?;
-        match postcard::from_bytes::<ChatMeta>(&plain) {
-            Ok(meta) => Ok(meta),
-            Err(_) => Ok(postcard::from_bytes::<ChatMetaV0>(&plain)?.into()),
+        if let Ok(meta) = postcard::from_bytes::<ChatMeta>(&plain) {
+            return Ok(meta);
         }
+        if let Ok(v1) = postcard::from_bytes::<ChatMetaV1>(&plain) {
+            return Ok(v1.into());
+        }
+        Ok(postcard::from_bytes::<ChatMetaV0>(&plain)?.into())
     }
 }
 
@@ -598,6 +646,50 @@ mod tests {
         assert!(s.messages(chat, None).unwrap()[0].delivered);
         assert!(s.outbox_for(&peer).unwrap().is_empty());
         assert!(s.outbox_remove(&pending[0].0).unwrap().is_none());
+    }
+
+    #[test]
+    fn friends_from_before_verification_upgrade_as_unverified() {
+        #[derive(Serialize)]
+        struct PeerV1 {
+            identity: [u8; 32],
+            name: String,
+            onion: Option<String>,
+        }
+        #[derive(Serialize)]
+        struct V1 {
+            kind: ChatKind,
+            title: String,
+            sigil_key: Vec<u8>,
+            pinned: bool,
+            created_at: u64,
+            group_id: Vec<u8>,
+            peers: Vec<PeerV1>,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[4; 32]).unwrap();
+        let old = V1 {
+            kind: ChatKind::Direct,
+            title: "Bob".into(),
+            sigil_key: vec![2; 32],
+            pinned: false,
+            created_at: 3,
+            group_id: vec![5, 6],
+            peers: vec![PeerV1 {
+                identity: [7; 32],
+                name: "Bob".into(),
+                onion: None,
+            }],
+        };
+        s.db.execute(
+            "INSERT INTO chats (id, sealed) VALUES (77, ?1)",
+            params![s.seal(&chat_aad(77), &old).unwrap()],
+        )
+        .unwrap();
+        let (_, meta) = s.chats().unwrap().remove(0);
+        assert_eq!(meta.group_id, vec![5, 6]);
+        assert_eq!(meta.peers[0].identity, [7; 32]);
+        assert!(!meta.peers[0].verified);
     }
 
     #[test]

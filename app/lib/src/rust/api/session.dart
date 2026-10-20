@@ -43,9 +43,22 @@ Future<void> netStart({
 Future<String> myCode({required String myName}) =>
     RustLib.instance.api.crateApiSessionMyCode(myName: myName);
 
-/// Adds the friend whose code was scanned, pasted or typed.
-Future<PairedView> friendAdd({required String code}) =>
-    RustLib.instance.api.crateApiSessionFriendAdd(code: code);
+/// Adds the friend whose code was scanned (`scanned`: in person, so
+/// verified), pasted or typed (verify later by comparing safety numbers).
+Future<PairedView> friendAdd({required String code, required bool scanned}) =>
+    RustLib.instance.api.crateApiSessionFriendAdd(code: code, scanned: scanned);
+
+/// Marks a friend verified (or not) after comparing safety numbers.
+Future<void> friendSetVerified({
+  required PlatformInt64 chatId,
+  required bool verified,
+}) => RustLib.instance.api.crateApiSessionFriendSetVerified(
+  chatId: chatId,
+  verified: verified,
+);
+
+Future<String> friendSafetyNumber({required PlatformInt64 chatId}) =>
+    RustLib.instance.api.crateApiSessionFriendSafetyNumber(chatId: chatId);
 
 /// Friends, for choosing whom to start a temp chat with.
 Future<List<FriendView>> friendList() =>
@@ -116,6 +129,14 @@ enum NetStatus { off, connecting, online, failed }
 class PairedView {
   final PlatformInt64 chatId;
   final String friend;
+
+  /// The friend's identity key: their own sigil comes from it.
+  final Uint8List friendKey;
+
+  /// Added by scanning their QR in person.
+  final bool verified;
+
+  /// The shared chat sigil, made from both keys.
   final Uint8List sigilKey;
 
   /// Read aloud on a call to confirm a remote pairing.
@@ -124,6 +145,8 @@ class PairedView {
   const PairedView({
     required this.chatId,
     required this.friend,
+    required this.friendKey,
+    required this.verified,
     required this.sigilKey,
     required this.safetyNumber,
   });
@@ -132,6 +155,8 @@ class PairedView {
   int get hashCode =>
       chatId.hashCode ^
       friend.hashCode ^
+      friendKey.hashCode ^
+      verified.hashCode ^
       sigilKey.hashCode ^
       safetyNumber.hashCode;
 
@@ -142,6 +167,8 @@ class PairedView {
           runtimeType == other.runtimeType &&
           chatId == other.chatId &&
           friend == other.friend &&
+          friendKey == other.friendKey &&
+          verified == other.verified &&
           sigilKey == other.sigilKey &&
           safetyNumber == other.safetyNumber;
 }

@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -705748696;
+  int get rustContentHash => 1696029448;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -99,9 +99,21 @@ abstract class RustLibApi extends BaseApi {
     required bool pinned,
   });
 
-  Future<PairedView> crateApiSessionFriendAdd({required String code});
+  Future<PairedView> crateApiSessionFriendAdd({
+    required String code,
+    required bool scanned,
+  });
 
   Future<List<FriendView>> crateApiSessionFriendList();
+
+  Future<String> crateApiSessionFriendSafetyNumber({
+    required PlatformInt64 chatId,
+  });
+
+  Future<void> crateApiSessionFriendSetVerified({
+    required PlatformInt64 chatId,
+    required bool verified,
+  });
 
   Future<Uint8List> crateApiIdentityIdentityNew();
 
@@ -332,12 +344,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
-  Future<PairedView> crateApiSessionFriendAdd({required String code}) {
+  Future<PairedView> crateApiSessionFriendAdd({
+    required String code,
+    required bool scanned,
+  }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(code, serializer);
+          sse_encode_bool(scanned, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -350,14 +366,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiSessionFriendAddConstMeta,
-        argValues: [code],
+        argValues: [code, scanned],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiSessionFriendAddConstMeta =>
-      const TaskConstMeta(debugName: "friend_add", argNames: ["code"]);
+  TaskConstMeta get kCrateApiSessionFriendAddConstMeta => const TaskConstMeta(
+    debugName: "friend_add",
+    argNames: ["code", "scanned"],
+  );
 
   @override
   Future<List<FriendView>> crateApiSessionFriendList() {
@@ -387,6 +405,74 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "friend_list", argNames: []);
 
   @override
+  Future<String> crateApiSessionFriendSafetyNumber({
+    required PlatformInt64 chatId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(chatId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 8,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiSessionFriendSafetyNumberConstMeta,
+        argValues: [chatId],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionFriendSafetyNumberConstMeta =>
+      const TaskConstMeta(
+        debugName: "friend_safety_number",
+        argNames: ["chatId"],
+      );
+
+  @override
+  Future<void> crateApiSessionFriendSetVerified({
+    required PlatformInt64 chatId,
+    required bool verified,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_i_64(chatId, serializer);
+          sse_encode_bool(verified, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 9,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiSessionFriendSetVerifiedConstMeta,
+        argValues: [chatId, verified],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiSessionFriendSetVerifiedConstMeta =>
+      const TaskConstMeta(
+        debugName: "friend_set_verified",
+        argNames: ["chatId", "verified"],
+      );
+
+  @override
   Future<Uint8List> crateApiIdentityIdentityNew() {
     return handler.executeNormal(
       NormalTask(
@@ -395,7 +481,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 8,
+            funcId: 10,
             port: port_,
           );
         },
@@ -425,7 +511,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 11,
             port: port_,
           );
         },
@@ -455,7 +541,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 12,
             port: port_,
           );
         },
@@ -487,7 +573,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 13,
             port: port_,
           );
         },
@@ -521,7 +607,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 14,
             port: port_,
           );
         },
@@ -551,7 +637,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 15,
             port: port_,
           );
         },
@@ -585,7 +671,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 16,
             port: port_,
           );
         },
@@ -614,7 +700,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 17,
             port: port_,
           );
         },
@@ -648,7 +734,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 18,
             port: port_,
           );
         },
@@ -678,7 +764,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 17,
+            funcId: 19,
             port: port_,
           );
         },
@@ -710,7 +796,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 20,
             port: port_,
           );
         },
@@ -737,7 +823,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 21,
             port: port_,
           );
         },
@@ -764,7 +850,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 22,
             port: port_,
           );
         },
@@ -791,7 +877,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 23,
             port: port_,
           );
         },
@@ -821,7 +907,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 22,
+            funcId: 24,
             port: port_,
           );
         },
@@ -849,7 +935,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 25,
             port: port_,
           );
         },
@@ -881,7 +967,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 26,
             port: port_,
           );
         },
@@ -909,7 +995,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 27,
             port: port_,
           );
         },
@@ -936,7 +1022,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 28,
             port: port_,
           );
         },
@@ -1149,13 +1235,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PairedView dco_decode_paired_view(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return PairedView(
       chatId: dco_decode_i_64(arr[0]),
       friend: dco_decode_String(arr[1]),
-      sigilKey: dco_decode_list_prim_u_8_strict(arr[2]),
-      safetyNumber: dco_decode_String(arr[3]),
+      friendKey: dco_decode_list_prim_u_8_strict(arr[2]),
+      verified: dco_decode_bool(arr[3]),
+      sigilKey: dco_decode_list_prim_u_8_strict(arr[4]),
+      safetyNumber: dco_decode_String(arr[5]),
     );
   }
 
@@ -1189,8 +1277,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   StoredChat dco_decode_stored_chat(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return StoredChat(
       id: dco_decode_i_64(arr[0]),
       kind: dco_decode_chat_kind_view(arr[1]),
@@ -1198,6 +1286,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       sigilKey: dco_decode_list_prim_u_8_strict(arr[3]),
       pinned: dco_decode_bool(arr[4]),
       createdAt: dco_decode_i_64(arr[5]),
+      verified: dco_decode_bool(arr[6]),
     );
   }
 
@@ -1504,11 +1593,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_chatId = sse_decode_i_64(deserializer);
     var var_friend = sse_decode_String(deserializer);
+    var var_friendKey = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_verified = sse_decode_bool(deserializer);
     var var_sigilKey = sse_decode_list_prim_u_8_strict(deserializer);
     var var_safetyNumber = sse_decode_String(deserializer);
     return PairedView(
       chatId: var_chatId,
       friend: var_friend,
+      friendKey: var_friendKey,
+      verified: var_verified,
       sigilKey: var_sigilKey,
       safetyNumber: var_safetyNumber,
     );
@@ -1557,6 +1650,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_sigilKey = sse_decode_list_prim_u_8_strict(deserializer);
     var var_pinned = sse_decode_bool(deserializer);
     var var_createdAt = sse_decode_i_64(deserializer);
+    var var_verified = sse_decode_bool(deserializer);
     return StoredChat(
       id: var_id,
       kind: var_kind,
@@ -1564,6 +1658,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       sigilKey: var_sigilKey,
       pinned: var_pinned,
       createdAt: var_createdAt,
+      verified: var_verified,
     );
   }
 
@@ -1876,6 +1971,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_64(self.chatId, serializer);
     sse_encode_String(self.friend, serializer);
+    sse_encode_list_prim_u_8_strict(self.friendKey, serializer);
+    sse_encode_bool(self.verified, serializer);
     sse_encode_list_prim_u_8_strict(self.sigilKey, serializer);
     sse_encode_String(self.safetyNumber, serializer);
   }
@@ -1910,6 +2007,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_prim_u_8_strict(self.sigilKey, serializer);
     sse_encode_bool(self.pinned, serializer);
     sse_encode_i_64(self.createdAt, serializer);
+    sse_encode_bool(self.verified, serializer);
   }
 
   @protected

@@ -315,6 +315,7 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
+          if (card.friend && !card.temp) _VerifyButton(card: card),
           if (onWipe != null)
             TextButton.icon(
               onPressed: onWipe,
@@ -322,6 +323,98 @@ class _Header extends StatelessWidget {
               label: const Text('Wipe', style: TextStyle(color: Palette.danger)),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Verification status, like Threema's levels: green once their key is
+/// confirmed (QR scanned in person, or safety number compared on a call).
+class _VerifyButton extends StatefulWidget {
+  const _VerifyButton({required this.card});
+
+  final ChatCard card;
+
+  @override
+  State<_VerifyButton> createState() => _VerifyButtonState();
+}
+
+class _VerifyButtonState extends State<_VerifyButton> {
+  static const _green = Color(0xFF3DDC97);
+  static const _amber = Color(0xFFFFC145);
+
+  Future<void> _open() async {
+    final number = await friendSafetyNumber(chatId: widget.card.id);
+    if (!mounted) return;
+    final card = widget.card;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheet) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(Space.xl, 0, Space.xl, Space.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox.square(dimension: 110, child: ClipOval(child: SigilView(spec: card.sigil))),
+                const SizedBox(height: Space.lg),
+                Text(card.verified ? '${card.title} is verified' : 'Verify ${card.title}', style: AppText.title),
+                const SizedBox(height: Space.sm),
+                Text(
+                  card.verified
+                      ? 'Their key was confirmed: by scanning their code in person, or by comparing this number.'
+                      : 'Call ${card.title} and read this number to each other. If it matches on both phones, '
+                          'nobody swapped your codes.',
+                  textAlign: TextAlign.center,
+                  style: AppText.caption,
+                ),
+                const SizedBox(height: Space.lg),
+                const Text('SAFETY NUMBER', style: AppText.overline),
+                const SizedBox(height: 6),
+                SelectableText(number, style: AppText.mono.copyWith(fontSize: 26, letterSpacing: 3, color: card.sigil.accent.color)),
+                const SizedBox(height: Space.xl),
+                SizedBox(
+                  width: double.infinity,
+                  child: card.verified
+                      ? OutlinedButton(
+                          onPressed: () async {
+                            await friendSetVerified(chatId: card.id, verified: false);
+                            setSheet(() => card.verified = false);
+                            setState(() {});
+                          },
+                          child: const Text('Mark as not verified'),
+                        )
+                      : FilledButton(
+                          onPressed: () async {
+                            HapticFeedback.heavyImpact();
+                            await friendSetVerified(chatId: card.id, verified: true);
+                            setSheet(() => card.verified = true);
+                            setState(() {});
+                          },
+                          child: const Text('Numbers match'),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final verified = widget.card.verified;
+    return IconButton(
+      tooltip: verified ? 'Verified' : 'Not verified',
+      onPressed: _open,
+      icon: AnimatedSwitcher(
+        duration: Motion.medium,
+        child: Icon(
+          verified ? Icons.verified_user_rounded : Icons.shield_outlined,
+          key: ValueKey(verified),
+          color: verified ? _green : _amber,
+        ),
       ),
     );
   }

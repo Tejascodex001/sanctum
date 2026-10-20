@@ -17,6 +17,9 @@ pub struct StoredChat {
     pub sigil_key: Vec<u8>,
     pub pinned: bool,
     pub created_at: i64,
+    /// Friends' chats: their key is confirmed (scanned in person or
+    /// safety number compared).
+    pub verified: bool,
 }
 
 pub struct MessageView {
@@ -47,6 +50,7 @@ pub fn chat_list() -> anyhow::Result<Vec<StoredChat>> {
                 sigil_key: m.sigil_key,
                 pinned: m.pinned,
                 created_at: m.created_at as i64,
+                verified: m.peers.iter().all(|p| p.verified),
             })
             .collect())
     })

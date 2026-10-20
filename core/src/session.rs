@@ -44,6 +44,10 @@ pub type Result<T> = std::result::Result<T, SessionError>;
 pub struct Paired {
     pub chat_id: i64,
     pub friend: String,
+    /// The friend's identity key (their own sigil comes from it).
+    pub friend_key: [u8; 32],
+    /// Added by scanning their QR in person.
+    pub verified: bool,
     /// Both phones derive the same sigil from this.
     pub sigil_key: Vec<u8>,
     /// Both phones show this number, to compare on a call.
@@ -112,8 +116,10 @@ impl Session {
 
     /// Adds the friend whose code was scanned, pasted or typed. Each friend
     /// adds the other's code; the encrypted session is set up on first
-    /// contact.
-    pub fn add_friend(&mut self, code: &str) -> Result<Paired> {
+    /// contact. A code `scanned` in person from their screen counts as
+    /// verified; a typed or pasted one is verified later by comparing the
+    /// safety number.
+    pub fn add_friend(&mut self, code: &str, scanned: bool) -> Result<Paired> {
         let friend = FriendCode::decode(code)?;
         if friend.identity == self.public_key() {
             return Err(SessionError::OwnCode);
@@ -138,14 +144,32 @@ impl Session {
                 identity: friend.identity,
                 name: name.clone(),
                 onion: None,
+                verified: scanned,
             }],
         })?;
         Ok(Paired {
             chat_id,
             friend: name,
+            friend_key: friend.identity,
+            verified: scanned,
             safety_number: safety_number(&sigil_key),
             sigil_key,
         })
+    }
+
+    /// Marks a friend verified after comparing the safety number.
+    pub fn set_verified(&mut self, chat_id: i64, verified: bool) -> Result<()> {
+        let mut meta = self.chat(chat_id)?;
+        for p in &mut meta.peers {
+            p.verified = verified;
+        }
+        self.store.update_chat(chat_id, &meta)?;
+        Ok(())
+    }
+
+    /// The safety number for a friend's chat.
+    pub fn safety_number(&self, chat_id: i64) -> Result<String> {
+        Ok(safety_number(&self.chat(chat_id)?.sigil_key))
     }
 
     /// Friends, as (chat id, friend).
@@ -616,8 +640,8 @@ mod tests {
 
     /// Both add each other's codes. Returns (alice's chat with bob, bob's chat with alice).
     fn befriend(a: &mut Phone, b: &mut Phone) -> (i64, i64) {
-        let ab = a.s.add_friend(&b.s.my_code("Bob")).unwrap().chat_id;
-        let ba = b.s.add_friend(&a.s.my_code("Alice")).unwrap().chat_id;
+        let ab = a.s.add_friend(&b.s.my_code("Bob"), true).unwrap().chat_id;
+        let ba = b.s.add_friend(&a.s.my_code("Alice"), true).unwrap().chat_id;
         (ab, ba)
     }
 
@@ -859,19 +883,32 @@ mod tests {
     #[test]
     fn friend_codes_and_safety_numbers() {
         let (mut alice, mut bob) = (Phone::new(), Phone::new());
-        let on_alice = alice.s.add_friend(&bob.s.my_code("Bob")).unwrap();
-        let on_bob = bob.s.add_friend(&alice.s.my_code("Alice")).unwrap();
+        // Alice scans Bob's QR in person; Bob types Alice's code.
+        let on_alice = alice.s.add_friend(&bob.s.my_code("Bob"), true).unwrap();
+        let on_bob = bob.s.add_friend(&alice.s.my_code("Alice"), false).unwrap();
         assert_eq!(
             (on_alice.friend.as_str(), on_bob.friend.as_str()),
             ("Bob", "Alice")
         );
         assert_eq!(on_alice.safety_number, on_bob.safety_number);
+        assert_eq!(
+            on_alice.sigil_key, on_bob.sigil_key,
+            "same shared sigil on both phones"
+        );
+        assert_eq!(on_alice.friend_key, bob.pk());
+        assert!(on_alice.verified && !on_bob.verified);
+        assert_eq!(
+            bob.s.safety_number(on_bob.chat_id).unwrap(),
+            on_bob.safety_number
+        );
+        bob.s.set_verified(on_bob.chat_id, true).unwrap();
+        assert!(bob.s.chat(on_bob.chat_id).unwrap().peers[0].verified);
         assert!(matches!(
-            alice.s.add_friend(&bob.s.my_code("Bob")),
+            alice.s.add_friend(&bob.s.my_code("Bob"), true),
             Err(SessionError::AlreadyFriends)
         ));
         assert!(matches!(
-            alice.s.add_friend(&alice.s.my_code("me")),
+            alice.s.add_friend(&alice.s.my_code("me"), true),
             Err(SessionError::OwnCode)
         ));
     }

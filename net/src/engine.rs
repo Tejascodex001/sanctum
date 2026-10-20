@@ -333,14 +333,14 @@ mod tests {
             .session
             .lock()
             .unwrap()
-            .add_friend(&b_code)
+            .add_friend(&b_code, true)
             .unwrap()
             .chat_id;
         let ba = b
             .session
             .lock()
             .unwrap()
-            .add_friend(&a_code)
+            .add_friend(&a_code, true)
             .unwrap()
             .chat_id;
         (ab, ba)

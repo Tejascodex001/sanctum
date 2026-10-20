@@ -97,6 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
         sigil: await _sigil(c.sigilKey),
         source: StoreSource(c.id),
         friend: !notes,
+        verified: c.verified,
         note: notes ? 'Only on this device' : 'End-to-end encrypted · over Tor',
         updatedAt: DateTime.fromMillisecondsSinceEpoch(c.createdAt * 1000),
       )..pinned = c.pinned;

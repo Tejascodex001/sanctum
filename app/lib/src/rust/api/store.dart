@@ -85,6 +85,10 @@ class StoredChat {
   final bool pinned;
   final PlatformInt64 createdAt;
 
+  /// Friends' chats: their key is confirmed (scanned in person or
+  /// safety number compared).
+  final bool verified;
+
   const StoredChat({
     required this.id,
     required this.kind,
@@ -92,6 +96,7 @@ class StoredChat {
     required this.sigilKey,
     required this.pinned,
     required this.createdAt,
+    required this.verified,
   });
 
   @override
@@ -101,7 +106,8 @@ class StoredChat {
       title.hashCode ^
       sigilKey.hashCode ^
       pinned.hashCode ^
-      createdAt.hashCode;
+      createdAt.hashCode ^
+      verified.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -113,5 +119,6 @@ class StoredChat {
           title == other.title &&
           sigilKey == other.sigilKey &&
           pinned == other.pinned &&
-          createdAt == other.createdAt;
+          createdAt == other.createdAt &&
+          verified == other.verified;
 }

@@ -174,6 +174,11 @@ pub(crate) fn poke(peer: Option<[u8; 32]>) {
 pub struct PairedView {
     pub chat_id: i64,
     pub friend: String,
+    /// The friend's identity key: their own sigil comes from it.
+    pub friend_key: Vec<u8>,
+    /// Added by scanning their QR in person.
+    pub verified: bool,
+    /// The shared chat sigil, made from both keys.
     pub sigil_key: Vec<u8>,
     /// Read aloud on a call to confirm a remote pairing.
     pub safety_number: String,
@@ -184,6 +189,8 @@ impl From<Paired> for PairedView {
         Self {
             chat_id: p.chat_id,
             friend: p.friend,
+            friend_key: p.friend_key.to_vec(),
+            verified: p.verified,
             sigil_key: p.sigil_key,
             safety_number: p.safety_number,
         }
@@ -195,10 +202,20 @@ pub fn my_code(my_name: String) -> anyhow::Result<String> {
     with(|s| Ok(s.my_code(&my_name)))
 }
 
-/// Adds the friend whose code was scanned, pasted or typed.
-pub fn friend_add(code: String) -> anyhow::Result<PairedView> {
-    let paired = with(|s| Ok(s.add_friend(&code)?))?;
+/// Adds the friend whose code was scanned (`scanned`: in person, so
+/// verified), pasted or typed (verify later by comparing safety numbers).
+pub fn friend_add(code: String, scanned: bool) -> anyhow::Result<PairedView> {
+    let paired = with(|s| Ok(s.add_friend(&code, scanned)?))?;
     Ok(paired.into())
+}
+
+/// Marks a friend verified (or not) after comparing safety numbers.
+pub fn friend_set_verified(chat_id: i64, verified: bool) -> anyhow::Result<()> {
+    with(|s| Ok(s.set_verified(chat_id, verified)?))
+}
+
+pub fn friend_safety_number(chat_id: i64) -> anyhow::Result<String> {
+    with(|s| Ok(s.safety_number(chat_id)?))
 }
 
 pub struct FriendView {
