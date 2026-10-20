@@ -11,6 +11,7 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 const NONCE_LEN: usize = 24;
@@ -58,6 +59,9 @@ pub struct StoredMessage {
 pub struct Store {
     db: Connection,
     cipher: XChaCha20Poly1305,
+    /// Keys the hashes that index MLS state, so lookup keys (which contain
+    /// group ids) never appear on disk.
+    index_key: [u8; 32],
 }
 
 impl Store {
@@ -71,6 +75,10 @@ impl Store {
                  id INTEGER PRIMARY KEY,
                  sealed BLOB NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS mls_kv (
+                 k BLOB PRIMARY KEY,
+                 sealed BLOB NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS messages (
                  chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
                  seq INTEGER NOT NULL,
@@ -81,6 +89,7 @@ impl Store {
         let store = Self {
             db,
             cipher: XChaCha20Poly1305::new(key.into()),
+            index_key: blake3::derive_key("sanctum store index v1", key),
         };
         // Fail fast on a wrong key rather than on first read.
         if let Some((id, sealed)) = store
@@ -172,6 +181,40 @@ impl Store {
         Ok(out)
     }
 
+    /// All persisted MLS state (group secrets, ratchets, key packages).
+    pub fn mls_load(&self) -> Result<HashMap<Vec<u8>, Vec<u8>>> {
+        let mut stmt = self.db.prepare("SELECT k, sealed FROM mls_kv")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?;
+        rows.map(|row| {
+            let (hashed, sealed) = row?;
+            self.open_sealed::<(Vec<u8>, Vec<u8>)>(&mls_aad(&hashed), &sealed)
+        })
+        .collect()
+    }
+
+    /// Writes changed MLS entries and removes deleted ones, atomically.
+    pub fn mls_apply(&self, upserts: &[(&[u8], &[u8])], deletes: &[&[u8]]) -> Result<()> {
+        let tx = self.db.unchecked_transaction()?;
+        for (k, v) in upserts {
+            let hashed = self.mls_index(k);
+            tx.execute(
+                "INSERT OR REPLACE INTO mls_kv (k, sealed) VALUES (?1, ?2)",
+                params![hashed, self.seal(&mls_aad(&hashed), &(k, v))?],
+            )?;
+        }
+        for k in deletes {
+            tx.execute("DELETE FROM mls_kv WHERE k = ?1", [self.mls_index(k)])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn mls_index(&self, k: &[u8]) -> Vec<u8> {
+        blake3::keyed_hash(&self.index_key, k).as_bytes().to_vec()
+    }
+
     fn chat_exists(&self, id: i64) -> Result<bool> {
         Ok(self
             .db
@@ -207,6 +250,10 @@ impl Store {
 
 fn chat_aad(id: i64) -> Vec<u8> {
     [b"chat:".as_slice(), &id.to_le_bytes()].concat()
+}
+
+fn mls_aad(hashed_key: &[u8]) -> Vec<u8> {
+    [b"mls:".as_slice(), hashed_key].concat()
 }
 
 fn message_aad(chat_id: i64, seq: i64) -> Vec<u8> {

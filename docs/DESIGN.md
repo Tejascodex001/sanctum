@@ -16,8 +16,8 @@ Flutter UI (Sigil + Deck)
 Rust core (sanctum-core)
    ├─ identity   Ed25519 key = your address; BLAKE3 fingerprints
    ├─ sigil      generative art from key fingerprints (also used for verification)
-   ├─ crypto     OpenMLS groups (1:1 is a 2-member group)            [todo]
-   ├─ store      SQLCipher, key in Android Keystore, unlocked by biometric/PIN   [todo]
+   ├─ mls        OpenMLS (RFC 9420) groups; 1:1 is a 2-member group. Identity key = MLS signing key
+   ├─ store      SQLite with every row sealed (XChaCha20-Poly1305); key in Android Keystore
    ├─ temp_chat  in-memory only, 24h TTL, wipe anytime
    └─ transport  Internet: Tor onion service per device (Arti)          [todo]
                  Nearby: Wi-Fi Direct + Bluetooth LE (temp chats)        [todo]
@@ -28,6 +28,11 @@ Rust core (sanctum-core)
 - A foreground service keeps it reachable (no Google push, so Google never sees activity).
 - If a recipient is offline, online group members hold the encrypted message and pass it on later (store-and-forward). They can't read it.
 - Trade-offs: messages may take a few seconds longer; the app uses some battery; delivery is slow if nobody in the group is online.
+
+## Encryption
+- **In transit:** MLS with ciphersuite X25519 / ChaCha20-Poly1305 / SHA-256 / Ed25519. Forward secrecy and post-compromise security from MLS ratchets. Messages padded to 64-byte blocks to hide length. A member's MLS identity must equal their signing key, so nobody can impersonate a friend inside a group. Tampered or replayed messages are rejected.
+- **At rest:** every chat, message and MLS secret is sealed before SQLite sees it, with the row's identity bound as associated data so rows can't be swapped. Lookup keys for MLS state are keyed hashes, so group ids never appear on disk. `secure_delete` zeroes deleted data. Temp chats never touch disk.
+- MLS state is persisted after every operation; a crash before persisting just rolls back to the last saved state.
 
 ## Security features
 - App lock with biometric or PIN; locks again when the app goes to the background.
