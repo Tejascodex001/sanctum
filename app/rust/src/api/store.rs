@@ -25,6 +25,10 @@ pub struct StoredChat {
     pub waiting: bool,
     /// Left out of the list until revealed with biometrics.
     pub hidden: bool,
+    /// Groups: how many others are in it (or invited).
+    pub members: u32,
+    /// Groups: false once we've left or been removed.
+    pub active: bool,
 }
 
 pub struct MessageView {
@@ -73,6 +77,8 @@ pub fn chat_list() -> anyhow::Result<Vec<StoredChat>> {
                 verified: m.peers.iter().all(|p| p.verified),
                 waiting: m.kind == ChatKind::Direct && m.group_id.is_empty(),
                 hidden: m.hidden,
+                members: m.peers.len() as u32,
+                active: m.kind != ChatKind::Group || !m.group_id.is_empty(),
             })
             .collect())
     })
@@ -128,8 +134,10 @@ pub fn chat_delete(id: i64) -> anyhow::Result<()> {
 /// Saves a message and sends it to the friend (over Tor) if this is a
 /// friend's chat.
 pub fn message_send(chat_id: i64, body: String, reply_to: Option<i64>) -> anyhow::Result<()> {
-    let peer = session::with(|s| Ok(s.send_message(chat_id, &body, reply_to)?))?;
-    session::poke(peer);
+    let peers = session::with(|s| Ok(s.send_to_chat(chat_id, &body, reply_to)?))?;
+    for peer in peers {
+        session::poke(Some(peer));
+    }
     Ok(())
 }
 

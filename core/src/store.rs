@@ -221,6 +221,10 @@ pub enum OutboxState {
     /// everything here) so it can be re-encrypted if the pair's group has
     /// to be rebuilt before the friend could read it.
     Sealed { plain: Vec<u8>, cipher: Vec<u8> },
+    /// For a group: encrypted once, the same bytes go to every member.
+    Group { group: Vec<u8>, cipher: Vec<u8> },
+    /// A whole frame (a group welcome), sent as is until acknowledged.
+    Frame(Vec<u8>),
 }
 
 pub struct Store {
@@ -368,6 +372,22 @@ impl Store {
             .collect::<Result<Vec<_>>>()?;
         out.reverse();
         Ok(out)
+    }
+
+    /// Whether anything waiting to be delivered belongs to this message
+    /// (a group message waits for each member separately).
+    pub fn outbox_has_message(&self, chat_id: i64, seq: i64) -> Result<bool> {
+        let mut stmt = self.db.prepare("SELECT id, sealed FROM outbox")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
+        for row in rows {
+            let (id, sealed) = row?;
+            let id: [u8; 16] = id.try_into().map_err(|_| StoreError::Decrypt)?;
+            let item: OutboxItem = self.open_sealed(&outbox_aad(&id), &sealed)?;
+            if item.message == Some((chat_id, seq)) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// One message, by its sequence number.

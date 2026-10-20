@@ -13,6 +13,8 @@ class ChatCard {
     this.verified = false,
     this.friendChatId,
     this.hidden = false,
+    this.group = false,
+    this.active = true,
     this.note,
     DateTime? updatedAt,
   }) : updatedAt = updatedAt ?? DateTime.now();
@@ -35,6 +37,12 @@ class ChatCard {
 
   /// Hidden from the list; shown only after revealing hidden chats.
   final bool hidden;
+
+  /// A group chat (several friends, no server).
+  final bool group;
+
+  /// Groups: false once we've left or been removed.
+  final bool active;
 
   /// Shown under the title inside the chat.
   final String? note;

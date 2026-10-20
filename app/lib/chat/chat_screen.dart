@@ -15,10 +15,13 @@ import '../theme/tokens.dart';
 import 'message_source.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key, required this.card, required this.close, this.onWipe});
+  const ChatScreen({super.key, required this.card, required this.close, this.onWipe, this.onGroupInfo});
 
   final ChatCard card;
   final VoidCallback close;
+
+  /// Groups: members, rename, add, remove, leave.
+  final VoidCallback? onGroupInfo;
 
   /// Temp chats only: wipes the chat; the screen animates out first.
   final Future<void> Function()? onWipe;
@@ -206,7 +209,12 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           SafeArea(
             child: Column(
               children: [
-                _Header(card: widget.card, onBack: widget.close, onWipe: widget.onWipe == null ? null : _doWipe),
+                _Header(
+                  card: widget.card,
+                  onBack: widget.close,
+                  onWipe: widget.onWipe == null ? null : _doWipe,
+                  onInfo: widget.onGroupInfo,
+                ),
                 Expanded(
                   child: AnimatedBuilder(
                     animation: _wipe,
@@ -227,7 +235,17 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                     child: _messages.isEmpty ? _EmptyChat(card: widget.card) : _list(accent),
                   ),
                 ),
-                _composer(accent),
+                if (widget.card.active)
+                  _composer(accent)
+                else
+                  const Padding(
+                    padding: EdgeInsets.all(Space.lg),
+                    child: Text(
+                      'You\'re no longer in this group.',
+                      textAlign: TextAlign.center,
+                      style: AppText.caption,
+                    ),
+                  ),
               ],
             ),
           ),
@@ -424,11 +442,12 @@ class _RotatingImageState extends State<_RotatingImage> with SingleTickerProvide
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.card, required this.onBack, this.onWipe});
+  const _Header({required this.card, required this.onBack, this.onWipe, this.onInfo});
 
   final ChatCard card;
   final VoidCallback onBack;
   final VoidCallback? onWipe;
+  final VoidCallback? onInfo;
 
   @override
   Widget build(BuildContext context) {
@@ -451,48 +470,54 @@ class _Header extends StatelessWidget {
           ),
           const SizedBox(width: Space.md),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(card.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.heading),
-                const SizedBox(height: 2),
-                ValueListenableBuilder<Set<int>>(
-                  valueListenable: NetBus.instance.online,
-                  builder: (context, online, _) {
-                    final isOnline = card.friend && online.contains(card.friendChatId);
-                    return AnimatedSwitcher(
-                      duration: Motion.fast,
-                      child: Row(
-                        key: ValueKey(isOnline),
-                        children: [
-                          if (isOnline) ...[
-                            Container(
-                              width: 7,
-                              height: 7,
-                              decoration: const BoxDecoration(color: OnlineDot.color, shape: BoxShape.circle),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onInfo,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(card.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.heading),
+                  const SizedBox(height: 2),
+                  ValueListenableBuilder<Set<int>>(
+                    valueListenable: NetBus.instance.online,
+                    builder: (context, online, _) {
+                      final isOnline = card.friend && online.contains(card.friendChatId);
+                      return AnimatedSwitcher(
+                        duration: Motion.fast,
+                        child: Row(
+                          key: ValueKey(isOnline),
+                          children: [
+                            if (isOnline) ...[
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: const BoxDecoration(color: OnlineDot.color, shape: BoxShape.circle),
+                              ),
+                              const SizedBox(width: 5),
+                            ],
+                            Flexible(
+                              child: Text(
+                                isOnline
+                                    ? (card.temp ? 'Online · burns after 24h' : 'Online')
+                                    : card.temp
+                                        ? 'Temp · burns after 24h'
+                                        : card.note ?? 'Only on this device',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppText.micro.copyWith(color: isOnline ? OnlineDot.color : null),
+                              ),
                             ),
-                            const SizedBox(width: 5),
                           ],
-                          Flexible(
-                            child: Text(
-                              isOnline
-                                  ? (card.temp ? 'Online · burns after 24h' : 'Online')
-                                  : card.temp
-                                      ? 'Temp · burns after 24h'
-                                      : card.note ?? 'Only on this device',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: AppText.micro.copyWith(color: isOnline ? OnlineDot.color : null),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ],
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
+          if (onInfo != null)
+            IconButton(tooltip: 'Group info', icon: const Icon(Icons.groups_rounded, size: 20), onPressed: onInfo),
           _ShotsButton(chatKey: card.temp ? Notifier.tempKey(card.id) : Notifier.chatKey(card.id)),
           if (card.friend && !card.temp) _VerifyButton(card: card),
           if (onWipe != null)

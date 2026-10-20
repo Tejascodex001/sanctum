@@ -10,6 +10,7 @@ import '../deck/chat_card.dart';
 import '../deck/chat_stack.dart';
 import '../deck/chat_tile.dart';
 import '../friends/add_friend_screen.dart';
+import '../group/group_sheets.dart';
 import '../background/background.dart';
 import '../identity/secrets.dart';
 import '../net/net_bus.dart';
@@ -44,7 +45,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Hidden chats are listed only after a biometric check, until the app
   /// leaves the screen.
   bool _showHidden = false;
-  List<ChatCard> get _visibleChats => [for (final c in _chats) if (_showHidden || !c.hidden) c];
+  List<ChatCard> get _visibleChats => [
+        for (final c in _chats)
+          if (_showHidden || !c.hidden) c
+      ];
   final _pages = PageController();
   final _search = TextEditingController();
   final _sigils = <String, SigilSpec>{};
@@ -194,20 +198,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final cards = <ChatCard>[];
     for (final c in stored) {
       final notes = c.kind == ChatKindView.notes;
+      final group = c.kind == ChatKindView.group;
       final card = ChatCard(
         id: c.id,
         title: c.title,
         sigil: await _sigil(c.sigilKey),
         source: StoreSource(c.id),
         friend: !notes,
-        friendChatId: notes ? null : c.id,
+        friendChatId: notes || group ? null : c.id,
         hidden: c.hidden,
+        group: group,
+        active: c.active,
         verified: c.verified,
         note: notes
             ? 'Only on this device'
-            : c.waiting
-                ? 'Request sent · waiting for them to accept'
-                : 'End-to-end encrypted · over Tor',
+            : group
+                ? (c.active ? 'Group · ${c.members + 1} members · no server' : 'You\'re no longer in this group')
+                : c.waiting
+                    ? 'Request sent · waiting for them to accept'
+                    : 'End-to-end encrypted · over Tor',
         updatedAt: DateTime.fromMillisecondsSinceEpoch(c.createdAt * 1000),
       )..pinned = c.pinned;
       await card.refresh();
@@ -255,7 +264,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ..nextBurn = v.nextBurn == null ? null : DateTime.fromMillisecondsSinceEpoch(v.nextBurn!.toInt() * 1000);
       cards.add(card);
     }
-    if (mounted) setState(() => _temp..clear()..addAll(cards));
+    if (!mounted) return;
+    setState(() => _temp
+      ..clear()
+      ..addAll(cards));
   }
 
   bool get _onTemp => _page > 0.5 && _page < 1.5;
@@ -263,12 +275,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _newTemp() async {
     HapticFeedback.selectionClick();
-    final friends = await friendList();
+    final friends = await _friendsForPicker();
     if (!mounted) return;
     final picked = await showModalBottomSheet<(bool, int?)>(
       context: context,
       builder: (context) => _TempPicker(
-        friends: [for (final f in friends) if (_showHidden || !f.hidden) f],
+        friends: friends,
         sigil: _sigil,
       ),
     );
@@ -332,7 +344,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _wipe(card);
                 },
               ),
-            if (!card.temp && card.friendChatId != null)
+            if (!card.temp && card.friend)
               ListTile(
                 leading: Icon(card.hidden ? Icons.visibility_rounded : Icons.visibility_off_rounded),
                 title: Text(card.hidden ? 'Unhide chat' : 'Hide chat'),
@@ -342,7 +354,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _setHidden(card, !card.hidden);
                 },
               ),
-            if (card.friend && !card.temp) ...[
+            if (card.group) ...[
+              ListTile(
+                leading: const Icon(Icons.groups_rounded),
+                title: const Text('Group info'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _groupInfo(card);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.logout_rounded, color: Palette.danger),
+                title:
+                    Text(card.active ? 'Leave group' : 'Delete group', style: const TextStyle(color: Palette.danger)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _groupInfo(card);
+                },
+              ),
+            ],
+            if (card.friend && !card.temp && !card.group) ...[
               ListTile(
                 leading: const Icon(Icons.edit_rounded),
                 title: const Text('Rename'),
@@ -397,6 +428,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ..showSnackBar(const SnackBar(content: Text('Hidden. Long-press "Sanctum" to see hidden chats.')));
   }
 
+  Future<List<FriendView>> _friendsForPicker() async => [
+        for (final f in await friendList())
+          if (_showHidden || !f.hidden) f
+      ];
+
+  Future<void> _newGroup() async {
+    HapticFeedback.selectionClick();
+    final friends = await _friendsForPicker();
+    if (!mounted) return;
+    final id = await showNewGroupSheet(context, friends: friends, sigil: _sigil);
+    if (id == null) return;
+    await _loadChats();
+    final card = _chats.where((c) => c.id == id).firstOrNull;
+    if (card != null) await _open(card);
+  }
+
+  Future<void> _groupInfo(ChatCard card) async {
+    final left = await showGroupSheet(
+      context,
+      chatId: card.id,
+      sigil: card.sigil,
+      friends: _friendsForPicker,
+      sigilFor: _sigil,
+    );
+    await _loadChats();
+    if (left && mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+  }
+
   Future<void> _rename(ChatCard card) async {
     final name = await showDialog<String>(
       context: context,
@@ -434,6 +493,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _openChat(ChatCard card, VoidCallback close) => ChatScreen(
         card: card,
         close: close,
+        onGroupInfo: card.group ? () => _groupInfo(card) : null,
         onWipe: card.temp ? () => tempWipe(id: card.id) : null,
       );
 
@@ -621,7 +681,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     requests: _requests,
                     friends: [
                       for (final c in _visibleChats)
-                        if (c.friend && !_waiting.contains(c.id)) c,
+                        if (c.friend && !c.group && !_waiting.contains(c.id)) c,
                     ],
                     waiting: [
                       for (final c in _visibleChats)
@@ -642,16 +702,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ],
         ),
       ),
-      floatingActionButton: AnimatedScale(
-        scale: _onTemp || _onFriends ? 1 : 0,
-        duration: Motion.medium,
-        curve: _onTemp || _onFriends ? Motion.decelerate : Motion.accelerate,
-        child: FloatingActionButton.extended(
-          onPressed: _onTemp ? _newTemp : _addFriend,
-          icon: Icon(_onFriends ? Icons.person_add_alt_1_rounded : Icons.add_rounded),
-          label: AnimatedSwitcher(
-            duration: Motion.fast,
-            child: Text(_onFriends ? 'Add a friend' : 'New temp chat', key: ValueKey(_onFriends)),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _onTemp
+            ? _newTemp
+            : _onFriends
+                ? _addFriend
+                : _newGroup,
+        icon: Icon(_onFriends
+            ? Icons.person_add_alt_1_rounded
+            : _onTemp
+                ? Icons.add_rounded
+                : Icons.group_add_rounded),
+        label: AnimatedSwitcher(
+          duration: Motion.fast,
+          child: Text(
+            _onFriends
+                ? 'Add a friend'
+                : _onTemp
+                    ? 'New temp chat'
+                    : 'New group',
+            key: ValueKey(_page.round()),
           ),
         ),
       ),
@@ -1513,7 +1583,9 @@ class _ReliabilityBannerState extends State<_ReliabilityBanner> with WidgetsBind
                   TextButton(
                     onPressed: () async {
                       HapticFeedback.selectionClick();
-                      _unrestricted ? await Background.openBackgroundSettings() : await Background.requestUnrestricted();
+                      _unrestricted
+                          ? await Background.openBackgroundSettings()
+                          : await Background.requestUnrestricted();
                     },
                     child: const Text('Open'),
                   ),

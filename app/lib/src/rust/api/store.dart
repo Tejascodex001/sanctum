@@ -160,6 +160,12 @@ class StoredChat {
   /// Left out of the list until revealed with biometrics.
   final bool hidden;
 
+  /// Groups: how many others are in it (or invited).
+  final int members;
+
+  /// Groups: false once we've left or been removed.
+  final bool active;
+
   const StoredChat({
     required this.id,
     required this.kind,
@@ -170,6 +176,8 @@ class StoredChat {
     required this.verified,
     required this.waiting,
     required this.hidden,
+    required this.members,
+    required this.active,
   });
 
   @override
@@ -182,7 +190,9 @@ class StoredChat {
       createdAt.hashCode ^
       verified.hashCode ^
       waiting.hashCode ^
-      hidden.hashCode;
+      hidden.hashCode ^
+      members.hashCode ^
+      active.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -197,5 +207,7 @@ class StoredChat {
           createdAt == other.createdAt &&
           verified == other.verified &&
           waiting == other.waiting &&
-          hidden == other.hidden;
+          hidden == other.hidden &&
+          members == other.members &&
+          active == other.active;
 }

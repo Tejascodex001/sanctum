@@ -55,6 +55,22 @@ Rust core (sanctum-core)
 - **At rest:** every chat, message and MLS secret is sealed before SQLite sees it, with the row's identity bound as associated data so rows can't be swapped. Lookup keys for MLS state are keyed hashes, so group ids never appear on disk. `secure_delete` zeroes deleted data. Temp chats never touch disk.
 - MLS state is persisted after every operation; a crash before persisting just rolls back to the last saved state.
 
+## Groups
+Peer to peer, with no server (`core/src/group.rs`).
+- **Encryption:** each group is an MLS group. A message is encrypted once, and the same bytes go to every member over their own Tor link (`Frame::GroupMls`).
+- **Delivery:** each copy is acknowledged separately. The message shows ✓✓ once every member has it, and copies for offline members wait in the outbox.
+- **One admin:** the creator is the only one who commits membership changes. With a single committer, members can't disagree about the group's state, which a server would otherwise guarantee.
+- **Adding members:** the admin adds friends only.
+  1. It asks a friend for a key package over their link and checks it really is theirs.
+  2. It commits the addition, which every existing member applies.
+  3. It sends the newcomer a welcome with the group's name and members, then sends everyone the updated member list (`Content::GroupInfo`).
+  - Invitees who are offline are retried until their phone is reached.
+- **Members who aren't friends** connect to each other directly for the group: `Session::knows` accepts friends and fellow group members. Strangers can still only send a friend request.
+- **Leaving and removal:** a member who leaves tells everyone and deletes the group from their phone; the admin then commits their removal. A removed member's copy goes inactive.
+- **Out-of-order messages:** they are expected without a server.
+  - Keys for 4 past epochs are kept, so a message sent just before a membership change can still be read after it.
+  - A message that can't be read yet is left unacknowledged and resent (live links resend every 30 seconds). It is dropped after 5 tries.
+
 ## Replies
 - Every message has an id that is the same on both phones (the network message id).
 - A reply (`Content::Reply`) carries a quote: the original's id, its author's key and its first 140 characters. It can be shown even if the original is gone, and tapping it scrolls to the original when it's nearby.

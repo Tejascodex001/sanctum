@@ -406,6 +406,8 @@ fn to_key(key: Vec<u8>) -> anyhow::Result<[u8; 32]> {
 
 pub struct FriendView {
     pub chat_id: i64,
+    /// Their identity key.
+    pub key: Vec<u8>,
     pub name: String,
     pub sigil_key: Vec<u8>,
     pub hidden: bool,
@@ -421,6 +423,7 @@ pub fn friend_list() -> anyhow::Result<Vec<FriendView>> {
                 let meta = s.chat(chat_id)?;
                 Ok(FriendView {
                     chat_id,
+                    key: peer.identity.to_vec(),
                     name: peer.name,
                     sigil_key: meta.sigil_key,
                     hidden: meta.hidden,
@@ -445,9 +448,13 @@ pub(crate) fn with<T>(f: impl FnOnce(&mut Session) -> anyhow::Result<T>) -> anyh
     // Pass events on, never drop them: some may be the network's (a message
     // that arrived a moment ago and wasn't announced yet).
     let events = guard.take_events();
+    let pokes = guard.take_pokes();
     drop(guard);
     for e in events {
         emit_session(e);
+    }
+    for peer in pokes {
+        poke(Some(peer));
     }
     out
 }

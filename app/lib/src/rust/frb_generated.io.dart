@@ -3,6 +3,7 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/group.dart';
 import 'api/identity.dart';
 import 'api/session.dart';
 import 'api/sigil.dart';
@@ -59,6 +60,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FriendView dco_decode_friend_view(dynamic raw);
 
   @protected
+  GroupDetails dco_decode_group_details(dynamic raw);
+
+  @protected
+  GroupMemberView dco_decode_group_member_view(dynamic raw);
+
+  @protected
   HslColor dco_decode_hsl_color(dynamic raw);
 
   @protected
@@ -72,6 +79,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FriendView> dco_decode_list_friend_view(dynamic raw);
+
+  @protected
+  List<GroupMemberView> dco_decode_list_group_member_view(dynamic raw);
 
   @protected
   List<HslColor> dco_decode_list_hsl_color(dynamic raw);
@@ -193,6 +203,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FriendView sse_decode_friend_view(SseDeserializer deserializer);
 
   @protected
+  GroupDetails sse_decode_group_details(SseDeserializer deserializer);
+
+  @protected
+  GroupMemberView sse_decode_group_member_view(SseDeserializer deserializer);
+
+  @protected
   HslColor sse_decode_hsl_color(SseDeserializer deserializer);
 
   @protected
@@ -206,6 +222,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FriendView> sse_decode_list_friend_view(SseDeserializer deserializer);
+
+  @protected
+  List<GroupMemberView> sse_decode_list_group_member_view(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<HslColor> sse_decode_list_hsl_color(SseDeserializer deserializer);
@@ -343,6 +364,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_friend_view(FriendView self, SseSerializer serializer);
 
   @protected
+  void sse_encode_group_details(GroupDetails self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_group_member_view(
+    GroupMemberView self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_hsl_color(HslColor self, SseSerializer serializer);
 
   @protected
@@ -357,6 +387,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_friend_view(
     List<FriendView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_group_member_view(
+    List<GroupMemberView> self,
     SseSerializer serializer,
   );
 

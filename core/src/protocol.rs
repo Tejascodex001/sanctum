@@ -52,6 +52,45 @@ pub enum Frame {
     },
     /// Keeps a link alive.
     Ping,
+    /// Groups. The admin asks a friend it's adding for a key package...
+    GroupKeyPackageRequest {
+        group: Vec<u8>,
+    },
+    /// ...gets one...
+    GroupKeyPackage {
+        group: Vec<u8>,
+        key_package: Vec<u8>,
+    },
+    /// ...and sends the welcome that lets them join, with the group's name
+    /// and members. Acknowledged like a message.
+    GroupWelcome {
+        id: MessageId,
+        welcome: Vec<u8>,
+        info: GroupInfo,
+    },
+    /// An MLS message (a commit, or [`Content`]) for a group, sent to each
+    /// member separately.
+    GroupMls {
+        group: Vec<u8>,
+        id: MessageId,
+        bytes: Vec<u8>,
+    },
+}
+
+/// What a group is called and who's in it, as its admin last said.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct GroupInfo {
+    pub title: String,
+    pub sigil_key: Vec<u8>,
+    pub admin: [u8; 32],
+    /// Everyone, the admin included, with the names the admin knows them by.
+    pub members: Vec<GroupMember>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct GroupMember {
+    pub identity: [u8; 32],
+    pub name: String,
 }
 
 /// What is inside an MLS application message.
@@ -81,6 +120,18 @@ pub enum Content {
         sent_at: u64,
         quote: Quote,
     },
+    /// A message in a group. Its id is shared by every member's copy (each
+    /// copy travels in its own frame).
+    GroupText {
+        id: MessageId,
+        body: String,
+        sent_at: u64,
+        quote: Option<Quote>,
+    },
+    /// From the admin: the group's name and members changed.
+    GroupInfo(GroupInfo),
+    /// The sender left the group.
+    GroupLeave,
 }
 
 /// The message a reply answers: enough to show it even if it's gone.
@@ -112,6 +163,17 @@ pub fn hello_message(reached: &[u8; 32], nonce: &[u8; 32]) -> Vec<u8> {
 }
 
 /// A frame on the wire: 4-byte big-endian length, then postcard bytes.
+impl Frame {
+    /// Unframed bytes, for keeping a frame in the outbox.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        postcard::to_stdvec(self).expect("serializable")
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        postcard::from_bytes(bytes).ok()
+    }
+}
+
 pub fn encode_frame(frame: &Frame) -> Vec<u8> {
     let body = postcard::to_stdvec(frame).expect("serializable");
     let mut out = (body.len() as u32).to_be_bytes().to_vec();

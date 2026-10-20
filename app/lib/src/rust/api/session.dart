@@ -148,12 +148,16 @@ enum AppEventKind {
 
 class FriendView {
   final PlatformInt64 chatId;
+
+  /// Their identity key.
+  final Uint8List key;
   final String name;
   final Uint8List sigilKey;
   final bool hidden;
 
   const FriendView({
     required this.chatId,
+    required this.key,
     required this.name,
     required this.sigilKey,
     required this.hidden,
@@ -161,7 +165,11 @@ class FriendView {
 
   @override
   int get hashCode =>
-      chatId.hashCode ^ name.hashCode ^ sigilKey.hashCode ^ hidden.hashCode;
+      chatId.hashCode ^
+      key.hashCode ^
+      name.hashCode ^
+      sigilKey.hashCode ^
+      hidden.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -169,6 +177,7 @@ class FriendView {
       other is FriendView &&
           runtimeType == other.runtimeType &&
           chatId == other.chatId &&
+          key == other.key &&
           name == other.name &&
           sigilKey == other.sigilKey &&
           hidden == other.hidden;

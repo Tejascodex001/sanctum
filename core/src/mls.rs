@@ -24,6 +24,10 @@ const CIPHERSUITE: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_CHACHA20POLY13
 
 /// Messages are padded to a multiple of this many bytes.
 const PADDING: usize = 64;
+/// Groups have no server to order messages: one sent just before a
+/// membership change can arrive just after it. Keys for this many past
+/// epochs are kept so it can still be read.
+const PAST_EPOCHS: usize = 4;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MlsError {
@@ -165,6 +169,7 @@ impl MlsClient {
             .ciphersuite(CIPHERSUITE)
             .use_ratchet_tree_extension(true)
             .padding_size(PADDING)
+            .max_past_epochs(PAST_EPOCHS)
             .build();
         let group = MlsGroup::new(
             &self.provider,
@@ -198,6 +203,19 @@ impl MlsClient {
         })
     }
 
+    /// Like [`invite`](Self::invite), but only if `key_package` is
+    /// `expected`'s: checked before anything changes.
+    pub fn invite_expecting(&self, group_id: &[u8], key_package: &[u8], expected: &[u8; 32]) -> Result<Invite> {
+        let kp = KeyPackageIn::tls_deserialize_exact(key_package)
+            .map_err(protocol)?
+            .validate(self.provider.crypto(), ProtocolVersion::Mls10)
+            .map_err(protocol)?;
+        if kp.leaf_node().signature_key().as_slice() != expected {
+            return Err(MlsError::Protocol("key package from someone else".into()));
+        }
+        self.invite(group_id, key_package)
+    }
+
     /// Joins a group from a welcome. Returns the group id.
     pub fn join(&self, welcome: &[u8]) -> Result<Vec<u8>> {
         let MlsMessageBodyIn::Welcome(welcome) = MlsMessageIn::tls_deserialize_exact(welcome)
@@ -209,6 +227,7 @@ impl MlsClient {
         let config = MlsGroupJoinConfig::builder()
             .use_ratchet_tree_extension(true)
             .padding_size(PADDING)
+            .max_past_epochs(PAST_EPOCHS)
             .build();
         let group = StagedWelcome::new_from_welcome(&self.provider, &config, welcome, None)
             .map_err(protocol)?

@@ -50,6 +50,8 @@ const BACKOFF_MAX_PENDING: Duration = Duration::from_secs(20);
 /// save battery. A friend coming online dials us anyway.
 const BACKOFF_MAX_BACKGROUND: Duration = Duration::from_secs(600);
 const BACKOFF_MAX_PENDING_BACKGROUND: Duration = Duration::from_secs(120);
+/// Every this many upkeep ticks, unacknowledged frames are resent.
+const RESEND_EVERY: u64 = 10;
 /// Tor circuits are expensive; don't build too many at once.
 const MAX_DIALS: usize = 6;
 
@@ -80,6 +82,7 @@ pub struct Node {
     /// When to next try a friend we couldn't reach, and the current delay.
     backoff: Mutex<HashMap<[u8; 32], (Instant, Duration)>>,
     background: AtomicBool,
+    ticks: Mutex<u64>,
     next_link: Mutex<u64>,
 }
 
@@ -98,6 +101,7 @@ impl Node {
             dialing: Mutex::default(),
             backoff: Mutex::default(),
             background: AtomicBool::new(false),
+            ticks: Mutex::new(0),
             next_link: Mutex::new(0),
         })
     }
@@ -135,6 +139,21 @@ impl Node {
     /// Keeps a link open to every friend: reconnects dropped ones, and
     /// retries unreachable ones with backoff (sooner when messages wait).
     pub fn maintain(self: &Arc<Self>) {
+        // Now and then, resend what live links haven't acknowledged (a
+        // group message may have been unreadable until a change arrived).
+        let tick = {
+            let mut tick = self.ticks.lock().unwrap();
+            *tick += 1;
+            *tick
+        };
+        if tick % RESEND_EVERY == 0 {
+            let pending = self.session.lock().unwrap().pending_peers().unwrap_or_default();
+            for (peer, link) in self.links.lock().unwrap().iter() {
+                if pending.contains(peer) {
+                    let _ = link.tx.send(Cmd::News);
+                }
+            }
+        }
         let (pending, friends) = {
             let s = self.session.lock().unwrap();
             (s.pending_peers().unwrap_or_default(), s.friend_keys().unwrap_or_default())
@@ -236,10 +255,17 @@ impl Node {
         });
     }
 
-    fn emit_session_events(&self) {
-        let events = self.session.lock().unwrap().take_events();
+    fn emit_session_events(self: &Arc<Self>) {
+        let (events, pokes) = {
+            let mut s = self.session.lock().unwrap();
+            (s.take_events(), s.take_pokes())
+        };
         for e in events {
             let _ = self.events.send(NetEvent::Session(e));
+        }
+        // E.g. a group change others must apply, found handling a frame.
+        for peer in pokes {
+            self.poke(peer);
         }
     }
 
@@ -265,7 +291,7 @@ impl Node {
         })
         .await??;
 
-        if !self.session.lock().unwrap().is_friend(&peer)? {
+        if !self.session.lock().unwrap().knows(&peer)? {
             // A stranger: hear their friend request, then hang up.
             let frame = timeout(HANDSHAKE_TIMEOUT, read_frame(&mut conn, &mut buf)).await??;
             self.session.lock().unwrap().on_stranger_frame(&peer, frame)?;
@@ -310,7 +336,7 @@ impl Node {
     }
 
     async fn serve(
-        &self,
+        self: &Arc<Self>,
         conn: &mut BoxConn,
         buf: &mut Vec<u8>,
         peer: &[u8; 32],
@@ -349,7 +375,7 @@ impl Node {
 
 impl Node {
     async fn handle_buffered(
-        &self,
+        self: &Arc<Self>,
         conn: &mut BoxConn,
         buf: &mut Vec<u8>,
         peer: &[u8; 32],
@@ -391,6 +417,7 @@ async fn read_frame(conn: &mut BoxConn, buf: &mut Vec<u8>) -> anyhow::Result<Fra
 mod tests {
     use super::*;
     use sanctum_core::identity::Identity;
+    use sanctum_core::store::ChatKind;
     use std::net::SocketAddr;
     use tempfile::TempDir;
     use tokio::net::{TcpListener, TcpStream};
@@ -566,6 +593,61 @@ mod tests {
             session.lock().unwrap().store.messages(ba, None).unwrap().iter().any(|m| m.body == "back?")
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn a_group_works_over_real_connections() {
+        let book = Arc::default();
+        let (alice, bob, carol) = (phone(&book).await, phone(&book).await, phone(&book).await);
+        let (ab, _) = befriend(&alice, &bob).await;
+        let (ac, _) = befriend(&alice, &carol).await;
+        for p in [&alice, &bob, &carol] {
+            p.node.spawn_retry_loop(Duration::from_millis(50));
+        }
+        let (group, invitees) = alice.session.lock().unwrap().create_group("Trip", &[ab, ac]).unwrap();
+        for p in invitees {
+            alice.node.poke(p);
+        }
+        // Both join, and learn about each other, on their own.
+        let group_on = |p: &Phone| {
+            p.session
+                .lock()
+                .unwrap()
+                .store
+                .chats()
+                .unwrap()
+                .into_iter()
+                .find(|(_, m)| m.kind == ChatKind::Group)
+                .map(|(id, m)| (id, m.peers.len()))
+        };
+        let (b, c) = (bob.session.clone(), carol.session.clone());
+        until(move || {
+            let joined = |s: &Arc<Mutex<Session>>| {
+                s.lock().unwrap().store.chats().unwrap().iter().any(|(_, m)| m.kind == ChatKind::Group && m.peers.len() == 2)
+            };
+            joined(&b) && joined(&c)
+        })
+        .await;
+        let (cg, _) = group_on(&carol).unwrap();
+        // Carol writes; Bob, who isn't her friend, gets it from her directly.
+        let reach = carol.session.lock().unwrap().send_to_chat(cg, "hi all", None).unwrap();
+        for p in reach {
+            carol.node.poke(p);
+        }
+        let (bg, _) = group_on(&bob).unwrap();
+        let session = bob.session.clone();
+        until(move || {
+            session.lock().unwrap().store.messages(bg, None).unwrap().iter().any(|m| m.body == "hi all")
+        })
+        .await;
+        let session = alice.session.clone();
+        until(move || {
+            session.lock().unwrap().store.messages(group, None).unwrap().iter().any(|m| m.body == "hi all")
+        })
+        .await;
+        // Delivered to everyone.
+        let session = carol.session.clone();
+        until(move || session.lock().unwrap().store.messages(cg, None).unwrap()[0].delivered).await;
     }
 
     #[tokio::test]

@@ -34,6 +34,8 @@ pub enum SessionError {
     NoSuchChat,
     #[error("not a friend")]
     NotAFriend,
+    #[error("only the group's admin can do that")]
+    NotAdmin,
     #[error("the other side broke the protocol")]
     Protocol,
 }
@@ -97,14 +99,21 @@ struct TempOut {
 }
 
 pub struct Session {
-    identity: Identity,
+    pub(crate) identity: Identity,
     pub store: Store,
-    mls: MlsClient,
+    pub(crate) mls: MlsClient,
     pub temp: TempChats,
     temp_out: Vec<TempOut>,
-    events: Vec<Event>,
+    pub(crate) events: Vec<Event>,
     /// Your name, sent with friend requests.
-    my_name: String,
+    pub(crate) my_name: String,
+    /// Group messages we couldn't read yet (e.g. a membership change is
+    /// still on its way), by frame id: retried a few times, then dropped.
+    pub(crate) unreadable: std::collections::HashMap<MessageId, u8>,
+    /// Peers with something new to send, found while handling another's
+    /// frame (e.g. a group change everyone must apply): the network reaches
+    /// them ([`Session::take_pokes`]).
+    pub(crate) pokes: Vec<[u8; 32]>,
     requests: Vec<FriendRequest>,
     /// Declined this run; not shown again until a restart.
     declined: HashSet<[u8; 32]>,
@@ -127,6 +136,8 @@ impl Session {
             temp_out: Vec::new(),
             events: Vec::new(),
             my_name: String::new(),
+            unreadable: Default::default(),
+            pokes: Vec::new(),
             requests: Vec::new(),
             declined: HashSet::new(),
         })
@@ -254,13 +265,13 @@ impl Session {
             .ok_or(SessionError::NoSuchChat)
     }
 
-    fn direct_chat(&self, peer: &[u8; 32]) -> Result<Option<(i64, ChatMeta)>> {
+    pub(crate) fn direct_chat(&self, peer: &[u8; 32]) -> Result<Option<(i64, ChatMeta)>> {
         Ok(self.store.chats()?.into_iter().find(|(_, m)| {
             m.kind == ChatKind::Direct && m.peers.iter().any(|p| &p.identity == peer)
         }))
     }
 
-    fn friend_name(&self, peer: &[u8; 32]) -> String {
+    pub(crate) fn friend_name(&self, peer: &[u8; 32]) -> String {
         self.direct_chat(peer)
             .ok()
             .flatten()
@@ -330,7 +341,7 @@ impl Session {
     }
 
     /// What a reply to the message at `seq` shows of it.
-    fn quote(&self, meta: &ChatMeta, chat_id: i64, seq: i64) -> Result<Option<Quote>> {
+    pub(crate) fn quote(&self, meta: &ChatMeta, chat_id: i64, seq: i64) -> Result<Option<Quote>> {
         let Some(m) = self.store.message(chat_id, seq)? else {
             return Ok(None);
         };
@@ -348,6 +359,11 @@ impl Session {
         }))
     }
 
+    /// Who the network should reach now (see `pokes`).
+    pub fn take_pokes(&mut self) -> Vec<[u8; 32]> {
+        std::mem::take(&mut self.pokes)
+    }
+
     /// Friends with something waiting to be delivered.
     pub fn pending_peers(&self) -> Result<Vec<[u8; 32]>> {
         let mut peers = self.store.outbox_peers()?;
@@ -360,6 +376,11 @@ impl Session {
                         peers.push(p.identity);
                     }
                 }
+            }
+        }
+        for peer in self.pending_invitees()? {
+            if !peers.contains(&peer) {
+                peers.push(peer);
             }
         }
         for out in &self.temp_out {
@@ -576,27 +597,49 @@ impl Session {
 
     /// A connection with `peer` is ready: frames to send first.
     pub fn on_link_up(&mut self, peer: &[u8; 32]) -> Result<Vec<Frame>> {
-        let (_, meta) = self.direct_chat(peer)?.ok_or(SessionError::NotAFriend)?;
-        if meta.group_id.is_empty() {
-            // The friend with the smaller key sets up the group. The other
-            // asks too: if the friend still has a group from before (we
-            // deleted and re-added them), that tells them to start over.
-            // The request comes first in case they haven't added us yet.
-            return Ok(vec![
+        let mut out = match self.direct_chat(peer)? {
+            // The friend with the smaller key sets up the pair's group. The
+            // other asks too: if the friend still has a group from before
+            // (we deleted and re-added them), that tells them to start
+            // over. The request comes first in case they haven't added us.
+            Some((_, meta)) if meta.group_id.is_empty() => vec![
                 Frame::FriendRequest { name: self.my_name.clone() },
                 Frame::KeyPackageRequest,
-            ]);
-        }
-        self.flush(peer)
+            ],
+            Some(_) => self.flush(peer)?,
+            // Not a friend, but in a group with us.
+            None if self.shares_group(peer)? => self.flush(peer)?,
+            None => return Err(SessionError::NotAFriend),
+        };
+        out.extend(self.group_invites_for(peer)?);
+        Ok(out)
+    }
+
+    /// Whether `peer` may connect: a friend, or someone in a group with us.
+    pub fn knows(&self, peer: &[u8; 32]) -> Result<bool> {
+        Ok(self.is_friend(peer)? || self.shares_group(peer)?)
     }
 
     /// Handles a frame from `peer`; returns frames to send back.
     pub fn on_frame(&mut self, peer: &[u8; 32], frame: Frame) -> Result<Vec<Frame>> {
+        // Frames anyone we know may send, friend or fellow group member.
+        let frame = match frame {
+            Frame::Ping => return Ok(Vec::new()),
+            Frame::Ack { id } => {
+                self.on_ack(id)?;
+                return Ok(Vec::new());
+            }
+            Frame::GroupKeyPackageRequest { .. }
+            | Frame::GroupKeyPackage { .. }
+            | Frame::GroupWelcome { .. }
+            | Frame::GroupMls { .. } => return self.on_group_frame(peer, frame),
+            other => other,
+        };
         let (chat_id, mut meta) = self.direct_chat(peer)?.ok_or(SessionError::NotAFriend)?;
         let initiator = self.public_key() < *peer;
         match frame {
             // Already friends.
-            Frame::FriendRequest { .. } | Frame::Ping => Ok(Vec::new()),
+            Frame::FriendRequest { .. } => Ok(Vec::new()),
             Frame::KeyPackageRequest if initiator => {
                 if meta.group_id.is_empty() {
                     // First contact: our own request is already on its way.
@@ -673,22 +716,27 @@ impl Session {
                 self.store.mark_seen(&id)?;
                 Ok(vec![Frame::Ack { id }])
             }
-            Frame::Ack { id } => {
-                if let Some(item) = self.store.outbox_remove(&id)? {
-                    if let Some((chat, seq)) = item.message {
-                        self.store.set_delivered(chat, seq)?;
-                        self.events.push(Event::Chat(chat));
-                    }
-                } else if let Some(i) = self.temp_out.iter().position(|o| o.id == id) {
-                    self.temp_out.remove(i);
-                    if let Some(temp) = self.temp.mark_delivered(&id) {
-                        self.events.push(Event::Temp(temp));
-                    }
-                }
-                Ok(Vec::new())
-            }
             _ => Err(SessionError::Protocol),
         }
+    }
+
+    /// The friend (or group member) has it. A group message counts as
+    /// delivered once every member has it.
+    fn on_ack(&mut self, id: MessageId) -> Result<()> {
+        if let Some(item) = self.store.outbox_remove(&id)? {
+            if let Some((chat, seq)) = item.message {
+                if !self.store.outbox_has_message(chat, seq)? {
+                    self.store.set_delivered(chat, seq)?;
+                }
+                self.events.push(Event::Chat(chat));
+            }
+        } else if let Some(i) = self.temp_out.iter().position(|o| o.id == id) {
+            self.temp_out.remove(i);
+            if let Some(temp) = self.temp.mark_delivered(&id) {
+                self.events.push(Event::Temp(temp));
+            }
+        }
+        Ok(())
     }
 
     /// Applies a friend's message.
@@ -752,6 +800,8 @@ impl Session {
                 self.events.push(Event::Temp(id));
                 self.events.push(Event::TempMessage(id));
             }
+            // Group content belongs in group frames, not a pair's chat.
+            Content::GroupText { .. } | Content::GroupInfo(_) | Content::GroupLeave => {}
             Content::TempWipe { temp } => {
                 if let Some(id) = self.temp.wipe_remote(*peer, temp) {
                     self.forget_temp_outbox(Some(*peer), temp);
@@ -792,6 +842,8 @@ impl Session {
                 OutboxState::Cipher(_) => {
                     self.store.outbox_remove(&id)?;
                 }
+                // Other groups' messages are unaffected.
+                OutboxState::Group { .. } | OutboxState::Frame(_) => {}
             }
         }
         for out in self.temp_out.iter_mut().filter(|o| &o.peer == peer) {
@@ -801,17 +853,33 @@ impl Session {
     }
 
     /// Everything waiting for `peer`, encrypted for the pair's group.
-    fn flush(&mut self, peer: &[u8; 32]) -> Result<Vec<Frame>> {
-        let Some((_, meta)) = self.direct_chat(peer)? else {
-            return Ok(Vec::new());
-        };
-        if meta.group_id.is_empty() {
-            return Ok(Vec::new());
-        }
+    pub(crate) fn flush(&mut self, peer: &[u8; 32]) -> Result<Vec<Frame>> {
+        // The pair's group, if set up: needed for direct messages.
+        let pair_group = self
+            .direct_chat(peer)?
+            .map(|(_, meta)| meta.group_id)
+            .filter(|g| !g.is_empty());
         let mut frames = Vec::new();
         for (id, mut item) in self.store.outbox_for(peer)? {
+            match &item.state {
+                // Group messages and welcomes go out as they are.
+                OutboxState::Group { group, cipher } => {
+                    frames.push(Frame::GroupMls {
+                        group: group.clone(),
+                        id,
+                        bytes: cipher.clone(),
+                    });
+                    continue;
+                }
+                OutboxState::Frame(bytes) => {
+                    frames.extend(Frame::from_bytes(bytes));
+                    continue;
+                }
+                _ => {}
+            }
+            let Some(group) = &pair_group else { continue };
             if let OutboxState::Plain(plain) = &item.state {
-                let cipher = self.mls.encrypt(&meta.group_id, plain)?;
+                let cipher = self.mls.encrypt(group, plain)?;
                 item.state = OutboxState::Sealed { plain: plain.clone(), cipher };
                 self.mls.persist(&self.store)?;
                 self.store.outbox_put(&id, &item)?;
@@ -820,12 +888,15 @@ impl Session {
                 OutboxState::Cipher(bytes) | OutboxState::Sealed { cipher: bytes, .. } => {
                     frames.push(Frame::Mls { id, bytes });
                 }
-                OutboxState::Plain(_) => {}
+                OutboxState::Plain(_) | OutboxState::Group { .. } | OutboxState::Frame(_) => {}
             }
         }
+        let Some(group) = pair_group else {
+            return Ok(frames);
+        };
         for out in self.temp_out.iter_mut().filter(|o| &o.peer == peer) {
             if out.cipher.is_none() {
-                out.cipher = Some(self.mls.encrypt(&meta.group_id, &out.content.encode())?);
+                out.cipher = Some(self.mls.encrypt(&group, &out.content.encode())?);
                 self.mls.persist(&self.store)?;
             }
             frames.push(Frame::Mls {
@@ -846,13 +917,13 @@ impl Session {
     }
 }
 
-fn now() -> u64 {
+pub(crate) fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
 }
 
-fn clip(s: &str, max: usize) -> String {
+pub(crate) fn clip(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
@@ -1157,6 +1228,107 @@ mod tests {
         let msgs = bob.s.store.messages(ba, None).unwrap();
         let or9 = msgs.iter().find(|m| m.body == "or 9").unwrap();
         assert_eq!(or9.reply.as_ref().unwrap().author, alice.pk());
+    }
+
+    /// The group chat on `phone` with this title.
+    fn group_of(phone: &Phone, title: &str) -> Option<i64> {
+        phone
+            .s
+            .store
+            .chats()
+            .unwrap()
+            .into_iter()
+            .find(|(_, m)| m.kind == ChatKind::Group && m.title == title)
+            .map(|(id, _)| id)
+    }
+
+    fn names(phone: &Phone, chat: i64) -> Vec<String> {
+        let mut names: Vec<String> = phone.s.group_view(chat).unwrap().members.into_iter().map(|m| m.name).collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn groups_work_without_a_server() {
+        let (mut alice, mut bob, mut carol) = (Phone::new(), Phone::new(), Phone::new());
+        alice.s.set_my_name("Alice");
+        bob.s.set_my_name("Bob");
+        carol.s.set_my_name("Carol");
+        // Alice is friends with both; Bob and Carol don't know each other.
+        let (ab, _) = befriend(&mut alice, &mut bob);
+        let ac = alice.s.add_friend(&carol.s.my_code("Carol"), true).unwrap().chat_id;
+        carol.s.add_friend(&alice.s.my_code("Alice"), true).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+
+        let (group, invitees) = alice.s.create_group("Trip", &[ab, ac]).unwrap();
+        assert_eq!(invitees.len(), 2);
+        assert!(alice.s.group_view(group).unwrap().members.iter().filter(|m| m.pending).count() == 2);
+        assert!(alice.s.pending_peers().unwrap().contains(&bob.pk()), "keeps trying to reach invitees");
+
+        // Each joins when Alice reaches them.
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        connect(&mut alice, &mut bob); // Bob learns Carol joined
+        let bg = group_of(&bob, "Trip").expect("Bob joined");
+        let cg = group_of(&carol, "Trip").expect("Carol joined");
+        assert_eq!(names(&bob, bg), ["Alice", "Carol", "You"]);
+        assert_eq!(names(&carol, cg), ["Alice", "Bob", "You"]);
+        assert!(alice.s.group_view(group).unwrap().members.iter().all(|m| !m.pending));
+        assert!(!bob.s.group_view(bg).unwrap().admin_is_me);
+
+        // Bob writes; Carol gets it straight from Bob, though they aren't friends.
+        let reach = bob.s.send_to_chat(bg, "who's driving?", None).unwrap();
+        assert_eq!(reach.len(), 2);
+        assert!(carol.s.knows(&bob.pk()).unwrap() && !carol.s.is_friend(&bob.pk()).unwrap());
+        connect(&mut bob, &mut carol);
+        assert!(!bob.texts(bg)[0].2, "delivered only once everyone has it");
+        connect(&mut bob, &mut alice);
+        assert!(bob.texts(bg)[0].2);
+        for (phone, chat) in [(&carol, cg), (&alice, group)] {
+            let m = phone.s.store.messages(chat, None).unwrap().pop().unwrap();
+            assert_eq!((m.body.as_str(), m.sender), ("who's driving?", Some(bob.pk())));
+        }
+        // Replies work in groups too.
+        carol.s.send_to_chat(cg, "me", Some(0)).unwrap();
+        connect(&mut carol, &mut alice);
+        let reply = alice.s.store.messages(group, None).unwrap().pop().unwrap();
+        assert_eq!(reply.reply.unwrap().author, bob.pk());
+
+        // Only the admin manages the group.
+        assert!(matches!(bob.s.group_rename(bg, "Mine"), Err(SessionError::NotAdmin)));
+        alice.s.group_rename(group, "Road trip").unwrap();
+        connect(&mut alice, &mut bob);
+        assert!(group_of(&bob, "Road trip").is_some());
+
+        // Carol leaves; Alice removes her for everyone.
+        carol.s.group_leave(cg).unwrap();
+        assert!(group_of(&carol, "Trip").is_none());
+        connect(&mut carol, &mut alice);
+        connect(&mut alice, &mut bob);
+        assert_eq!(names(&bob, bg), ["Alice", "You"]);
+        assert_eq!(names(&alice, group), ["Bob", "You"]);
+        // Messages now reach Bob only.
+        assert_eq!(alice.s.send_to_chat(group, "just us", None).unwrap(), vec![bob.pk()]);
+
+        // Removed by the admin: Bob's copy goes quiet.
+        alice.s.group_remove(group, &bob.pk()).unwrap();
+        connect(&mut alice, &mut bob);
+        let view = bob.s.group_view(bg).unwrap();
+        assert!(!view.active);
+        assert!(bob.s.send_to_chat(bg, "hello?", None).is_err());
+    }
+
+    #[test]
+    fn strangers_still_cant_connect() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, _) = befriend(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        alice.s.create_group("Us", &[ab]).unwrap();
+        let eve = Phone::new();
+        assert!(!alice.s.knows(&eve.pk()).unwrap());
+        // A friend who isn't in any group of ours is still just a friend.
+        assert!(alice.s.knows(&bob.pk()).unwrap());
     }
 
     #[test]
