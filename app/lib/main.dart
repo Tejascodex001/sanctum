@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'home/home_screen.dart';
+import 'background/background.dart';
 import 'identity/secrets.dart';
 import 'net/net_bus.dart';
 import 'notify/notifier.dart';
@@ -31,6 +32,12 @@ Future<void> main() async {
       cacheDir: '${(await getApplicationCacheDirectory()).path}/tor-cache',
       identitySecret: secret,
     );
+    if (await Background.nearbyEnabled()) {
+      // Best effort: another app may hold the discovery port.
+      try {
+        await NetBus.instance.setNearby(true);
+      } catch (_) {}
+    }
     final publicKey = await identityPublicKey(secret: secret);
     final mySigil = await sigilForKey(publicKey: publicKey);
     runApp(SanctumApp(

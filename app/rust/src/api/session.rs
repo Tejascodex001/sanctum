@@ -4,7 +4,8 @@
 use crate::frb_generated::StreamSink;
 use sanctum_core::identity::{pair_fingerprint, safety_number};
 use sanctum_core::session::{Event, Paired, Session};
-use sanctum_net::{NetEvent, Node};
+use sanctum_net::nearby::{Nearby, Reach};
+use sanctum_net::{NetEvent, Node, Transport};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
@@ -13,6 +14,8 @@ use tokio::sync::broadcast;
 
 static SESSION: LazyLock<Mutex<Option<Arc<Mutex<Session>>>>> = LazyLock::new(Default::default);
 static NODE: LazyLock<Mutex<Option<Arc<Node>>>> = LazyLock::new(Default::default);
+/// How friends are reached: directly when nearby, else over Tor once it's up.
+static REACH: LazyLock<Arc<Reach>> = LazyLock::new(Default::default);
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -139,6 +142,8 @@ pub fn net_start(
         return Ok(());
     }
     let session = session()?;
+    // The node runs from the start, so nearby friends work without Tor.
+    let node = ensure_node(session);
     set_status(NetStatus::Connecting, 0, "Starting Tor");
     RUNTIME.spawn(async move {
         // Run Tor in its own task so a panic inside it surfaces here as an
@@ -153,7 +158,13 @@ pub fn net_start(
                     set_status(NetStatus::Connecting, percent, detail);
                 }
             },
-            |transport| Node::new(session, transport),
+            {
+                let node = node.clone();
+                move |transport| {
+                    *REACH.tor.write().unwrap() = Some(transport);
+                    node
+                }
+            },
         ));
         let started = match tokio::time::timeout(START_TIMEOUT, &mut task).await {
             Ok(Ok(started)) => started,
@@ -164,20 +175,62 @@ pub fn net_start(
             }
         };
         match started {
-            Ok((tor, node)) => {
+            Ok((tor, _)) => {
                 // Keep Tor running for the life of the app.
                 std::mem::forget(tor);
-                forward_events(&node);
-                // Keeps a live link to every friend, reconnecting quickly.
-                node.spawn_retry_loop(Duration::from_secs(3));
-                node.maintain();
-                *NODE.lock().unwrap() = Some(node);
+                node.reconnect_now();
                 set_status(NetStatus::Online, 100, "Connected");
             }
             Err(e) => set_status(NetStatus::Failed, 0, format!("{e:#}")),
         }
     });
     Ok(())
+}
+
+/// The network node: created once, used by Tor and nearby alike.
+fn ensure_node(session: Arc<Mutex<Session>>) -> Arc<Node> {
+    let mut slot = NODE.lock().unwrap();
+    if let Some(node) = slot.clone() {
+        return node;
+    }
+    let _guard = RUNTIME.enter();
+    let reach: Arc<dyn Transport> = REACH.clone();
+    let node = Node::new(session, reach);
+    forward_events(&node);
+    // Keeps a live link to every friend, reconnecting quickly.
+    node.spawn_retry_loop(Duration::from_secs(3));
+    *slot = Some(node.clone());
+    node
+}
+
+/// Nearby on or off: friends on the same Wi-Fi or hotspot connect directly,
+/// without internet. They see this phone's local network address.
+pub fn nearby_set(enabled: bool) -> anyhow::Result<()> {
+    let session = session()?;
+    let node = ensure_node(session.clone());
+    let mut slot = REACH.nearby.write().unwrap();
+    if enabled && slot.is_none() {
+        *slot = Some(RUNTIME.block_on(Nearby::start(node, session))?);
+    } else if !enabled {
+        if let Some(nearby) = slot.take() {
+            nearby.stop();
+        }
+    }
+    Ok(())
+}
+
+/// Friends' chats whose friend is nearby right now.
+pub fn nearby_chats() -> anyhow::Result<Vec<i64>> {
+    let peers = REACH.nearby.read().unwrap().as_ref().map(|n| n.peers()).unwrap_or_default();
+    with(|s| {
+        let mut chats = Vec::new();
+        for peer in &peers {
+            if let Some(id) = s.chat_id_for(peer)? {
+                chats.push(id);
+            }
+        }
+        Ok(chats)
+    })
 }
 
 fn panic_text(join: tokio::task::JoinError) -> String {
@@ -229,6 +282,9 @@ pub fn net_set_background(background: bool) {
 /// closes the store and deletes `paths` (the database, Tor's state and
 /// cache). The app exits right after; temp chats die with the process.
 pub fn wipe_everything(paths: Vec<String>) -> anyhow::Result<()> {
+    if let Some(nearby) = REACH.nearby.write().unwrap().take() {
+        nearby.stop();
+    }
     if let Some(node) = NODE.lock().unwrap().take() {
         node.shutdown_links();
     }

@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `forward_events`, `panic_text`, `poke`, `session`, `set_status`, `to_key`, `with`
+// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `ensure_node`, `forward_events`, `panic_text`, `poke`, `session`, `set_status`, `to_key`, `with`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Opens the encrypted store at `dir` and restores MLS state. Call once at
@@ -38,6 +38,15 @@ Future<void> netStart({
   cacheDir: cacheDir,
   identitySecret: identitySecret,
 );
+
+/// Nearby on or off: friends on the same Wi-Fi or hotspot connect directly,
+/// without internet. They see this phone's local network address.
+Future<void> nearbySet({required bool enabled}) =>
+    RustLib.instance.api.crateApiSessionNearbySet(enabled: enabled);
+
+/// Friends' chats whose friend is nearby right now.
+Future<Int64List> nearbyChats() =>
+    RustLib.instance.api.crateApiSessionNearbyChats();
 
 /// The app went to the background (or came back): pace reconnects for
 /// battery. Coming back also reconnects everyone now.

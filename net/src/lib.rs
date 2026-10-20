@@ -5,6 +5,7 @@
 //! whose key is its identity key.
 
 pub mod engine;
+pub mod nearby;
 pub mod tor;
 
 pub use engine::{NetEvent, Node, Transport};

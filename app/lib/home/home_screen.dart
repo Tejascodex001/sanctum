@@ -553,6 +553,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
               child: _BackgroundSettings(),
             ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
+              child: _NearbySettings(),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
               child: ListTile(
@@ -1025,7 +1029,12 @@ class _TempPicker extends StatelessWidget {
                   ),
                 ),
                 title: Text(f.name, style: AppText.heading),
-                subtitle: const Text('Both phones · burns after 24h', style: AppText.caption),
+                subtitle: Text(
+                  NetBus.instance.nearby.value.contains(f.chatId.toInt())
+                      ? 'Nearby · works without internet'
+                      : 'Both phones · burns after 24h',
+                  style: AppText.caption,
+                ),
                 onTap: () => Navigator.pop(context, (true, f.chatId.toInt())),
               ),
             if (friends.isEmpty)
@@ -1291,11 +1300,13 @@ class _FriendsPage extends StatelessWidget {
                 for (final c in friends)
                   _FriendRow(
                     card: c,
-                    subtitle: online.contains(c.id)
-                        ? 'Online'
-                        : c.verified
-                            ? 'Verified'
-                            : 'Not verified yet',
+                    subtitle: NetBus.instance.nearby.value.contains(c.id)
+                        ? 'Nearby · same Wi-Fi'
+                        : online.contains(c.id)
+                            ? 'Online'
+                            : c.verified
+                                ? 'Verified'
+                                : 'Not verified yet',
                     subtitleColor: online.contains(c.id) ? OnlineDot.color : null,
                     onTap: () => onOpen(c),
                     onLongPress: () => onActions(c),
@@ -1600,6 +1611,70 @@ class _ReliabilityBannerState extends State<_ReliabilityBanner> with WidgetsBind
                 ],
               ),
             ),
+    );
+  }
+}
+
+/// Nearby: friends on the same Wi-Fi or hotspot, with no internet.
+class _NearbySettings extends StatefulWidget {
+  const _NearbySettings();
+
+  @override
+  State<_NearbySettings> createState() => _NearbySettingsState();
+}
+
+class _NearbySettingsState extends State<_NearbySettings> {
+  bool? _on;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    Background.nearbyEnabled().then((on) {
+      if (mounted) setState(() => _on = on);
+    });
+  }
+
+  Future<void> _set(bool on) async {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _on = on;
+      _error = null;
+    });
+    try {
+      await NetBus.instance.setNearby(on);
+      await saveFlag('nearby', on);
+    } catch (e) {
+      await NetBus.instance.setNearby(false).catchError((_) {});
+      if (!mounted) return;
+      setState(() {
+        _on = false;
+        _error = 'Couldn\'t start nearby: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final on = _on;
+    if (on == null) return const SizedBox(height: 64);
+    return Container(
+      decoration: BoxDecoration(
+        color: Palette.bg.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(Radii.md),
+      ),
+      child: SwitchListTile(
+        value: on,
+        secondary: const Icon(Icons.wifi_tethering_rounded),
+        title: const Text('Nearby, without internet'),
+        subtitle: Text(
+          _error ??
+              'Chat with friends on the same Wi-Fi or one phone\'s hotspot, even offline. '
+                  'They can see your local network address (never your internet one).',
+          style: AppText.caption.copyWith(color: _error == null ? null : Palette.danger),
+        ),
+        onChanged: _set,
+      ),
     );
   }
 }

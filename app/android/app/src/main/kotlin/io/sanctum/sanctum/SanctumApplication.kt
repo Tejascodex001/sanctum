@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
@@ -23,6 +24,12 @@ import io.flutter.plugin.common.MethodChannel
  * phone, nothing goes through Google.
  */
 class SanctumApplication : Application() {
+    private val multicast: WifiManager.MulticastLock by lazy {
+        (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
+            .createMulticastLock("sanctum-nearby")
+            .apply { setReferenceCounted(false) }
+    }
+
     override fun onCreate() {
         super.onCreate()
         createChannels()
@@ -53,6 +60,12 @@ class SanctumApplication : Application() {
                             open = call.argument<String>("open"),
                             count = call.argument<Int>("count") ?: 0,
                         )
+                        result.success(null)
+                    }
+                    "nearbyLock" -> {
+                        // Some phones drop local broadcasts (the nearby
+                        // beacons) unless an app asks to hear them.
+                        if (call.argument<Boolean>("on") == true) multicast.acquire() else if (multicast.isHeld) multicast.release()
                         result.success(null)
                     }
                     "cancelAll" -> {

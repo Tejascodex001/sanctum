@@ -55,6 +55,17 @@ Rust core (sanctum-core)
 - **At rest:** every chat, message and MLS secret is sealed before SQLite sees it, with the row's identity bound as associated data so rows can't be swapped. Lookup keys for MLS state are keyed hashes, so group ids never appear on disk. `secure_delete` zeroes deleted data. Temp chats never touch disk.
 - MLS state is persisted after every operation; a crash before persisting just rolls back to the last saved state.
 
+## Nearby, without internet
+An opt-in feature in the sigil sheet (`net/src/nearby.rs`).
+- **What it does:** friends on the same Wi-Fi, or on one phone's hotspot, connect directly over the local network. Temp chats and everything else work with no internet at all.
+- **Beacons:** every 4 seconds each phone broadcasts a beacon (UDP port 47823) carrying an 8-byte tag per friend.
+  - The tag is `BLAKE3-keyed(pair fingerprint, minute)`, so only that friend can recognize it, and strangers on the network can't link beacons from one minute to the next.
+  - A friend who recognizes a tag connects to the TCP port in the beacon. From there it's the usual signed hello and MLS.
+- **The trade-off:** a nearby friend sees your local address, never your internet one. That's why it's opt-in.
+- **Routing:** `Reach` dials nearby friends directly first, then falls back to Tor. The network node now starts before Tor, so nearby works even when Tor can't.
+- **Android:** the app takes a multicast lock while nearby is on, because some phones drop broadcasts otherwise.
+- **Later:** Bluetooth and Wi-Fi Direct need Android radio code, so they're a separate step.
+
 ## Groups
 Peer to peer, with no server (`core/src/group.rs`).
 - **Encryption:** each group is an MLS group. A message is encrypted once, and the same bytes go to every member over their own Tor link (`Frame::GroupMls`).

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../background/background.dart';
 import '../src/rust/api/session.dart';
 
 /// Live updates from Rust: new messages, delivery receipts, temp chats
@@ -16,6 +17,10 @@ class NetBus {
   );
   /// Friends' chats whose friend is connected right now.
   final online = ValueNotifier<Set<int>>(const {});
+
+  /// Friends' chats whose friend is on the same Wi-Fi or hotspot.
+  final nearby = ValueNotifier<Set<int>>(const {});
+  Timer? _nearbyPoll;
   final _events = StreamController<AppEvent>.broadcast();
   StreamSubscription<AppEvent>? _sub;
   Future<void> Function()? _connect;
@@ -36,6 +41,18 @@ class NetBus {
   Future<void> refreshOnline() async {
     final chats = (await onlineChats()).map((id) => id.toInt()).toSet();
     if (!setEquals(chats, online.value)) online.value = chats;
+    final near = (await nearbyChats()).map((id) => id.toInt()).toSet();
+    if (!setEquals(near, nearby.value)) nearby.value = near;
+  }
+
+  /// Turns nearby (same Wi-Fi / hotspot, no internet needed) on or off.
+  Future<void> setNearby(bool on) async {
+    await Background.nearbyLock(on);
+    await nearbySet(enabled: on);
+    _nearbyPoll?.cancel();
+    // Beacons come and go without events; look every few seconds.
+    _nearbyPoll = on ? Timer.periodic(const Duration(seconds: 5), (_) => refreshOnline()) : null;
+    await refreshOnline();
   }
 
   bool isOnline(int? chatId) => chatId != null && online.value.contains(chatId);

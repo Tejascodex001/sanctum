@@ -2337,6 +2337,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "if-addrs"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "imara-diff"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4193,11 +4203,15 @@ dependencies = [
  "anyhow",
  "arti-client",
  "async-trait",
+ "blake3",
  "futures",
+ "if-addrs",
+ "postcard",
  "rand 0.8.8",
  "rustls",
  "safelog",
  "sanctum-core",
+ "serde",
  "tempfile",
  "tokio",
  "tor-cell",

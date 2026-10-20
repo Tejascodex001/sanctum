@@ -71,6 +71,12 @@ abstract final class Background {
     return (await brand()).aggressive && !await loadFlag('opened_background_settings', fallback: false);
   }
 
+  /// Nearby on or off (remembered), with what Android needs to hear
+  /// friends' beacons.
+  static Future<bool> nearbyEnabled() => loadFlag('nearby', fallback: false);
+
+  static Future<void> nearbyLock(bool on) => _call(_bg, 'nearbyLock', {'on': on});
+
   /// Blocks (or allows) screenshots and the recents preview.
   static Future<void> setSecure(bool secure) => _call(_app, 'setSecure', {'secure': secure});
 

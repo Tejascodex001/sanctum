@@ -179,6 +179,14 @@ impl Node {
         self.background.store(background, Ordering::Relaxed);
     }
 
+    /// Connects to `peer` now unless already connected, skipping backoff
+    /// (e.g. they just turned up nearby).
+    pub fn dial_now(self: &Arc<Self>, peer: [u8; 32]) {
+        if !self.links.lock().unwrap().contains_key(&peer) {
+            self.dial(peer);
+        }
+    }
+
     /// Pull to refresh: try every friend not connected now, skipping backoff.
     pub fn reconnect_now(self: &Arc<Self>) {
         self.backoff.lock().unwrap().clear();
