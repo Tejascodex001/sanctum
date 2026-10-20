@@ -21,10 +21,20 @@ import '../theme/tokens.dart';
 import 'message_source.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key, required this.card, required this.close, this.onWipe, this.onGroupInfo});
+  const ChatScreen({
+    super.key,
+    required this.card,
+    required this.close,
+    this.onWipe,
+    this.onGroupInfo,
+    this.showSeq,
+  });
 
   final ChatCard card;
   final VoidCallback close;
+
+  /// A message to scroll to and light up (from search or a catch-up).
+  final int? showSeq;
 
   /// Groups: members, rename, add, remove, leave.
   final VoidCallback? onGroupInfo;
@@ -58,6 +68,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   /// Bubbles on screen, by sequence number: tapping a quote scrolls there.
   final _bubbleKeys = <int, GlobalKey>{};
+  final _scroll = ScrollController();
   int? _flash;
   late final _wipe = AnimationController(vsync: this, duration: Motion.slow);
 
@@ -69,6 +80,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       if (has != _hasText) setState(() => _hasText = has);
     });
     if (widget.card.preloaded == null) _reload();
+    final show = widget.showSeq;
+    if (show != null) {
+      // After the opening transition, so the bubbles are laid out.
+      Future<void>.delayed(Motion.slow, () => _reveal(show));
+    }
     Notifier.instance
       ..viewing = _key
       ..markRead(_key);
@@ -103,6 +119,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     if (_recording) Background.recordCancel();
     _input.dispose();
     _focus.dispose();
+    _scroll.dispose();
     _wipe.dispose();
     super.dispose();
   }
@@ -159,6 +176,18 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   /// Scrolls to a quoted message (when it's near enough to be built) and
   /// flashes it.
+  /// Scrolls back until the message at [seq] is built, then shows it.
+  Future<void> _reveal(int seq) async {
+    for (var i = 0; i < 200 && mounted; i++) {
+      if (_bubbleKeys[seq]?.currentContext != null) return _jumpTo(seq);
+      if (!_scroll.hasClients) return;
+      final p = _scroll.position;
+      if (p.pixels >= p.maxScrollExtent) return;
+      _scroll.jumpTo((p.pixels + p.viewportDimension * 0.8).clamp(0.0, p.maxScrollExtent));
+      await WidgetsBinding.instance.endOfFrame;
+    }
+  }
+
   void _jumpTo(int? seq) {
     final context = seq == null ? null : _bubbleKeys[seq]?.currentContext;
     if (context == null) return;
@@ -322,6 +351,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       if (to != null) replies[to] = (replies[to] ?? 0) + 1;
     }
     return ListView.builder(
+      controller: _scroll,
       reverse: true,
       padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, Space.sm),
       itemCount: _messages.length,

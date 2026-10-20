@@ -30,6 +30,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `core/src/session.rs` | The protocol engine: friends, sending, frames in and out, deleting. I/O-free; tested by passing frames between in-memory "phones" |
 | `core/src/group.rs` | Groups: single admin, invites, welcomes, broadcasting |
 | `core/src/poll.rs` | Polls, date polls and plans, and everyone's answers |
+| `core/src/recall.rs` | Search across chats and the "While you were away" catch-up |
 | `core/src/moment.rs` | Daily moments: one photo a day for every friend, gone after 24 hours |
 | `core/src/store.rs` | The encrypted SQLite store. Every row is sealed; index columns are keyed hashes |
 | `core/src/protocol.rs` | Wire types: `Frame` (link level) and `Content` (inside MLS) |

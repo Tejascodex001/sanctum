@@ -140,6 +140,12 @@ A fourth tab with public posts from PeerTube (videos) and Pixelfed or other Mast
 - **Videos:** the player only speaks plain HTTP, so it's given `http://127.0.0.1:port/<token>`. A relay on the phone forwards each request, ranges included, to the real `https://` address through Tor, and follows redirects itself, so the player never connects anywhere else. It listens on loopback only and answers only for random tokens it handed out. Android's network security config allows plain HTTP to 127.0.0.1 and nothing else. PeerTube videos play at up to 480p, which streams well over Tor.
 - Sending a post to a chat sends its link as a message. Nothing is fetched from the link for a preview.
 
+## Search and catch-up
+On the phone, over the sealed store (`core/src/recall.rs`). Nothing is indexed in the clear: messages are opened and checked in memory.
+- **Search** finds messages with all the typed words in any case, looking at text, poll questions and choices, plan places, file names and album names. It returns up to 100, newest first, and opens the chat scrolled to the message. Hidden chats are searched only while revealed.
+- **Catch-up** ("While you were away") counts what friends wrote since the app was last left (`kv` "catchup:since", set when it goes to the background). It shows chats with new messages, mentions of your name (whole words), plans in the next two weeks you haven't answered, and others' polls from the last week you haven't answered. It appears only for 5 or more new messages, or a mention.
+- On-device AI (transcription, written summaries) comes later and will run models on the phone only.
+
 ## Deleting
 - **Delete a message:** for me, or (your own messages only) for everyone (`Content::DeleteMessage`, by the shared message id). Works in groups too.
 - **Clear chat:** for me, or (friends' chats) for everyone (`Content::ClearChat`). The friendship stays.
@@ -194,5 +200,5 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 ## Roadmap
 Status per feature is tracked in the README's feature table. In short:
 - **v1, private messaging:** done. Only nearby over Wi-Fi Direct remains, and hotspot mode mostly covers it.
-- **v2:** plans and date polls, shared albums, daily moments, the Explore tab for the Fediverse (done); on-device AI (catch-up summaries, transcription, search).
+- **v2:** plans and date polls, shared albums, daily moments, the Explore tab for the Fediverse, search and catch-up (done); on-device AI (voice note transcription, written summaries).
 - **v3:** voice and video calls, with no IP exposure.

@@ -8,6 +8,7 @@ import 'api/group.dart';
 import 'api/identity.dart';
 import 'api/moment.dart';
 import 'api/poll.dart';
+import 'api/recall.dart';
 import 'api/session.dart';
 import 'api/sigil.dart';
 import 'api/store.dart';
@@ -76,7 +77,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int dco_decode_box_autoadd_u_32(dynamic raw);
 
   @protected
+  int dco_decode_box_autoadd_u_8(dynamic raw);
+
+  @protected
   UpdateInfo dco_decode_box_autoadd_update_info(dynamic raw);
+
+  @protected
+  CatchUpView dco_decode_catch_up_view(dynamic raw);
+
+  @protected
+  ChatCatchUpView dco_decode_chat_catch_up_view(dynamic raw);
 
   @protected
   ChatKindView dco_decode_chat_kind_view(dynamic raw);
@@ -124,6 +134,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
+  List<ChatCatchUpView> dco_decode_list_chat_catch_up_view(dynamic raw);
+
+  @protected
   List<FediItem> dco_decode_list_fedi_item(dynamic raw);
 
   @protected
@@ -148,6 +161,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MomentView> dco_decode_list_moment_view(dynamic raw);
 
   @protected
+  List<OpenPollView> dco_decode_list_open_poll_view(dynamic raw);
+
+  @protected
+  List<PlanAheadView> dco_decode_list_plan_ahead_view(dynamic raw);
+
+  @protected
   List<PollOptionView> dco_decode_list_poll_option_view(dynamic raw);
 
   @protected
@@ -164,6 +183,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<RequestView> dco_decode_list_request_view(dynamic raw);
+
+  @protected
+  List<SearchHit> dco_decode_list_search_hit(dynamic raw);
 
   @protected
   List<StoredChat> dco_decode_list_stored_chat(dynamic raw);
@@ -191,6 +213,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   NetStatus dco_decode_net_status(dynamic raw);
+
+  @protected
+  OpenPollView dco_decode_open_poll_view(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
@@ -223,6 +248,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
+  int? dco_decode_opt_box_autoadd_u_8(dynamic raw);
+
+  @protected
   UpdateInfo? dco_decode_opt_box_autoadd_update_info(dynamic raw);
 
   @protected
@@ -230,6 +258,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PairedView dco_decode_paired_view(dynamic raw);
+
+  @protected
+  PlanAheadView dco_decode_plan_ahead_view(dynamic raw);
 
   @protected
   PlanView dco_decode_plan_view(dynamic raw);
@@ -248,6 +279,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RequestView dco_decode_request_view(dynamic raw);
+
+  @protected
+  SearchHit dco_decode_search_hit(dynamic raw);
 
   @protected
   SigilForm dco_decode_sigil_form(dynamic raw);
@@ -333,7 +367,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
+  int sse_decode_box_autoadd_u_8(SseDeserializer deserializer);
+
+  @protected
   UpdateInfo sse_decode_box_autoadd_update_info(SseDeserializer deserializer);
+
+  @protected
+  CatchUpView sse_decode_catch_up_view(SseDeserializer deserializer);
+
+  @protected
+  ChatCatchUpView sse_decode_chat_catch_up_view(SseDeserializer deserializer);
 
   @protected
   ChatKindView sse_decode_chat_kind_view(SseDeserializer deserializer);
@@ -381,6 +424,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
+  List<ChatCatchUpView> sse_decode_list_chat_catch_up_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<FediItem> sse_decode_list_fedi_item(SseDeserializer deserializer);
 
   @protected
@@ -407,6 +455,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MomentView> sse_decode_list_moment_view(SseDeserializer deserializer);
 
   @protected
+  List<OpenPollView> sse_decode_list_open_poll_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<PlanAheadView> sse_decode_list_plan_ahead_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<PollOptionView> sse_decode_list_poll_option_view(
     SseDeserializer deserializer,
   );
@@ -427,6 +485,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<RequestView> sse_decode_list_request_view(SseDeserializer deserializer);
+
+  @protected
+  List<SearchHit> sse_decode_list_search_hit(SseDeserializer deserializer);
 
   @protected
   List<StoredChat> sse_decode_list_stored_chat(SseDeserializer deserializer);
@@ -458,6 +519,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   NetStatus sse_decode_net_status(SseDeserializer deserializer);
+
+  @protected
+  OpenPollView sse_decode_open_poll_view(SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
@@ -498,6 +562,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
+  int? sse_decode_opt_box_autoadd_u_8(SseDeserializer deserializer);
+
+  @protected
   UpdateInfo? sse_decode_opt_box_autoadd_update_info(
     SseDeserializer deserializer,
   );
@@ -507,6 +574,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PairedView sse_decode_paired_view(SseDeserializer deserializer);
+
+  @protected
+  PlanAheadView sse_decode_plan_ahead_view(SseDeserializer deserializer);
 
   @protected
   PlanView sse_decode_plan_view(SseDeserializer deserializer);
@@ -525,6 +595,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RequestView sse_decode_request_view(SseDeserializer deserializer);
+
+  @protected
+  SearchHit sse_decode_search_hit(SseDeserializer deserializer);
 
   @protected
   SigilForm sse_decode_sigil_form(SseDeserializer deserializer);
@@ -635,8 +708,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_u_8(int self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_update_info(
     UpdateInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_catch_up_view(CatchUpView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_chat_catch_up_view(
+    ChatCatchUpView self,
     SseSerializer serializer,
   );
 
@@ -689,6 +774,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_chat_catch_up_view(
+    List<ChatCatchUpView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_fedi_item(List<FediItem> self, SseSerializer serializer);
 
   @protected
@@ -728,6 +819,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_open_poll_view(
+    List<OpenPollView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_plan_ahead_view(
+    List<PlanAheadView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_poll_option_view(
     List<PollOptionView> self,
     SseSerializer serializer,
@@ -757,6 +860,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_request_view(
     List<RequestView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_search_hit(
+    List<SearchHit> self,
     SseSerializer serializer,
   );
 
@@ -795,6 +904,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_net_status(NetStatus self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_open_poll_view(OpenPollView self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
@@ -848,6 +960,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_u_8(int? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_box_autoadd_update_info(
     UpdateInfo? self,
     SseSerializer serializer,
@@ -861,6 +976,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_paired_view(PairedView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_plan_ahead_view(PlanAheadView self, SseSerializer serializer);
 
   @protected
   void sse_encode_plan_view(PlanView self, SseSerializer serializer);
@@ -882,6 +1000,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_request_view(RequestView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_search_hit(SearchHit self, SseSerializer serializer);
 
   @protected
   void sse_encode_sigil_form(SigilForm self, SseSerializer serializer);

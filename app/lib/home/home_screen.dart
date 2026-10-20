@@ -15,6 +15,7 @@ import '../background/background.dart';
 import '../identity/secrets.dart';
 import '../explore/explore.dart';
 import '../moments/moments.dart';
+import 'recall_views.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
 import '../security/app_lock.dart';
@@ -144,12 +145,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _open(card);
   }
 
-  /// Opens a chat from outside the deck (the Friends tab).
-  Future<void> _open(ChatCard card) async {
+  /// Opens a chat from outside the deck (the Friends tab, search), at the
+  /// message [seq] if given.
+  Future<void> _open(ChatCard card, {int? seq}) async {
     HapticFeedback.selectionClick();
     card.preloaded = await card.source.load();
     if (!mounted) return;
-    await Navigator.of(context).push(ChatRoute(builder: (ctx) => _openChat(card, () => Navigator.pop(ctx))));
+    await Navigator.of(context)
+        .push(ChatRoute(builder: (ctx) => _openChat(card, () => Navigator.pop(ctx), showSeq: seq)));
     card.preloaded = null;
     await _closed(card);
   }
@@ -551,9 +554,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       );
 
-  Widget _openChat(ChatCard card, VoidCallback close) => ChatScreen(
+  Widget _openChat(ChatCard card, VoidCallback close, {int? showSeq}) => ChatScreen(
         card: card,
         close: close,
+        showSeq: showSeq,
         onGroupInfo: card.group ? () => _groupInfo(card) : null,
         onWipe: card.temp ? () => tempWipe(id: card.id) : null,
       );
@@ -562,6 +566,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (card.temp) return _loadTemp();
     await card.refresh();
     if (mounted) setState(() {});
+  }
+
+  void _openAt(int chatId, int? seq) {
+    final card = _chats.where((c) => c.id == chatId).firstOrNull;
+    if (card != null) _open(card, seq: seq);
   }
 
   void _goTo(int page) {
@@ -724,6 +733,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ? MomentsStrip(mySigil: widget.mySigil, sigil: _sigil)
                   : const SizedBox(width: double.infinity),
             ),
+            if (_page.round() == 0 && _search.text.isEmpty) CatchUpCard(hidden: _showHidden, onOpen: _openAt),
             const _UpdateBanner(),
             const _ReliabilityBanner(),
             AnimatedSize(
@@ -741,15 +751,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 controller: _pages,
                 onPageChanged: (_) => HapticFeedback.selectionClick(),
                 children: [
-                  ChatStack(
-                    cards: _visibleChats,
-                    query: _search.text,
-                    openBuilder: _openChat,
-                    onClosed: _closed,
-                    onLongPress: _actions,
-                    onRefresh: _refresh,
-                    empty: const _Empty(text: 'No chats yet'),
-                  ),
+                  if (_search.text.trim().isNotEmpty)
+                    SearchResults(
+                      query: _search.text.trim(),
+                      chats: [
+                        for (final c in _visibleChats)
+                          if (c.title.toLowerCase().contains(_search.text.trim().toLowerCase())) c,
+                      ],
+                      hidden: _showHidden,
+                      onOpenChat: _open,
+                      onOpenMessage: _openAt,
+                    )
+                  else
+                    ChatStack(
+                      cards: _visibleChats,
+                      query: _search.text,
+                      openBuilder: _openChat,
+                      onClosed: _closed,
+                      onLongPress: _actions,
+                      onRefresh: _refresh,
+                      empty: const _Empty(text: 'No chats yet'),
+                    ),
                   ChatStack(
                     cards: _temp,
                     query: _search.text,

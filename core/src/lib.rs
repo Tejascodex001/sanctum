@@ -12,6 +12,7 @@ pub mod nearby;
 pub mod pin;
 pub mod poll;
 pub mod protocol;
+pub mod recall;
 pub mod session;
 pub mod sigil;
 pub mod store;

@@ -1744,6 +1744,52 @@ mod tests {
     }
 
     #[test]
+    fn search_and_catch_up_find_whats_new() {
+        use crate::protocol::{Plan, Poll};
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        alice.s.set_my_name("Alice");
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        alice.s.send_text(ab, "Old news about the BEACH").unwrap();
+        connect(&mut alice, &mut bob);
+        let since = now() - 1;
+        bob.s.send_text(ba, "Alice, the beach was lovely").unwrap();
+        let poll = Poll { question: "Pizza or sushi?".into(), options: vec!["Pizza".into(), "Sushi".into()], ..Default::default() };
+        bob.s.send_poll(ba, poll).unwrap();
+        let plan = Poll {
+            question: "Hike".into(),
+            plan: Some(Plan { when: now() + 86_400, place: "Hills".into() }),
+            ..Default::default()
+        };
+        bob.s.send_poll(ba, plan).unwrap();
+        connect(&mut bob, &mut alice);
+
+        let hits = alice.s.search("beach", false).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert!(!hits[0].from_me, "newest first");
+        assert_eq!(alice.s.search("sushi pizza", false).unwrap().len(), 1, "poll choices are searched");
+        assert!(alice.s.search("beach volleyball", false).unwrap().is_empty(), "every word must match");
+
+        let up = alice.s.catch_up(since, false).unwrap();
+        assert_eq!(up.chats.len(), 1);
+        let chat = &up.chats[0];
+        assert_eq!((chat.chat_id, chat.count, chat.mentions), (ab, 3, 1));
+        assert_eq!(chat.senders, vec![bob.pk()]);
+        assert_eq!(chat.last, "Plan: Hike");
+        assert_eq!(up.plans.len(), 1);
+        assert_eq!((up.plans[0].place.as_str(), up.plans[0].mine), ("Hills", None));
+        assert_eq!(up.polls.len(), 1);
+        // Answered: no longer waiting.
+        alice.s.vote(ab, up.polls[0].seq, vec![1]).unwrap();
+        assert!(alice.s.catch_up(since, false).unwrap().polls.is_empty());
+        // Hidden chats stay out unless revealed.
+        alice.s.set_hidden(ab, true).unwrap();
+        assert!(alice.s.search("beach", false).unwrap().is_empty());
+        assert!(alice.s.catch_up(since, false).unwrap().chats.is_empty());
+        assert_eq!(alice.s.search("beach", true).unwrap().len(), 2);
+    }
+
+    #[test]
     fn shared_albums_collect_everyones_photos() {
         use crate::protocol::Album;
         let (mut alice, mut bob) = (Phone::new(), Phone::new());
