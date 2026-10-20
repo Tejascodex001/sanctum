@@ -21,7 +21,10 @@ pub enum PeerAddress {
     /// v3 onion address derived from the peer's identity key.
     Onion(String),
     /// Ephemeral local session id; rotated per session, never a MAC address.
-    Nearby { kind: TransportKind, session: [u8; 16] },
+    Nearby {
+        kind: TransportKind,
+        session: [u8; 16],
+    },
 }
 
 #[derive(Debug, thiserror::Error)]

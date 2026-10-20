@@ -38,7 +38,11 @@ impl TempChats {
         let idx = match self.chats.iter().position(|c| c.id == id) {
             Some(i) => i,
             None => {
-                self.chats.push(TempChat { id, transport, messages: Vec::new() });
+                self.chats.push(TempChat {
+                    id,
+                    transport,
+                    messages: Vec::new(),
+                });
                 self.chats.len() - 1
             }
         };
@@ -49,13 +53,18 @@ impl TempChats {
         self.chats.iter().find(|c| c.id == id)
     }
 
-    /// Drops expired messages and chats left empty. Run on a timer and on
-    /// every app resume.
+    /// Drops expired messages, and chats whose last message just expired.
+    /// Run on a timer and on every app resume.
     pub fn purge_expired(&mut self, now: u64) {
-        for chat in &mut self.chats {
+        self.chats.retain_mut(|chat| {
+            let had_messages = !chat.messages.is_empty();
             chat.messages.retain(|m| m.expires_at() > now);
-        }
-        self.chats.retain(|c| !c.messages.is_empty());
+            !had_messages || !chat.messages.is_empty()
+        });
+    }
+
+    pub fn ids(&self) -> Vec<u64> {
+        self.chats.iter().map(|c| c.id).collect()
     }
 
     pub fn wipe(&mut self, id: u64) {
@@ -80,19 +89,33 @@ mod tests {
     use super::*;
 
     fn msg(sent_at: u64) -> TempMessage {
-        TempMessage { from_me: true, body: "hi".into(), sent_at }
+        TempMessage {
+            from_me: true,
+            body: "hi".into(),
+            sent_at,
+        }
     }
 
     #[test]
     fn messages_expire_after_24h() {
         let mut t = TempChats::default();
-        t.open(1, TransportKind::Bluetooth).messages.extend([msg(0), msg(1000)]);
+        t.open(1, TransportKind::Bluetooth)
+            .messages
+            .extend([msg(0), msg(1000)]);
         t.purge_expired(TEMP_TTL_SECS - 1);
         assert_eq!(t.get(1).unwrap().messages.len(), 2);
         t.purge_expired(TEMP_TTL_SECS);
         assert_eq!(t.get(1).unwrap().messages, vec![msg(1000)]);
         t.purge_expired(TEMP_TTL_SECS + 1000);
         assert!(t.is_empty());
+    }
+
+    #[test]
+    fn new_empty_chat_survives_purge() {
+        let mut t = TempChats::default();
+        t.open(7, TransportKind::Internet);
+        t.purge_expired(u64::MAX);
+        assert_eq!(t.ids(), vec![7]);
     }
 
     #[test]

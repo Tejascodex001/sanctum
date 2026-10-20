@@ -13,11 +13,19 @@ pub struct Identity {
 
 impl Identity {
     pub fn generate() -> Self {
-        Self { signing: SigningKey::generate(&mut OsRng) }
+        Self {
+            signing: SigningKey::generate(&mut OsRng),
+        }
     }
 
     pub fn from_secret(secret: [u8; 32]) -> Self {
-        Self { signing: SigningKey::from_bytes(&secret) }
+        Self {
+            signing: SigningKey::from_bytes(&secret),
+        }
+    }
+
+    pub fn secret(&self) -> [u8; 32] {
+        self.signing.to_bytes()
     }
 
     pub fn public_key(&self) -> [u8; 32] {

@@ -24,7 +24,14 @@ pub enum Form {
     Spiral,
 }
 
-const FORMS: [Form; 6] = [Form::Rings, Form::Petals, Form::Shards, Form::Waves, Form::Lattice, Form::Spiral];
+const FORMS: [Form; 6] = [
+    Form::Rings,
+    Form::Petals,
+    Form::Shards,
+    Form::Waves,
+    Form::Lattice,
+    Form::Spiral,
+];
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Sigil {
@@ -54,10 +61,22 @@ impl Sigil {
         let hue = |h: f32| h.rem_euclid(360.0);
 
         Self {
-            accent: Hsl { h: base_hue, s: 0.65 + unit(fp[3]) * 0.25, l: 0.55 + unit(fp[4]) * 0.1 },
+            accent: Hsl {
+                h: base_hue,
+                s: 0.65 + unit(fp[3]) * 0.25,
+                l: 0.55 + unit(fp[4]) * 0.1,
+            },
             palette: [
-                Hsl { h: hue(base_hue + off), s: 0.5 + unit(fp[5]) * 0.3, l: 0.35 + unit(fp[6]) * 0.2 },
-                Hsl { h: hue(base_hue - off / 2.0), s: 0.4 + unit(fp[7]) * 0.3, l: 0.2 + unit(fp[8]) * 0.15 },
+                Hsl {
+                    h: hue(base_hue + off),
+                    s: 0.5 + unit(fp[5]) * 0.3,
+                    l: 0.35 + unit(fp[6]) * 0.2,
+                },
+                Hsl {
+                    h: hue(base_hue - off / 2.0),
+                    s: 0.4 + unit(fp[7]) * 0.3,
+                    l: 0.2 + unit(fp[8]) * 0.15,
+                },
             ],
             form: FORMS[(fp[9] as usize) % FORMS.len()],
             symmetry: 3 + fp[10] % 7,

@@ -14,8 +14,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rust core tests
-        run: cargo test --workspace
+      - name: Rust tests
+        run: |
+          cargo test --workspace
+          cargo build -p rust_lib_sanctum
 
       - uses: actions/setup-java@v4
         with:
@@ -32,6 +34,7 @@ jobs:
         run: |
           flutter pub get
           flutter analyze
+          flutter test
           flutter build apk --release
 
       - name: Publish release
