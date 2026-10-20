@@ -250,6 +250,10 @@ impl Store {
                  k BLOB PRIMARY KEY,
                  sealed BLOB NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS kv (
+                 k BLOB PRIMARY KEY,
+                 sealed BLOB NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS outbox (
                  id BLOB PRIMARY KEY,
                  peer BLOB NOT NULL,
@@ -574,6 +578,34 @@ impl Store {
     }
 
     /// All persisted MLS state (group secrets, ratchets, key packages).
+    /// A small sealed value under `name` (e.g. a friend's nearby key).
+    pub fn kv_put<T: Serialize>(&self, name: &[u8], value: &T) -> Result<()> {
+        let hashed = self.kv_index(name);
+        self.db.execute(
+            "INSERT INTO kv (k, sealed) VALUES (?1, ?2) ON CONFLICT(k) DO UPDATE SET sealed = excluded.sealed",
+            params![hashed, self.seal(&kv_aad(&hashed), value)?],
+        )?;
+        Ok(())
+    }
+
+    pub fn kv_get<T: DeserializeOwned>(&self, name: &[u8]) -> Result<Option<T>> {
+        let hashed = self.kv_index(name);
+        let sealed: Option<Vec<u8>> = self
+            .db
+            .query_row("SELECT sealed FROM kv WHERE k = ?1", [&hashed], |r| r.get(0))
+            .optional()?;
+        sealed.map(|s| self.open_sealed(&kv_aad(&hashed), &s)).transpose()
+    }
+
+    pub fn kv_delete(&self, name: &[u8]) -> Result<()> {
+        self.db.execute("DELETE FROM kv WHERE k = ?1", [self.kv_index(name)])?;
+        Ok(())
+    }
+
+    fn kv_index(&self, name: &[u8]) -> Vec<u8> {
+        blake3::keyed_hash(&self.index_key, &[b"kv:".as_slice(), name].concat()).as_bytes().to_vec()
+    }
+
     pub fn mls_load(&self) -> Result<HashMap<Vec<u8>, Vec<u8>>> {
         let mut stmt = self.db.prepare("SELECT k, sealed FROM mls_kv")?;
         let rows = stmt.query_map([], |r| {
@@ -661,6 +693,10 @@ impl Store {
 
 fn chat_aad(id: i64) -> Vec<u8> {
     [b"chat:".as_slice(), &id.to_le_bytes()].concat()
+}
+
+fn kv_aad(hashed_key: &[u8]) -> Vec<u8> {
+    [b"kv:".as_slice(), hashed_key].concat()
 }
 
 fn mls_aad(hashed_key: &[u8]) -> Vec<u8> {

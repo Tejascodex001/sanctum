@@ -64,7 +64,12 @@ An opt-in feature in the sigil sheet (`net/src/nearby.rs`).
 - **The trade-off:** a nearby friend sees your local address, never your internet one. That's why it's opt-in.
 - **Routing:** `Reach` dials nearby friends directly first, then falls back to Tor. The network node now starts before Tor, so nearby works even when Tor can't.
 - **Android:** the app takes a multicast lock while nearby is on, because some phones drop broadcasts otherwise.
-- **Later:** Bluetooth and Wi-Fi Direct need Android radio code, so they're a separate step.
+- **Bluetooth (Android 10+)** is part of the same switch (`core/src/nearby.rs`, `BluetoothNearby.kt`).
+  - **Advert:** a Bluetooth advert holds only a few bytes, so each phone advertises one 8-byte ID that rotates every minute, `BLAKE3-keyed(nearby key, minute)`, plus its L2CAP port.
+  - **Nearby key:** derived from the identity secret, and shared only with friends inside MLS (`Content::NearbyKey`). Keys are swapped automatically after the first connection. Strangers see random bytes that can't be linked from one minute to the next.
+  - **Links:** unpaired LE L2CAP channels, relayed through localhost so the Rust node treats them like any other connection. Incoming links go to the nearby listener. For outgoing links, `Reach` connects to the relay and sends the device's handle.
+  - **Order:** `Reach` tries Wi-Fi first, then Bluetooth, then Tor.
+- **Later:** Wi-Fi Direct (mostly covered by hotspot mode).
 
 ## Updates over the air
 - **Checking:** the newest release is found through Tor, by following `github.com/<repo>/releases/latest`, which redirects to the newest `build-N` tag. That uses no API, so shared Tor exits don't hit rate limits.

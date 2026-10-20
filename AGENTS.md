@@ -33,10 +33,11 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `net/src/engine.rs` | The `Node`: handshakes, live links, keepalive, reconnect with backoff, resends |
 | `net/src/tor.rs` | Arti (Tor): onion service, dialing, a connector for HTTPS |
 | `net/src/nearby.rs` | Local-network discovery (per-friend rotating tags) and the `Reach` transport |
+| `core/src/nearby.rs` | Rotating Bluetooth IDs and the friends-only nearby key exchange |
 | `net/src/https.rs` | A small HTTPS client for updates through Tor |
 | `app/rust/src/api/` | The Dart-facing API (flutter_rust_bridge). Keep it thin; logic belongs in `core` |
 | `app/lib/` | The Flutter UI. Design tokens are in `app/lib/theme/tokens.dart`; use them, never one-off values |
-| `app/android/app/src/main/kotlin/` | The scanner, background service, notifications, installer and OEM battery settings |
+| `app/android/app/src/main/kotlin/` | The scanner, background service, notifications, installer, OEM battery settings and Bluetooth nearby (`BluetoothNearby.kt`) |
 
 ## Rules that keep data and the wire compatible
 

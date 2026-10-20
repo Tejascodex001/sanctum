@@ -138,6 +138,9 @@ pub enum Content {
     ClearChat,
     /// The sender removed us as a friend, on both phones: delete the chat.
     Unfriend,
+    /// The sender's nearby key: lets us recognize their phone's rotating
+    /// Bluetooth ID (see `nearby`).
+    NearbyKey([u8; 32]),
 }
 
 /// The message a reply answers: enough to show it even if it's gone.

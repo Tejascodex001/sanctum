@@ -4,7 +4,7 @@
 use crate::frb_generated::StreamSink;
 use sanctum_core::identity::{pair_fingerprint, safety_number};
 use sanctum_core::session::{Event, Paired, Session};
-use sanctum_net::nearby::{Nearby, Reach};
+use sanctum_net::nearby::{Bluetooth, Nearby, Reach};
 use sanctum_net::{NetEvent, Node, Transport};
 use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -220,9 +220,53 @@ pub fn nearby_set(enabled: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Friends' chats whose friend is nearby right now.
+/// Where nearby friends' connections arrive (for the Bluetooth relay).
+pub fn nearby_port() -> Option<u16> {
+    REACH.nearby.read().unwrap().as_ref().map(|n| n.port())
+}
+
+/// Bluetooth is up: friends seen are reached through the relay on
+/// `proxy_port` (see `BluetoothNearby.kt`).
+pub fn bt_start(proxy_port: u16) {
+    *REACH.bluetooth.write().unwrap() = Some(Arc::new(Bluetooth::new(proxy_port)));
+}
+
+pub fn bt_stop() {
+    REACH.bluetooth.write().unwrap().take();
+}
+
+/// The rotating ID to advertise this minute.
+pub fn bt_my_id() -> anyhow::Result<Vec<u8>> {
+    with(|s| Ok(s.my_nearby_id(minute()).to_vec()))
+}
+
+/// A Sanctum phone advertising `id` was seen as device `handle`: if it's a
+/// friend, connect.
+pub fn bt_seen(id: Vec<u8>, handle: u64) -> anyhow::Result<()> {
+    let Some(friend) = with(|s| Ok(s.nearby_friend(&id, minute())?))? else {
+        return Ok(());
+    };
+    let Some(bt) = REACH.bluetooth.read().unwrap().clone() else {
+        return Ok(());
+    };
+    bt.saw(friend, handle);
+    if let Some(node) = NODE.lock().unwrap().clone() {
+        let _guard = RUNTIME.enter();
+        node.dial_now(friend);
+    }
+    Ok(())
+}
+
+fn minute() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() / 60)
+}
+
+/// Friends' chats whose friend is nearby right now (Wi-Fi or Bluetooth).
 pub fn nearby_chats() -> anyhow::Result<Vec<i64>> {
-    let peers = REACH.nearby.read().unwrap().as_ref().map(|n| n.peers()).unwrap_or_default();
+    let mut peers = REACH.nearby.read().unwrap().as_ref().map(|n| n.peers()).unwrap_or_default();
+    peers.extend(REACH.bluetooth.read().unwrap().as_ref().map(|b| b.peers()).unwrap_or_default());
     with(|s| {
         let mut chats = Vec::new();
         for peer in &peers {

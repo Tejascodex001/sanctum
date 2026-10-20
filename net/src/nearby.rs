@@ -62,6 +62,9 @@ pub struct Nearby {
     /// Friends heard recently, and where they listen.
     book: Mutex<HashMap<[u8; 32], (SocketAddr, Instant)>>,
     instance: u64,
+    /// Where friends' connections arrive (Wi-Fi, and Bluetooth links handed
+    /// over by the Android side on localhost).
+    port: u16,
     stop: watch::Sender<bool>,
 }
 
@@ -82,14 +85,21 @@ impl Nearby {
     ) -> anyhow::Result<Arc<Self>> {
         let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await?;
         let port = listener.local_addr()?.port();
-        let udp = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, discovery_port))?;
-        udp.set_broadcast(true)?;
-        udp.set_nonblocking(true)?;
-        let udp = Arc::new(UdpSocket::from_std(udp)?);
+        // Beacons are best effort: some networks or phones refuse the port,
+        // and Bluetooth still works without them.
+        let udp = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, discovery_port))
+            .and_then(|u| {
+                u.set_broadcast(true)?;
+                u.set_nonblocking(true)?;
+                UdpSocket::from_std(u)
+            })
+            .ok()
+            .map(Arc::new);
         let (stop, _) = watch::channel(false);
         let nearby = Arc::new(Self {
             book: Mutex::default(),
             instance: rand::random(),
+            port,
             stop,
         });
 
@@ -107,6 +117,9 @@ impl Nearby {
             }
         });
 
+        let Some(udp) = udp else {
+            return Ok(nearby);
+        };
         // Our beacon.
         let (me, s, sock, mut stopped) = (nearby.clone(), session.clone(), udp.clone(), nearby.stop.subscribe());
         tokio::spawn(async move {
@@ -140,6 +153,11 @@ impl Nearby {
             }
         });
         Ok(nearby)
+    }
+
+    /// Where friends' connections arrive.
+    pub fn port(&self) -> u16 {
+        self.port
     }
 
     pub fn stop(&self) {
@@ -221,11 +239,51 @@ fn broadcast_addresses() -> Vec<SocketAddr> {
     out
 }
 
-/// Reaches friends nearby directly when possible, else over Tor (once Tor
-/// is up). Either can be missing: no internet, or nearby turned off.
+/// Friends seen over Bluetooth, reached through the Android side: it
+/// listens on a localhost port, takes an 8-byte handle naming the device,
+/// opens a Bluetooth link to it and relays bytes both ways.
+pub struct Bluetooth {
+    proxy_port: u16,
+    seen: Mutex<HashMap<[u8; 32], (u64, Instant)>>,
+}
+
+impl Bluetooth {
+    pub fn new(proxy_port: u16) -> Self {
+        Self {
+            proxy_port,
+            seen: Mutex::default(),
+        }
+    }
+
+    /// `peer`'s phone was seen as device `handle`.
+    pub fn saw(&self, peer: [u8; 32], handle: u64) -> bool {
+        self.seen.lock().unwrap().insert(peer, (handle, Instant::now())).is_none()
+    }
+
+    pub fn handle(&self, peer: &[u8; 32]) -> Option<u64> {
+        let seen = self.seen.lock().unwrap();
+        seen.get(peer).filter(|(_, at)| at.elapsed() < FRESH).map(|(h, _)| *h)
+    }
+
+    pub fn peers(&self) -> Vec<[u8; 32]> {
+        let seen = self.seen.lock().unwrap();
+        seen.iter().filter(|(_, (_, at))| at.elapsed() < FRESH).map(|(p, _)| *p).collect()
+    }
+
+    async fn dial(&self, handle: u64) -> anyhow::Result<BoxConn> {
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, self.proxy_port)).await?;
+        tokio::io::AsyncWriteExt::write_all(&mut stream, &handle.to_le_bytes()).await?;
+        let _ = stream.set_nodelay(true);
+        Ok(Box::new(stream))
+    }
+}
+
+/// Reaches friends nearby directly when possible (Wi-Fi, then Bluetooth),
+/// else over Tor once it's up. Any can be missing: no internet, nearby off.
 #[derive(Default)]
 pub struct Reach {
     pub nearby: RwLock<Option<Arc<Nearby>>>,
+    pub bluetooth: RwLock<Option<Arc<Bluetooth>>>,
     pub tor: RwLock<Option<Arc<dyn Transport>>>,
 }
 
@@ -237,6 +295,13 @@ impl Transport for Reach {
             if let Ok(Ok(stream)) = timeout(DIAL_TIMEOUT, TcpStream::connect(addr)).await {
                 let _ = stream.set_nodelay(true);
                 return Ok(Box::new(stream));
+            }
+        }
+        let bluetooth = self.bluetooth.read().unwrap().clone();
+        if let Some(handle) = bluetooth.as_ref().and_then(|b| b.handle(&peer)) {
+            // Bluetooth links take a few seconds to open.
+            if let Ok(Ok(conn)) = timeout(Duration::from_secs(15), bluetooth.unwrap().dial(handle)).await {
+                return Ok(conn);
             }
         }
         let tor = self.tor.read().unwrap().clone();
@@ -322,6 +387,33 @@ mod tests {
         .expect("messages never arrived");
         alice_nearby.stop();
         bob_nearby.stop();
+    }
+
+    #[tokio::test]
+    async fn bluetooth_routes_go_through_the_local_relay() {
+        // Stands in for the Android side: reads the handle, then echoes.
+        let relay = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let port = relay.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let (mut s, _) = relay.accept().await.unwrap();
+            let mut handle = [0u8; 8];
+            s.read_exact(&mut handle).await.unwrap();
+            s.write_all(&handle).await.unwrap();
+        });
+        let reach = Reach::default();
+        let bt = Arc::new(Bluetooth::new(port));
+        let peer = [7u8; 32];
+        assert!(bt.saw(peer, 42));
+        assert!(!bt.saw(peer, 42), "already known");
+        *reach.bluetooth.write().unwrap() = Some(bt.clone());
+        let mut conn = reach.dial(peer).await.unwrap();
+        let mut back = [0u8; 8];
+        tokio::io::AsyncReadExt::read_exact(&mut conn, &mut back).await.unwrap();
+        assert_eq!(u64::from_le_bytes(back), 42);
+        assert_eq!(bt.peers(), [peer]);
+        // Unknown peers aren't routed there.
+        assert!(reach.dial([8u8; 32]).await.is_err());
     }
 
     #[test]

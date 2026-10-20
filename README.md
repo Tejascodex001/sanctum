@@ -27,7 +27,8 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Group chats** | Peer to peer, no server. The admin manages members; members who aren't friends still reach each other |
 | ✅ | **Temp chats** | Kept in memory only, on both phones. Each message burns 24 hours after it's sent, and either person can wipe the chat for both |
 | ✅ | **Nearby (Wi-Fi / hotspot)** | Chat with friends on the same Wi-Fi or one phone's hotspot, with no internet. Opt-in |
-| ⏳ | Nearby over Bluetooth / Wi-Fi Direct | |
+| ✅ | **Nearby over Bluetooth** | For friends who've connected once before. Android 10+. Part of the same Nearby switch |
+| ⏳ | Nearby over Wi-Fi Direct | Mostly covered by hotspot mode |
 | ✅ | **Replies** | Swipe a message right; tap the quote to jump to the original |
 | ⏳ | Thread view | A dedicated view for long reply chains |
 | ✅ | **Delete & clear** | Delete a message (for me / for everyone), clear a chat (for me / for everyone), remove a friend (it's removed on both phones) |

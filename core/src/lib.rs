@@ -6,6 +6,7 @@ mod group;
 pub mod identity;
 pub mod invite;
 pub mod mls;
+pub mod nearby;
 pub mod protocol;
 pub mod session;
 pub mod sigil;

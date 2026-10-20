@@ -114,6 +114,8 @@ pub struct Session {
     /// frame (e.g. a group change everyone must apply): the network reaches
     /// them ([`Session::take_pokes`]).
     pub(crate) pokes: Vec<[u8; 32]>,
+    /// Friends we've sent our nearby key to this run.
+    pub(crate) nearby_offered: HashSet<[u8; 32]>,
     requests: Vec<FriendRequest>,
     /// Declined this run; not shown again until a restart.
     declined: HashSet<[u8; 32]>,
@@ -138,6 +140,7 @@ impl Session {
             my_name: String::new(),
             unreadable: Default::default(),
             pokes: Vec::new(),
+            nearby_offered: HashSet::new(),
             requests: Vec::new(),
             declined: HashSet::new(),
         })
@@ -606,7 +609,10 @@ impl Session {
                 Frame::FriendRequest { name: self.my_name.clone() },
                 Frame::KeyPackageRequest,
             ],
-            Some(_) => self.flush(peer)?,
+            Some(_) => {
+                self.offer_nearby_key(peer)?;
+                self.flush(peer)?
+            }
             // Not a friend, but in a group with us; or a former friend we
             // still owe a goodbye ("removed on both phones").
             None if self.shares_group(peer)? || self.store.has_outbox_for(peer)? => self.flush(peer)?,
@@ -636,7 +642,14 @@ impl Session {
             | Frame::GroupMls { .. } => return self.on_group_frame(peer, frame),
             other => other,
         };
-        let (chat_id, mut meta) = self.direct_chat(peer)?.ok_or(SessionError::NotAFriend)?;
+        let Some((chat_id, mut meta)) = self.direct_chat(peer)? else {
+            // A former friend we still owe a goodbye: whatever they sent
+            // before getting it is moot. Keep the link for their ack.
+            if self.store.has_outbox_for(peer)? {
+                return Ok(Vec::new());
+            }
+            return Err(SessionError::NotAFriend);
+        };
         let initiator = self.public_key() < *peer;
         match frame {
             // Already friends.
@@ -820,6 +833,7 @@ impl Session {
                 self.delete_chat(chat_id)?;
                 self.events.push(Event::Chat(chat_id));
             }
+            Content::NearbyKey(key) => self.on_nearby_key(peer, key)?,
             Content::TempWipe { temp } => {
                 if let Some(id) = self.temp.wipe_remote(*peer, temp) {
                     self.forget_temp_outbox(Some(*peer), temp);
@@ -915,6 +929,9 @@ impl Session {
     /// longer reach this phone until you pair again.
     pub fn delete_chat(&mut self, chat_id: i64) -> Result<()> {
         if let Ok(meta) = self.chat(chat_id) {
+            for peer in meta.peers.iter().filter(|_| meta.kind == ChatKind::Direct) {
+                self.forget_nearby_key(&peer.identity)?;
+            }
             for peer in &meta.peers {
                 for (id, _) in self.store.outbox_for(&peer.identity)? {
                     self.store.outbox_remove(&id)?;
@@ -1518,6 +1535,27 @@ mod tests {
         bob.s.delete_message(bg, 0, true).unwrap();
         connect(&mut bob, &mut alice);
         assert!(alice.texts(group).is_empty() && bob.texts(bg).is_empty());
+    }
+
+    #[test]
+    fn friends_recognize_each_others_bluetooth_id_and_nobody_else_does() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, _) = befriend(&mut alice, &mut bob);
+        let eve = Phone::new();
+        // Keys are swapped automatically once the phones have talked.
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        let minute = 29_000_000;
+        let alice_id = alice.s.my_nearby_id(minute);
+        assert_eq!(bob.s.nearby_friend(&alice_id, minute).unwrap(), Some(alice.pk()));
+        assert_eq!(bob.s.nearby_friend(&alice_id, minute + 1).unwrap(), Some(alice.pk()), "a minute of clock skew");
+        assert_eq!(bob.s.nearby_friend(&alice_id, minute + 2).unwrap(), None, "it rotates");
+        assert_eq!(alice.s.nearby_friend(&bob.s.my_nearby_id(minute), minute).unwrap(), Some(bob.pk()));
+        assert_eq!(bob.s.nearby_friend(&eve.s.my_nearby_id(minute), minute).unwrap(), None);
+        assert_ne!(alice_id, alice.s.my_nearby_id(minute + 1));
+        // Once removed, no longer recognized.
+        alice.s.remove_friend(ab, false).unwrap();
+        assert_eq!(alice.s.nearby_friend(&bob.s.my_nearby_id(minute), minute).unwrap(), None);
     }
 
     #[test]

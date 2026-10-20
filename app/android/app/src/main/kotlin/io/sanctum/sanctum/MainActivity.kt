@@ -36,6 +36,13 @@ class MainActivity : FlutterFragmentActivity() {
         pendingPermission = null
     }
 
+    private var pendingPermissions: MethodChannel.Result? = null
+    private val permissionsLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+            pendingPermissions?.success(granted.values.all { it })
+            pendingPermissions = null
+        }
+
     // The engine lives in SanctumApplication and outlives this activity.
     override fun getCachedEngineId(): String = SanctumApplication.ENGINE
 
@@ -101,6 +108,22 @@ class MainActivity : FlutterFragmentActivity() {
                             pendingPermission = result
                             permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         }
+                    }
+                    "requestBluetooth" -> {
+                        // Nearby devices (Android 12+); before that, BLE
+                        // scanning needs location access.
+                        val needed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            arrayOf(
+                                Manifest.permission.BLUETOOTH_SCAN,
+                                Manifest.permission.BLUETOOTH_ADVERTISE,
+                                Manifest.permission.BLUETOOTH_CONNECT,
+                            )
+                        } else {
+                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+                        }
+                        pendingPermissions?.success(false)
+                        pendingPermissions = result
+                        permissionsLauncher.launch(needed)
                     }
                     "setSecure" -> {
                         // Screenshots and the recents preview: blocked unless

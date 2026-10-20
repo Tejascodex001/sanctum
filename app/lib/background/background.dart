@@ -86,6 +86,27 @@ abstract final class Background {
   static Future<String> installApk(String path) async =>
       await _call<String>(_app, 'installApk', {'path': path}) ?? 'failed';
 
+  /// Bluetooth nearby (Android 10+): asks for the Nearby devices
+  /// permission, then starts; returns the relay port, or null.
+  static Future<int?> bluetoothStart(int rustPort) async {
+    if (await _call<bool>(_app, 'requestBluetooth') != true) return null;
+    final port = await _call<int>(_bg, 'btStart', {'rustPort': rustPort});
+    return port == null || port < 0 ? null : port;
+  }
+
+  static Future<void> bluetoothAdvertise(Uint8List id) => _call(_bg, 'btAdvertise', {'id': id});
+  static Future<void> bluetoothStop() => _call(_bg, 'btStop');
+
+  /// A Sanctum phone was seen over Bluetooth (its advertised ID, and a
+  /// handle naming the device).
+  static void onBluetoothSeen(void Function(Uint8List id, int handle) handler) {
+    _bg.setMethodCallHandler((call) async {
+      if (call.method != 'btSeen') return;
+      final args = call.arguments as Map<Object?, Object?>;
+      handler(args['id']! as Uint8List, args['handle']! as int);
+    });
+  }
+
   /// Blocks (or allows) screenshots and the recents preview.
   static Future<void> setSecure(bool secure) => _call(_app, 'setSecure', {'secure': secure});
 

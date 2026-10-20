@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.pm.PackageInfoCompat
@@ -25,6 +27,9 @@ import io.flutter.plugin.common.MethodChannel
  * phone, nothing goes through Google.
  */
 class SanctumApplication : Application() {
+    private lateinit var channel: MethodChannel
+    private var bluetooth: BluetoothNearby? = null
+
     private val multicast: WifiManager.MulticastLock by lazy {
         (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
             .createMulticastLock("sanctum-nearby")
@@ -37,9 +42,19 @@ class SanctumApplication : Application() {
         val engine = FlutterEngine(this)
         engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         FlutterEngineCache.getInstance().put(ENGINE, engine)
-        MethodChannel(engine.dartExecutor.binaryMessenger, "sanctum/background")
-            .setMethodCallHandler { call, result ->
+        channel = MethodChannel(engine.dartExecutor.binaryMessenger, "sanctum/background")
+        channel.setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "btStart" -> result.success(startBluetooth(call.argument<Int>("rustPort")!!))
+                    "btAdvertise" -> {
+                        bluetooth?.advertise(call.argument<ByteArray>("id")!!)
+                        result.success(null)
+                    }
+                    "btStop" -> {
+                        bluetooth?.stop()
+                        bluetooth = null
+                        result.success(null)
+                    }
                     "start" -> {
                         // Refused while in the background on Android 12+;
                         // Dart asks again whenever the app is on screen.
@@ -88,6 +103,18 @@ class SanctumApplication : Application() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    /** Bluetooth nearby (Android 10+); returns the relay port, or -1. */
+    private fun startBluetooth(rustPort: Int): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return -1
+        bluetooth?.stop()
+        val main = Handler(Looper.getMainLooper())
+        val nearby = BluetoothNearby(this) { id, handle ->
+            main.post { channel.invokeMethod("btSeen", mapOf("id" to id, "handle" to handle)) }
+        }
+        bluetooth = nearby
+        return runCatching { nearby.start(rustPort) }.getOrDefault(-1)
     }
 
     private fun createChannels() {

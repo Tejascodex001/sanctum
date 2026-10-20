@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `ensure_node`, `forward_events`, `panic_text`, `poke`, `runtime`, `session`, `set_status`, `to_key`, `with`
+// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `ensure_node`, `forward_events`, `minute`, `panic_text`, `poke`, `runtime`, `session`, `set_status`, `to_key`, `with`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Opens the encrypted store at `dir` and restores MLS state. Call once at
@@ -44,7 +44,25 @@ Future<void> netStart({
 Future<void> nearbySet({required bool enabled}) =>
     RustLib.instance.api.crateApiSessionNearbySet(enabled: enabled);
 
-/// Friends' chats whose friend is nearby right now.
+/// Where nearby friends' connections arrive (for the Bluetooth relay).
+Future<int?> nearbyPort() => RustLib.instance.api.crateApiSessionNearbyPort();
+
+/// Bluetooth is up: friends seen are reached through the relay on
+/// `proxy_port` (see `BluetoothNearby.kt`).
+Future<void> btStart({required int proxyPort}) =>
+    RustLib.instance.api.crateApiSessionBtStart(proxyPort: proxyPort);
+
+Future<void> btStop() => RustLib.instance.api.crateApiSessionBtStop();
+
+/// The rotating ID to advertise this minute.
+Future<Uint8List> btMyId() => RustLib.instance.api.crateApiSessionBtMyId();
+
+/// A Sanctum phone advertising `id` was seen as device `handle`: if it's a
+/// friend, connect.
+Future<void> btSeen({required List<int> id, required BigInt handle}) =>
+    RustLib.instance.api.crateApiSessionBtSeen(id: id, handle: handle);
+
+/// Friends' chats whose friend is nearby right now (Wi-Fi or Bluetooth).
 Future<Int64List> nearbyChats() =>
     RustLib.instance.api.crateApiSessionNearbyChats();
 

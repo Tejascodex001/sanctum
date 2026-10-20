@@ -22,6 +22,11 @@ class NetBus {
   /// Friends' chats whose friend is on the same Wi-Fi or hotspot.
   final nearby = ValueNotifier<Set<int>>(const {});
   Timer? _nearbyPoll;
+  Timer? _advertise;
+
+  /// Whether Bluetooth nearby started (needs Android 10+, Bluetooth on and
+  /// the Nearby devices permission).
+  final bluetooth = ValueNotifier<bool>(false);
   final _events = StreamController<AppEvent>.broadcast();
   StreamSubscription<AppEvent>? _sub;
   Future<void> Function()? _connect;
@@ -51,6 +56,7 @@ class NetBus {
   Future<void> setNearby(bool on) async {
     await Background.nearbyLock(on);
     await nearbySet(enabled: on);
+    await _setBluetooth(on);
     _nearbyPoll?.cancel();
     // Beacons come and go without events; look every few seconds.
     _nearbyPoll = on ? Timer.periodic(const Duration(seconds: 5), (_) => refreshOnline()) : null;
@@ -77,6 +83,33 @@ class NetBus {
   }) {
     _connect = () => netStart(stateDir: stateDir, cacheDir: cacheDir, identitySecret: identitySecret);
     return _connect!();
+  }
+
+  Future<void> _setBluetooth(bool on) async {
+    _advertise?.cancel();
+    _advertise = null;
+    if (!on) {
+      await Background.bluetoothStop();
+      await btStop();
+      bluetooth.value = false;
+      return;
+    }
+    final rustPort = await nearbyPort();
+    final relay = rustPort == null ? null : await Background.bluetoothStart(rustPort);
+    if (relay == null) {
+      bluetooth.value = false;
+      return;
+    }
+    await btStart(proxyPort: relay);
+    Background.onBluetoothSeen((id, handle) async {
+      await btSeen(id: id, handle: BigInt.from(handle));
+      await refreshOnline();
+    });
+    // The ID rotates every minute; re-advertise a little more often.
+    Future<void> advertise() async => Background.bluetoothAdvertise(Uint8List.fromList(await btMyId()));
+    await advertise();
+    _advertise = Timer.periodic(const Duration(seconds: 20), (_) => advertise());
+    bluetooth.value = true;
   }
 
   /// Tries again after Tor failed to start.

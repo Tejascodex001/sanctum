@@ -1360,7 +1360,7 @@ class _FriendsPage extends StatelessWidget {
                   _FriendRow(
                     card: c,
                     subtitle: NetBus.instance.nearby.value.contains(c.id)
-                        ? 'Nearby · same Wi-Fi'
+                        ? 'Nearby · no internet needed'
                         : online.contains(c.id)
                             ? 'Online'
                             : c.verified
@@ -1726,11 +1726,15 @@ class _NearbySettingsState extends State<_NearbySettings> {
         value: on,
         secondary: const Icon(Icons.wifi_tethering_rounded),
         title: const Text('Nearby, without internet'),
-        subtitle: Text(
-          _error ??
-              'Chat with friends on the same Wi-Fi or one phone\'s hotspot, even offline. '
-                  'They can see your local network address (never your internet one).',
-          style: AppText.caption.copyWith(color: _error == null ? null : Palette.danger),
+        subtitle: ValueListenableBuilder<bool>(
+          valueListenable: NetBus.instance.bluetooth,
+          builder: (context, bluetooth, _) => Text(
+            _error ??
+                'Chat with friends on the same Wi-Fi, a hotspot, or over Bluetooth, even offline. '
+                    'Over Wi-Fi they can see your local network address (never your internet one).'
+                    '${on ? (bluetooth ? '\nBluetooth: on' : '\nBluetooth: off (turn Bluetooth on and allow Nearby devices; Android 10+)') : ''}',
+            style: AppText.caption.copyWith(color: _error == null ? null : Palette.danger),
+          ),
         ),
         onChanged: _set,
       ),
