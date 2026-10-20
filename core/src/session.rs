@@ -36,8 +36,8 @@ pub enum SessionError {
     NotAFriend,
     #[error("only the group's admin can do that")]
     NotAdmin,
-    #[error("too large to send (50 MB at most)")]
-    TooLarge,
+    #[error("too large to send ({0} MB at most for this kind)")]
+    TooLarge(u64),
     #[error("storage: {0}")]
     Io(String),
     #[error("the other side broke the protocol")]
@@ -1650,6 +1650,28 @@ mod tests {
         connect(&mut alice, &mut bob);
         assert!(bob.s.store.message(ba, 0).unwrap().is_none());
         assert_eq!(std::fs::read_dir(bob.dir.path().join("media")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn each_kind_has_its_size_limit() {
+        use crate::media::max_size;
+        use crate::protocol::MediaKind;
+        let mb = 1024 * 1024;
+        assert_eq!(
+            [MediaKind::Image, MediaKind::Video, MediaKind::Audio, MediaKind::File].map(max_size),
+            [10 * mb, 20 * mb, 10 * mb, 50 * mb]
+        );
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        let (path, _) = photo(&alice, (10 * mb + 1) as usize);
+        assert!(matches!(alice.s.send_media(ab, outgoing(&path), None), Err(SessionError::TooLarge(10))));
+        // As a file, the same bytes may go.
+        let mut file = outgoing(&path);
+        file.kind = MediaKind::File;
+        alice.s.send_media(ab, file, None).unwrap();
+        connect(&mut alice, &mut bob);
+        assert_eq!(bob.s.media_bytes(ba, 0).unwrap().unwrap().len() as u64, 10 * mb + 1);
     }
 
     #[test]

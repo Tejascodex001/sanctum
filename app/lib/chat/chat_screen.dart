@@ -430,7 +430,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
             ListTile(
               leading: const Icon(Icons.photo_library_rounded),
               title: const Text('Photo or video'),
-              subtitle: const Text('Photos are resized and lose hidden data like location'),
+              subtitle: const Text('Photos up to 10 MB (resized, hidden data like location removed), videos up to 20 MB'),
               onTap: () => Navigator.pop(sheet, 'visual'),
             ),
             ListTile(

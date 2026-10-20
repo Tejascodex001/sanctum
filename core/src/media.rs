@@ -20,7 +20,19 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 pub const CHUNK: usize = 64 * 1024;
-pub const MAX_SIZE: u64 = 50 * 1024 * 1024;
+const MB: u64 = 1024 * 1024;
+
+/// The largest attachment of each kind, on sending and on receiving.
+/// Photos are resized before sending, so they're usually far smaller;
+/// voice notes are recorded at 48 kbps, so 10 MB is about 25 minutes.
+pub fn max_size(kind: MediaKind) -> u64 {
+    match kind {
+        MediaKind::Image => 10 * MB,
+        MediaKind::Video => 20 * MB,
+        MediaKind::Audio => 10 * MB,
+        MediaKind::File => 50 * MB,
+    }
+}
 /// Big files aren't resent on every flush: only on a new link, or after
 /// this long without an acknowledgement.
 const RESEND_AFTER: Duration = Duration::from_secs(300);
@@ -91,8 +103,8 @@ impl Session {
     pub fn send_media(&mut self, chat_id: i64, out: Outgoing<'_>, reply_to: Option<i64>) -> Result<Vec<[u8; 32]>> {
         let meta = self.chat(chat_id)?;
         let plain = fs::read(out.path).map_err(io)?;
-        if plain.len() as u64 > MAX_SIZE {
-            return Err(SessionError::TooLarge);
+        if plain.len() as u64 > max_size(out.kind) {
+            return Err(SessionError::TooLarge(max_size(out.kind) / MB));
         }
         let blob: BlobId = rand::random();
         let key: [u8; 32] = rand::random();
@@ -337,7 +349,8 @@ impl Session {
         quote: Option<crate::protocol::Quote>,
         media: Media,
     ) -> Result<()> {
-        if media.size > MAX_SIZE {
+        // Bigger than its kind allows: refused, its chunks ignored.
+        if media.size > max_size(media.kind) {
             return Ok(());
         }
         self.expect_blob(chat_id, peer, &media)?;

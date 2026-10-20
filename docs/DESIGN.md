@@ -106,7 +106,7 @@ Photos, videos and files (`core/src/media.rs`).
 - **Photos** are shrunk (2048 px max) and re-encoded on the phone before sending. That also strips EXIF metadata such as location.
 - **Viewing:** photos are decrypted in memory. Videos play in the app from a temporary decrypted copy, which is deleted when the player closes and on every start. Files open in another app through a read-only link.
 - **Voice notes** are attachments too: AAC in .m4a, mono at 48 kbps, recorded only while the mic is held. They play in the app from a temporary decrypted copy.
-- **Limits:** 50 MB per attachment. Temp chats have none, because they're memory-only.
+- **Limits:** photos 10 MB, videos 20 MB, voice notes 10 MB (about 25 minutes), files 50 MB. Enforced when sending and when receiving: a bigger attachment is refused. Temp chats have none, because they're memory-only.
 - Deleting a message or chat deletes its files; panic wipe deletes the media folder.
 
 ## Deleting
