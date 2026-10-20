@@ -171,8 +171,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (card == null) {
           _loadChats();
         } else {
+          // Fails if the chat is gone (the friend removed us from both
+          // phones): reload the list instead.
           card.refresh().then((_) {
             if (mounted) setState(() {});
+          }, onError: (_) {
+            _loadChats();
           });
         }
       case AppEventKind.temp:
@@ -385,14 +389,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.delete_outline_rounded, color: Palette.danger),
-                title: const Text('Delete chat', style: TextStyle(color: Palette.danger)),
+                leading: const Icon(Icons.person_remove_rounded, color: Palette.danger),
+                title: const Text('Remove friend', style: TextStyle(color: Palette.danger)),
                 onTap: () {
                   Navigator.pop(context);
-                  _delete(card);
+                  _removeFriend(card);
                 },
               ),
             ],
+            if (!card.temp)
+              ListTile(
+                leading: const Icon(Icons.cleaning_services_rounded),
+                title: const Text('Clear chat'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _clear(card);
+                },
+              ),
           ],
         ),
       ),
@@ -468,29 +481,60 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _loadChats();
   }
 
-  Future<void> _delete(ChatCard card) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Delete chat with ${card.title}?'),
-        content: const Text(
-          'Messages are erased from this phone and unsent ones are dropped. '
-          'They won\'t be able to reach you until you add each other again.',
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete', style: TextStyle(color: Palette.danger)),
-          ),
-        ],
-      ),
+  /// Removes a friend from this phone, or from both phones.
+  Future<void> _removeFriend(ChatCard card) async {
+    final both = await _choose(
+      title: 'Remove ${card.title}?',
+      body: 'Your chat with them is deleted. From both phones also deletes it on theirs '
+          '(as soon as their phone is reached). Either way, you\'d need to add each other again.',
+      mine: 'From my phone',
+      everyone: 'From both phones',
     );
-    if (ok != true) return;
+    if (both == null) return;
     HapticFeedback.heavyImpact();
-    await chatDelete(id: card.id);
+    await friendRemove(chatId: card.id, bothPhones: both);
     await _loadChats();
   }
+
+  /// Clears a chat's messages here, or (friends' chats) on both phones.
+  Future<void> _clear(ChatCard card) async {
+    final friendChat = card.friend && !card.group;
+    final everyone = await _choose(
+      title: 'Clear ${card.title}?',
+      body: friendChat
+          ? 'Every message in this chat is erased. For everyone also erases them on their phone.'
+          : 'Every message in this chat is erased from this phone.',
+      mine: friendChat ? 'For me' : 'Clear',
+      everyone: friendChat ? 'For everyone' : null,
+    );
+    if (everyone == null) return;
+    HapticFeedback.heavyImpact();
+    await chatClear(chatId: card.id, forEveryone: everyone);
+    await card.refresh();
+    if (mounted) setState(() {});
+  }
+
+  /// "Just me" (false) or "everyone" (true); null if cancelled.
+  Future<bool?> _choose({required String title, required String body, required String mine, String? everyone}) =>
+      showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(body),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(mine, style: const TextStyle(color: Palette.danger)),
+            ),
+            if (everyone != null)
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(everyone, style: const TextStyle(color: Palette.danger)),
+              ),
+          ],
+        ),
+      );
 
   Widget _openChat(ChatCard card, VoidCallback close) => ChatScreen(
         card: card,

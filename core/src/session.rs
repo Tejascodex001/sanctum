@@ -607,8 +607,9 @@ impl Session {
                 Frame::KeyPackageRequest,
             ],
             Some(_) => self.flush(peer)?,
-            // Not a friend, but in a group with us.
-            None if self.shares_group(peer)? => self.flush(peer)?,
+            // Not a friend, but in a group with us; or a former friend we
+            // still owe a goodbye ("removed on both phones").
+            None if self.shares_group(peer)? || self.store.has_outbox_for(peer)? => self.flush(peer)?,
             None => return Err(SessionError::NotAFriend),
         };
         out.extend(self.group_invites_for(peer)?);
@@ -802,6 +803,23 @@ impl Session {
             }
             // Group content belongs in group frames, not a pair's chat.
             Content::GroupText { .. } | Content::GroupInfo(_) | Content::GroupLeave => {}
+            Content::DeleteMessage { id } => {
+                // Only their own messages.
+                if let Some((seq, m)) = self.store.message_by_id(chat_id, &id)? {
+                    if !m.from_me {
+                        self.store.delete_message(chat_id, seq)?;
+                        self.events.push(Event::Chat(chat_id));
+                    }
+                }
+            }
+            Content::ClearChat => {
+                self.store.clear_messages(chat_id)?;
+                self.events.push(Event::Chat(chat_id));
+            }
+            Content::Unfriend => {
+                self.delete_chat(chat_id)?;
+                self.events.push(Event::Chat(chat_id));
+            }
             Content::TempWipe { temp } => {
                 if let Some(id) = self.temp.wipe_remote(*peer, temp) {
                     self.forget_temp_outbox(Some(*peer), temp);
@@ -810,6 +828,86 @@ impl Session {
             }
         }
         Ok(())
+    }
+
+    // ---- Deleting ----------------------------------------------------
+
+    /// Deletes one message, on this phone or (our own messages) on every
+    /// phone in the chat. Returns who to reach.
+    pub fn delete_message(&mut self, chat_id: i64, seq: i64, for_everyone: bool) -> Result<Vec<[u8; 32]>> {
+        let Some(message) = self.store.message(chat_id, seq)? else {
+            return Ok(Vec::new());
+        };
+        self.store.delete_message(chat_id, seq)?;
+        self.events.push(Event::Chat(chat_id));
+        match (for_everyone && message.from_me, message.id) {
+            (true, Some(id)) => self.tell_chat(chat_id, Content::DeleteMessage { id }),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// Clears a chat's messages, here or on both phones (friends' chats).
+    pub fn clear_chat(&mut self, chat_id: i64, for_everyone: bool) -> Result<Vec<[u8; 32]>> {
+        let meta = self.chat(chat_id)?;
+        self.store.clear_messages(chat_id)?;
+        self.events.push(Event::Chat(chat_id));
+        if for_everyone && meta.kind == ChatKind::Direct {
+            return self.tell_chat(chat_id, Content::ClearChat);
+        }
+        Ok(Vec::new())
+    }
+
+    /// Removes a friend: from this phone, or from both (their phone deletes
+    /// its chat with us too). Returns who to reach.
+    pub fn remove_friend(&mut self, chat_id: i64, both_phones: bool) -> Result<Vec<[u8; 32]>> {
+        let meta = self.chat(chat_id)?;
+        if meta.kind != ChatKind::Direct {
+            return Err(SessionError::NoSuchChat);
+        }
+        let peer = meta.peers.first().map(|p| p.identity);
+        // The goodbye is encrypted now: once the chat is gone, the pair's
+        // group can't be looked up for it.
+        let goodbye = match (both_phones, meta.group_id.is_empty()) {
+            (true, false) => Some(self.mls.encrypt(&meta.group_id, &Content::Unfriend.encode())?),
+            _ => None,
+        };
+        self.mls.persist(&self.store)?;
+        self.delete_chat(chat_id)?;
+        let (Some(peer), Some(cipher)) = (peer, goodbye) else {
+            return Ok(Vec::new());
+        };
+        self.store.outbox_put(
+            &rand::random(),
+            &OutboxItem {
+                peer,
+                state: OutboxState::Sealed { plain: Vec::new(), cipher },
+                message: None,
+            },
+        )?;
+        Ok(vec![peer])
+    }
+
+    /// Queues `content` for the chat's other phones.
+    fn tell_chat(&mut self, chat_id: i64, content: Content) -> Result<Vec<[u8; 32]>> {
+        let meta = self.chat(chat_id)?;
+        match meta.kind {
+            ChatKind::Group if !meta.group_id.is_empty() => self.broadcast_content(&meta, &content),
+            ChatKind::Direct => {
+                let Some(peer) = meta.peers.first().map(|p| p.identity) else {
+                    return Ok(Vec::new());
+                };
+                self.store.outbox_put(
+                    &rand::random(),
+                    &OutboxItem {
+                        peer,
+                        state: OutboxState::Plain(content.encode()),
+                        message: None,
+                    },
+                )?;
+                Ok(vec![peer])
+            }
+            _ => Ok(Vec::new()),
+        }
     }
 
     /// Deletes a chat, its messages and anything still waiting to be sent
@@ -876,6 +974,11 @@ impl Session {
                     continue;
                 }
                 _ => {}
+            }
+            // Already encrypted: goes out as is.
+            if let OutboxState::Sealed { cipher: bytes, .. } | OutboxState::Cipher(bytes) = &item.state {
+                frames.push(Frame::Mls { id, bytes: bytes.clone() });
+                continue;
             }
             let Some(group) = &pair_group else { continue };
             if let OutboxState::Plain(plain) = &item.state {
@@ -1329,6 +1432,92 @@ mod tests {
         assert!(!alice.s.knows(&eve.pk()).unwrap());
         // A friend who isn't in any group of ours is still just a friend.
         assert!(alice.s.knows(&bob.pk()).unwrap());
+    }
+
+    #[test]
+    fn deleting_messages_for_me_and_for_everyone() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        alice.s.send_text(ab, "oops").unwrap();
+        alice.s.send_text(ab, "keep").unwrap();
+        bob.s.send_text(ba, "mine").unwrap();
+        connect(&mut alice, &mut bob);
+        // Alice takes back "oops" everywhere.
+        assert_eq!(alice.s.delete_message(ab, 0, true).unwrap(), vec![bob.pk()]);
+        connect(&mut alice, &mut bob);
+        assert!(bob.texts(ba).iter().all(|m| m.1 != "oops"));
+        assert!(alice.texts(ab).iter().all(|m| m.1 != "oops"));
+        // Bob can't delete Alice's message on her phone, only on his.
+        let keep = bob.s.store.messages_indexed(ba, None).unwrap().into_iter().find(|(_, m)| m.body == "keep").unwrap().0;
+        assert!(bob.s.delete_message(ba, keep, true).unwrap().is_empty());
+        connect(&mut bob, &mut alice);
+        assert!(alice.texts(ab).iter().any(|m| m.1 == "keep"));
+        assert!(bob.texts(ba).iter().all(|m| m.1 != "keep"));
+        // New messages never reuse a deleted one's number.
+        let before: Vec<i64> = alice.s.store.messages_indexed(ab, None).unwrap().iter().map(|(s, _)| *s).collect();
+        alice.s.send_text(ab, "new").unwrap();
+        let newest = alice.s.store.messages_indexed(ab, None).unwrap().last().unwrap().0;
+        assert!(before.iter().all(|s| *s < newest));
+    }
+
+    #[test]
+    fn clearing_a_chat_here_or_on_both_phones() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        for i in 0..3 {
+            alice.s.send_text(ab, &format!("m{i}")).unwrap();
+        }
+        connect(&mut alice, &mut bob);
+        bob.s.clear_chat(ba, false).unwrap();
+        assert!(bob.texts(ba).is_empty() && alice.texts(ab).len() == 3, "only on Bob's phone");
+        bob.s.send_text(ba, "hi again").unwrap();
+        connect(&mut bob, &mut alice);
+        alice.s.clear_chat(ab, true).unwrap();
+        connect(&mut alice, &mut bob);
+        assert!(alice.texts(ab).is_empty() && bob.texts(ba).is_empty());
+        // Still friends.
+        alice.s.send_text(ab, "after").unwrap();
+        connect(&mut alice, &mut bob);
+        assert_eq!(bob.texts(ba), [(false, "after".into(), true)]);
+    }
+
+    #[test]
+    fn removing_a_friend_from_one_or_both_phones() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        // Only from Alice's phone: Bob still has her.
+        alice.s.remove_friend(ab, false).unwrap();
+        assert!(alice.s.friends().unwrap().is_empty());
+        assert_eq!(bob.s.friends().unwrap().len(), 1);
+
+        // Pair again, then remove on both phones.
+        let (mut carol, mut dave) = (Phone::new(), Phone::new());
+        let (cd, _) = befriend(&mut carol, &mut dave);
+        connect(&mut carol, &mut dave);
+        assert_eq!(carol.s.remove_friend(cd, true).unwrap(), vec![dave.pk()]);
+        assert!(carol.s.friends().unwrap().is_empty());
+        // The goodbye still reaches Dave, who deletes his chat with Carol.
+        connect(&mut carol, &mut dave);
+        assert!(dave.s.friends().unwrap().is_empty());
+        assert!(carol.s.pending_peers().unwrap().is_empty(), "goodbye acknowledged");
+        let _ = ba;
+    }
+
+    #[test]
+    fn deleting_for_everyone_in_a_group() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, _) = befriend(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        let (group, _) = alice.s.create_group("G", &[ab]).unwrap();
+        connect(&mut alice, &mut bob);
+        let bg = group_of(&bob, "G").unwrap();
+        bob.s.send_to_chat(bg, "typo", None).unwrap();
+        connect(&mut bob, &mut alice);
+        assert_eq!(alice.texts(group).len(), 1);
+        bob.s.delete_message(bg, 0, true).unwrap();
+        connect(&mut bob, &mut alice);
+        assert!(alice.texts(group).is_empty() && bob.texts(bg).is_empty());
     }
 
     #[test]

@@ -132,6 +132,12 @@ pub enum Content {
     GroupInfo(GroupInfo),
     /// The sender left the group.
     GroupLeave,
+    /// Delete for everyone: the sender's message with this id.
+    DeleteMessage { id: MessageId },
+    /// Clear for everyone: every message in the pair's chat.
+    ClearChat,
+    /// The sender removed us as a friend, on both phones: delete the chat.
+    Unfriend,
 }
 
 /// The message a reply answers: enough to show it even if it's gone.

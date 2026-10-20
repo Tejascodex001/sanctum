@@ -11,6 +11,7 @@ import '../notify/notifier.dart';
 import '../security/screenshots.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
+import '../src/rust/api/store.dart';
 import '../theme/tokens.dart';
 import 'message_source.dart';
 
@@ -93,7 +94,14 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _reload() async {
-    final messages = await widget.card.source.load();
+    final List<ChatMessage> messages;
+    try {
+      messages = await widget.card.source.load();
+    } catch (_) {
+      // The chat is gone (e.g. the friend removed us from both phones).
+      if (mounted) widget.close();
+      return;
+    }
     if (mounted) setState(() => _messages = messages);
   }
 
@@ -147,6 +155,13 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     });
   }
 
+  Future<void> _delete(ChatMessage m, {required bool everyone}) async {
+    HapticFeedback.mediumImpact();
+    setState(() => _messages = [for (final x in _messages) if (!identical(x, m)) x]);
+    await messageDelete(chatId: widget.card.id, seq: m.seq!, forEveryone: everyone);
+    await _reload();
+  }
+
   Future<void> _actions(ChatMessage m) async {
     HapticFeedback.mediumImpact();
     await showModalBottomSheet<void>(
@@ -173,6 +188,25 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 Clipboard.setData(ClipboardData(text: m.body));
               },
             ),
+            if (m.seq != null) ...[
+              ListTile(
+                leading: const Icon(Icons.delete_outline_rounded, color: Palette.danger),
+                title: const Text('Delete for me', style: TextStyle(color: Palette.danger)),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _delete(m, everyone: false);
+                },
+              ),
+              if (m.fromMe && widget.card.friend)
+                ListTile(
+                  leading: const Icon(Icons.delete_forever_rounded, color: Palette.danger),
+                  title: const Text('Delete for everyone', style: TextStyle(color: Palette.danger)),
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    _delete(m, everyone: true);
+                  },
+                ),
+            ],
           ],
         ),
       ),

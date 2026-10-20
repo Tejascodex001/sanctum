@@ -264,6 +264,12 @@ impl Store {
                  seq INTEGER NOT NULL,
                  sealed BLOB NOT NULL,
                  PRIMARY KEY (chat_id, seq)
+             );
+             -- The next sequence number per chat, so numbers aren't reused
+             -- after messages are deleted (pending receipts point at them).
+             CREATE TABLE IF NOT EXISTS chat_seq (
+                 chat_id INTEGER PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+                 next INTEGER NOT NULL
              );",
         )?;
         let store = Self {
@@ -331,13 +337,19 @@ impl Store {
             return Err(StoreError::NoSuchChat);
         }
         let seq: i64 = self.db.query_row(
-            "SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE chat_id = ?1",
+            "SELECT MAX(COALESCE((SELECT MAX(seq) + 1 FROM messages WHERE chat_id = ?1), 0),
+                        COALESCE((SELECT next FROM chat_seq WHERE chat_id = ?1), 0))",
             [chat_id],
             |r| r.get(0),
         )?;
         self.db.execute(
             "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, ?2, ?3)",
             params![chat_id, seq, self.seal(&message_aad(chat_id, seq), msg)?],
+        )?;
+        self.db.execute(
+            "INSERT INTO chat_seq (chat_id, next) VALUES (?1, ?2)
+             ON CONFLICT(chat_id) DO UPDATE SET next = excluded.next",
+            params![chat_id, seq + 1],
         )?;
         Ok(seq)
     }
@@ -388,6 +400,29 @@ impl Store {
             }
         }
         Ok(false)
+    }
+
+    /// A message by its shared id.
+    pub fn message_by_id(&self, chat_id: i64, id: &MessageId) -> Result<Option<(i64, StoredMessage)>> {
+        Ok(self
+            .messages_indexed(chat_id, None)?
+            .into_iter()
+            .find(|(_, m)| m.id.as_ref() == Some(id)))
+    }
+
+    pub fn delete_message(&self, chat_id: i64, seq: i64) -> Result<()> {
+        self.db.execute("DELETE FROM messages WHERE chat_id = ?1 AND seq = ?2", params![chat_id, seq])?;
+        Ok(())
+    }
+
+    /// Every message in the chat; the chat itself stays.
+    pub fn clear_messages(&self, chat_id: i64) -> Result<()> {
+        self.db.execute("DELETE FROM messages WHERE chat_id = ?1", [chat_id])?;
+        Ok(())
+    }
+
+    pub fn has_outbox_for(&self, peer: &[u8; 32]) -> Result<bool> {
+        Ok(!self.outbox_for(peer)?.is_empty())
     }
 
     /// One message, by its sequence number.

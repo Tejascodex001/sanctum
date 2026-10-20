@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `now`, `with`
+// These functions are ignored because they are not marked as `pub`: `now`, `reach`, `with`
 
 /// A fresh 32-byte storage key; Dart keeps it in Keystore-backed storage.
 Future<Uint8List> storeNewKey() =>
@@ -31,6 +31,36 @@ Future<void> chatSetPinned({required PlatformInt64 id, required bool pinned}) =>
 /// Renames a chat (for a friend: what you call them, on this phone only).
 Future<void> chatRename({required PlatformInt64 id, required String name}) =>
     RustLib.instance.api.crateApiStoreChatRename(id: id, name: name);
+
+/// Deletes a message here, or (our own) on every phone in the chat.
+Future<void> messageDelete({
+  required PlatformInt64 chatId,
+  required PlatformInt64 seq,
+  required bool forEveryone,
+}) => RustLib.instance.api.crateApiStoreMessageDelete(
+  chatId: chatId,
+  seq: seq,
+  forEveryone: forEveryone,
+);
+
+/// Clears a chat's messages here, or on both phones (friends' chats).
+Future<void> chatClear({
+  required PlatformInt64 chatId,
+  required bool forEveryone,
+}) => RustLib.instance.api.crateApiStoreChatClear(
+  chatId: chatId,
+  forEveryone: forEveryone,
+);
+
+/// Removes a friend from this phone, or from both (their phone deletes its
+/// chat with us too).
+Future<void> friendRemove({
+  required PlatformInt64 chatId,
+  required bool bothPhones,
+}) => RustLib.instance.api.crateApiStoreFriendRemove(
+  chatId: chatId,
+  bothPhones: bothPhones,
+);
 
 /// Hides a chat from the list (or shows it again).
 Future<void> chatSetHidden({required PlatformInt64 id, required bool hidden}) =>

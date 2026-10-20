@@ -418,6 +418,15 @@ impl Session {
                 self.store.update_chat(chat_id, meta)?;
                 self.events.push(Event::Chat(chat_id));
             }
+            // Delete for everyone: only the sender's own message.
+            Content::DeleteMessage { id } => {
+                if let Some((seq, m)) = self.store.message_by_id(chat_id, &id)? {
+                    if m.sender == Some(*peer) {
+                        self.store.delete_message(chat_id, seq)?;
+                        self.events.push(Event::Chat(chat_id));
+                    }
+                }
+            }
             Content::GroupLeave => {
                 if meta.admin == Some(me) {
                     let reach = self.group_remove(chat_id, peer)?;
@@ -450,6 +459,10 @@ impl Session {
     }
 
     // ---- Helpers -----------------------------------------------------
+
+    pub(crate) fn broadcast_content(&mut self, meta: &ChatMeta, content: &Content) -> Result<Vec<[u8; 32]>> {
+        self.broadcast(meta, content, None)
+    }
 
     /// Encrypts once and queues the same bytes for every other member.
     fn broadcast(&mut self, meta: &ChatMeta, content: &Content, message: Option<(i64, i64)>) -> Result<Vec<[u8; 32]>> {

@@ -89,6 +89,15 @@ Peer to peer, with no server (`core/src/group.rs`).
   - Keys for 4 past epochs are kept, so a message sent just before a membership change can still be read after it.
   - A message that can't be read yet is left unacknowledged and resent (live links resend every 30 seconds). It is dropped after 5 tries.
 
+## Deleting
+- **Delete a message:** for me, or (your own messages only) for everyone (`Content::DeleteMessage`, by the shared message id). Works in groups too.
+- **Clear chat:** for me, or (friends' chats) for everyone (`Content::ClearChat`). The friendship stays.
+- **Remove friend:** from my phone, or from both phones (`Content::Unfriend`).
+  - The goodbye is encrypted before the chat is deleted, then sent from the outbox. The network still connects to the former friend to deliver it.
+  - Their phone then deletes its chat with us.
+- **Safety:** these instructions travel inside MLS, so only the chat's other phone can act on them, and only on messages its sender wrote.
+- Message numbers are never reused after a deletion, because pending delivery receipts point at them.
+
 ## Replies
 - Every message has an id that is the same on both phones (the network message id).
 - A reply (`Content::Reply`) carries a quote: the original's id, its author's key and its first 140 characters. It can be shown even if the original is gone, and tapping it scrolls to the original when it's nearby.

@@ -122,6 +122,31 @@ pub fn chat_rename(id: i64, name: String) -> anyhow::Result<()> {
     session::with(|s| Ok(s.rename_chat(id, &name)?))
 }
 
+fn reach(peers: Vec<[u8; 32]>) {
+    for peer in peers {
+        session::poke(Some(peer));
+    }
+}
+
+/// Deletes a message here, or (our own) on every phone in the chat.
+pub fn message_delete(chat_id: i64, seq: i64, for_everyone: bool) -> anyhow::Result<()> {
+    reach(session::with(|s| Ok(s.delete_message(chat_id, seq, for_everyone)?))?);
+    Ok(())
+}
+
+/// Clears a chat's messages here, or on both phones (friends' chats).
+pub fn chat_clear(chat_id: i64, for_everyone: bool) -> anyhow::Result<()> {
+    reach(session::with(|s| Ok(s.clear_chat(chat_id, for_everyone)?))?);
+    Ok(())
+}
+
+/// Removes a friend from this phone, or from both (their phone deletes its
+/// chat with us too).
+pub fn friend_remove(chat_id: i64, both_phones: bool) -> anyhow::Result<()> {
+    reach(session::with(|s| Ok(s.remove_friend(chat_id, both_phones)?))?);
+    Ok(())
+}
+
 /// Hides a chat from the list (or shows it again).
 pub fn chat_set_hidden(id: i64, hidden: bool) -> anyhow::Result<()> {
     session::with(|s| Ok(s.set_hidden(id, hidden)?))
