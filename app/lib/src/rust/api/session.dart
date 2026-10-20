@@ -63,14 +63,22 @@ class PairedView {
   final String friend;
   final Uint8List sigilKey;
 
+  /// Read aloud on a call to confirm a remote pairing.
+  final String safetyNumber;
+
   const PairedView({
     required this.chatId,
     required this.friend,
     required this.sigilKey,
+    required this.safetyNumber,
   });
 
   @override
-  int get hashCode => chatId.hashCode ^ friend.hashCode ^ sigilKey.hashCode;
+  int get hashCode =>
+      chatId.hashCode ^
+      friend.hashCode ^
+      sigilKey.hashCode ^
+      safetyNumber.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -79,5 +87,6 @@ class PairedView {
           runtimeType == other.runtimeType &&
           chatId == other.chatId &&
           friend == other.friend &&
-          sigilKey == other.sigilKey;
+          sigilKey == other.sigilKey &&
+          safetyNumber == other.safetyNumber;
 }

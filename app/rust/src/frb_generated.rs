@@ -1041,10 +1041,12 @@ impl SseDecode for crate::api::session::PairedView {
         let mut var_chatId = <i64>::sse_decode(deserializer);
         let mut var_friend = <String>::sse_decode(deserializer);
         let mut var_sigilKey = <Vec<u8>>::sse_decode(deserializer);
+        let mut var_safetyNumber = <String>::sse_decode(deserializer);
         return crate::api::session::PairedView {
             chat_id: var_chatId,
             friend: var_friend,
             sigil_key: var_sigilKey,
+            safety_number: var_safetyNumber,
         };
     }
 }
@@ -1291,6 +1293,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::session::PairedView {
             self.chat_id.into_into_dart().into_dart(),
             self.friend.into_into_dart().into_dart(),
             self.sigil_key.into_into_dart().into_dart(),
+            self.safety_number.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -1561,6 +1564,7 @@ impl SseEncode for crate::api::session::PairedView {
         <i64>::sse_encode(self.chat_id, serializer);
         <String>::sse_encode(self.friend, serializer);
         <Vec<u8>>::sse_encode(self.sigil_key, serializer);
+        <String>::sse_encode(self.safety_number, serializer);
     }
 }
 

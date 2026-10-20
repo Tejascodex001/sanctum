@@ -998,12 +998,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PairedView dco_decode_paired_view(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
     return PairedView(
       chatId: dco_decode_i_64(arr[0]),
       friend: dco_decode_String(arr[1]),
       sigilKey: dco_decode_list_prim_u_8_strict(arr[2]),
+      safetyNumber: dco_decode_String(arr[3]),
     );
   }
 
@@ -1246,10 +1247,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_chatId = sse_decode_i_64(deserializer);
     var var_friend = sse_decode_String(deserializer);
     var var_sigilKey = sse_decode_list_prim_u_8_strict(deserializer);
+    var var_safetyNumber = sse_decode_String(deserializer);
     return PairedView(
       chatId: var_chatId,
       friend: var_friend,
       sigilKey: var_sigilKey,
+      safetyNumber: var_safetyNumber,
     );
   }
 
@@ -1508,6 +1511,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_64(self.chatId, serializer);
     sse_encode_String(self.friend, serializer);
     sse_encode_list_prim_u_8_strict(self.sigilKey, serializer);
+    sse_encode_String(self.safetyNumber, serializer);
   }
 
   @protected

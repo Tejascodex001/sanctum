@@ -27,6 +27,8 @@ pub struct PairedView {
     pub chat_id: i64,
     pub friend: String,
     pub sigil_key: Vec<u8>,
+    /// Read aloud on a call to confirm a remote pairing.
+    pub safety_number: String,
 }
 
 impl From<Paired> for PairedView {
@@ -34,6 +36,7 @@ impl From<Paired> for PairedView {
         Self {
             chat_id: p.chat_id,
             friend: p.friend,
+            safety_number: sanctum_core::identity::safety_number(&p.sigil_key),
             sigil_key: p.sigil_key,
         }
     }

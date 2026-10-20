@@ -38,7 +38,9 @@ Rust core (sanctum-core)
 1. Bob shows a QR **offer**: identity key, name, a one-time MLS key package, signed.
 2. Alice scans it, creates the chat's MLS group with Bob in it, and shows a QR **reply**: her identity, name and the MLS welcome, signed and bound to Bob's offer.
 3. Bob scans the reply and joins. Both phones derive the same **pair sigil**; if they match on screen, no code was swapped.
-Codes are about 560 and 1,300 characters. QR scanning uses ZXing on-device (no Google ML Kit, which reports usage to Google).
+QRs carry the codes as raw bytes (QR version ~14 for the offer, ~22 for the reply); the scanner analyses 85% of a high-resolution frame. QR scanning uses ZXing on-device (no Google ML Kit, which reports usage to Google).
+
+**Far away:** the same two codes are shared through any app and pasted instead of scanned. Because that app could in theory swap them, both phones show a 12-digit **safety number** derived from the pair fingerprint, read aloud on a call to confirm. (With Tor, short spoken invite words over a direct onion connection can replace copy-paste.)
 
 ## Security features
 - App lock with biometric or PIN; locks again when the app goes to the background.
