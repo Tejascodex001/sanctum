@@ -263,9 +263,9 @@ class _UpdateSettingsState extends State<UpdateSettings> {
           ListTile(
             leading: const Icon(Icons.system_update_rounded),
             onTap: _tapVersion,
-            title: Text('Sanctum $appVersion'),
-            subtitle: Text('${current == 0 ? '' : 'Build $current. '}'
-                'Updates are downloaded privately, and only genuine Sanctum updates can be installed.'),
+            title: Text('Sanctum ${fullVersion(current)}'),
+            subtitle:
+                const Text('Updates are downloaded privately, and only genuine Sanctum updates can be installed.'),
             trailing: _checking
                 ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : TextButton(onPressed: _check, child: const Text('Check')),

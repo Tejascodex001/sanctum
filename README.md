@@ -6,7 +6,7 @@
 
 Sanctum is an Android app for a small circle of people who trust each other (about 200 friends at most). Your messages, photos, calls and plans go straight from your phone to your friends' phones, hidden by Tor. There's no company in the middle that stores them, reads them or sells anything about you.
 
-> Sanctum is in **beta** (the app says *beta-1.0.0*). It's ready to use with friends, and it updates itself from inside the app.
+> Sanctum is in **beta** (the app says *beta-1.0.0* followed by the build number, like *beta-1.0.0.66*). It's ready to use with friends, and it updates itself from inside the app.
 
 ## Why Sanctum
 

@@ -270,10 +270,7 @@ class _Sent extends StatelessWidget {
     final lines = [
       ('Phone', phone == null ? 'Not included' : (phone!.isEmpty ? 'Unknown' : phone!)),
       ('Android version', android == null ? 'Not included' : (android!.isEmpty ? 'Unknown' : android!)),
-      (
-        'Sanctum version',
-        switch (buildNumber) { null => 'Not included', 0 => appVersion, final b => '$appVersion, build $b' }
-      ),
+      ('Sanctum version', buildNumber == null ? 'Not included' : fullVersion(buildNumber!)),
       ('Rating', rating == 0 ? 'No stars' : '$rating of 5 stars'),
       ('Feedback', 'What you wrote above'),
     ];

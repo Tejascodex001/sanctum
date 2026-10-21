@@ -92,7 +92,7 @@ jobs:
         with:
           tag_name: build-${{ steps.number.outputs.n }}
           # The tag stays build-N: installed apps look for it to update.
-          name: Sanctum ${{ steps.version.outputs.name }} (build ${{ steps.number.outputs.n }})
+          name: Sanctum ${{ steps.version.outputs.name }}.${{ steps.number.outputs.n }}
           # Tag the commit that was built, not whatever main is by now.
           target_commitish: ${{ github.sha }}
           make_latest: true

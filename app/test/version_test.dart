@@ -8,7 +8,8 @@ void main() {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     final version = RegExp(r'^version: ([^+\s]+)', multiLine: true).firstMatch(pubspec)!.group(1);
     final gradle = File('android/app/build.gradle.kts').readAsStringSync();
-    final prefix = RegExp(r'versionName = "(.*)\$\{flutter.versionName\}"').firstMatch(gradle)!.group(1);
-    expect(appVersion, '$prefix$version');
+    final name = RegExp(r'versionName = "(.*)\$\{flutter.versionName\}\.\$\{flutter.versionCode\}"').firstMatch(gradle);
+    expect(appVersion, '${name!.group(1)}$version');
+    expect(fullVersion(66), '$appVersion.66');
   });
 }
