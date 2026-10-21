@@ -198,7 +198,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _loadRequests();
       // Dots, badges and notifications update themselves (NetBus, Notifier).
       // So do moments (MomentsStrip).
-      case AppEventKind.presence || AppEventKind.message || AppEventKind.tempMessage || AppEventKind.moments:
+      case AppEventKind.presence || AppEventKind.message || AppEventKind.tempMessage || AppEventKind.moments || AppEventKind.typing:
         break;
     }
   }

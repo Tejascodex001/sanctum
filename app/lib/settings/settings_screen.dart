@@ -5,6 +5,7 @@ import '../identity/secrets.dart';
 import '../security/panic.dart';
 import '../security/pin_settings.dart';
 import '../sigil/sigil_painter.dart';
+import '../src/rust/api/fedi.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
 import '../theme/appearance.dart';
@@ -117,6 +118,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const _Section('APPEARANCE'),
           _Group(children: [_AppearanceSettings(sigilAccent: sigil.accent.color)]),
+          const _Section('REELS'),
+          const _Group(children: [_ReelsSettings()]),
           const _Section('LOCK'),
           const PinSettings(),
           const _Section('STAYING CONNECTED'),
@@ -161,11 +164,12 @@ class _Group extends StatelessWidget {
   final List<Widget> children;
 
   @override
-  Widget build(BuildContext context) => Container(
-        decoration: BoxDecoration(
-          color: Palette.surface,
+  Widget build(BuildContext context) => Material(
+        color: Palette.surface,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(Radii.md),
-          border: Border.all(color: Palette.outline),
+          side: BorderSide(color: Palette.outline),
         ),
         child: Column(children: children),
       );
@@ -278,4 +282,47 @@ class _Swatch extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// Reels through Tor (private, slower) or straight from the sites (fast).
+class _ReelsSettings extends StatefulWidget {
+  const _ReelsSettings();
+
+  @override
+  State<_ReelsSettings> createState() => _ReelsSettingsState();
+}
+
+class _ReelsSettingsState extends State<_ReelsSettings> {
+  bool? _direct;
+
+  @override
+  void initState() {
+    super.initState();
+    fediDirect().then((on) {
+      if (mounted) setState(() => _direct = on);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final direct = _direct;
+    if (direct == null) return const SizedBox(height: 64);
+    return SwitchListTile(
+      value: direct,
+      title: const Text('Faster reels'),
+      subtitle: Text(
+        direct
+            ? 'Reels come straight from the video sites, so they can see your internet address. Your chats stay '
+                'private either way.'
+            : 'Reels come privately through Tor, which is slower. Turn on to load them straight from the sites: '
+                'faster, but the sites can see your internet address.',
+        style: AppText.caption,
+      ),
+      onChanged: (v) async {
+        HapticFeedback.selectionClick();
+        setState(() => _direct = v);
+        await fediSetDirect(enabled: v);
+      },
+    );
+  }
 }

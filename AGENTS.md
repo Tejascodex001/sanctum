@@ -5,7 +5,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 ## Non-negotiables
 
 - **Privacy:**
-  - The app connects to friends, update servers and the Fediverse sites Reels reads **only through Tor**. The one exception is opt-in Nearby (the local Wi-Fi). Video plays through the on-phone relay (`net/src/relay.rs`); never hand a player or WebView a remote URL.
+  - The app connects to friends, update servers and the Fediverse sites Reels reads **only through Tor**. Two opt-in exceptions, both off by default: Nearby (the local Wi-Fi and Bluetooth), and "Faster reels", which fetches Reels (and only Reels) directly so the video sites see the phone's address. With Faster reels off, video plays through the on-phone relay (`net/src/relay.rs`); never hand a player or WebView a remote URL then.
   - No analytics, no crash reporting, no Google services (no ML Kit, no Firebase, no Play Services). Notifications are posted on the phone itself.
   - Message content never leaves the encrypted store or MLS: not in notifications, logs or URLs.
 - **Strictly on-device:** no backups (`allowBackup` stays off), no cloud.
@@ -31,6 +31,8 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `core/src/group.rs` | Groups: single admin, invites, welcomes, broadcasting |
 | `core/src/poll.rs` | Polls, date polls and plans, and everyone's answers |
 | `core/src/recall.rs` | Search across chats and the "While you were away" catch-up |
+| `core/src/reaction.rs` | Emoji reactions: one per person per message, newest wins |
+| `core/src/typing.rs` | Typing signals: link-level, never stored or queued |
 | `core/src/moment.rs` | Daily moments: one photo a day for every friend, gone after 24 hours |
 | `core/src/store.rs` | The encrypted SQLite store. Every row is sealed; index columns are keyed hashes |
 | `core/src/protocol.rs` | Wire types: `Frame` (link level) and `Content` (inside MLS) |
@@ -43,6 +45,8 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `net/src/fedi.rs` | Reels: reading short videos from PeerTube and Mastodon sites anonymously |
 | `net/src/relay.rs` | The on-phone relay that streams Reels videos through Tor |
 | `app/rust/src/api/` | The Dart-facing API (flutter_rust_bridge). Keep it thin; logic belongs in `core` |
+| `app/lib/settings/` | The Settings screen (opened from your sigil) |
+| `app/lib/theme/appearance.dart` | Light, dark or like the phone, and the accent colour. `Palette` is read at build time, so `Restyler` redraws every screen when it changes: don't make widgets using `Palette` colours `const` |
 | `app/lib/` | The Flutter UI. Design tokens are in `app/lib/theme/tokens.dart`; use them, never one-off values |
 | `app/android/app/src/main/kotlin/` | The scanner, background service, notifications, installer, OEM battery settings and Bluetooth nearby (`BluetoothNearby.kt`) |
 

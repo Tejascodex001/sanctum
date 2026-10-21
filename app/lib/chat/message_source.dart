@@ -15,6 +15,7 @@ class ChatMessage {
     this.media,
     this.poll,
     this.album,
+    this.reactions = const [],
   });
 
   final String body;
@@ -42,6 +43,9 @@ class ChatMessage {
 
   /// The shared album a photo or video is in.
   final AlbumView? album;
+
+  /// Emoji reactions, most used first.
+  final List<ReactionView> reactions;
 }
 
 /// The part of a message a reply shows.
@@ -88,6 +92,7 @@ class StoreSource implements MessageSource {
             media: m.media,
             poll: m.poll,
             album: m.album,
+            reactions: m.reactions,
             reply: m.reply == null
                 ? null
                 : ChatQuote(

@@ -70,6 +70,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   final _bubbleKeys = <int, GlobalKey>{};
   final _scroll = ScrollController();
   int? _flash;
+
+  /// Who is typing here right now, and when we last heard so.
+  final _typing = <String, DateTime>{};
+  Timer? _typingTick;
+  DateTime _typingSent = DateTime(0);
   late final _wipe = AnimationController(vsync: this, duration: Motion.slow);
 
   @override
@@ -78,6 +83,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     _input.addListener(() {
       final has = _input.text.trim().isNotEmpty;
       if (has != _hasText) setState(() => _hasText = has);
+      if (has) _sayTyping();
     });
     if (widget.card.preloaded == null) _reload();
     final show = widget.showSeq;
@@ -99,6 +105,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         widget.close();
       } else if ((temp && e.kind == AppEventKind.temp) || (!temp && e.kind == AppEventKind.chat)) {
         _reload();
+      } else if (!temp && e.kind == AppEventKind.typing && e.name.isNotEmpty) {
+        _heardTyping(e.name);
+      } else if (!temp && e.kind == AppEventKind.message) {
+        // Their message arrived: they've stopped typing it.
+        if (_typing.isNotEmpty) setState(_typing.clear);
       }
     });
     // Temp messages count down and disappear while the chat is open.
@@ -114,6 +125,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     if (Notifier.instance.viewing == _key) Notifier.instance.viewing = null;
     Screenshots.leave();
     _tick?.cancel();
+    _typingTick?.cancel();
     _events?.cancel();
     _recordTick?.cancel();
     if (_recording) Background.recordCancel();
@@ -176,6 +188,77 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   /// Scrolls to a quoted message (when it's near enough to be built) and
   /// flashes it.
+  /// Tells the others we're typing, at most every 4 seconds (friends' chats
+  /// and groups; never what's typed).
+  void _sayTyping() {
+    final card = widget.card;
+    if (card.temp || !(card.friend || card.group) || !card.active) return;
+    final now = DateTime.now();
+    if (now.difference(_typingSent) < const Duration(seconds: 4)) return;
+    _typingSent = now;
+    chatTyping(chatId: card.id).ignore();
+  }
+
+  void _heardTyping(String name) {
+    setState(() => _typing[name] = DateTime.now());
+    _typingTick ??= Timer.periodic(const Duration(seconds: 1), (_) {
+      final cutoff = DateTime.now().subtract(const Duration(seconds: 6));
+      if (_typing.values.any((t) => t.isBefore(cutoff))) {
+        setState(() => _typing.removeWhere((_, t) => t.isBefore(cutoff)));
+      }
+      if (_typing.isEmpty) {
+        _typingTick?.cancel();
+        _typingTick = null;
+      }
+    });
+  }
+
+  /// Friends' chats and groups (not notes or temp chats) take reactions.
+  bool _canReact(ChatMessage m) =>
+      m.seq != null && widget.card.source is StoreSource && (widget.card.friend || widget.card.group);
+
+  /// Reacts to [m] with [emoji]; the same one again takes it back.
+  Future<void> _react(ChatMessage m, String emoji) async {
+    final seq = m.seq;
+    if (seq == null || !_canReact(m)) return;
+    HapticFeedback.lightImpact();
+    final mine = m.reactions.where((r) => r.mine).firstOrNull?.emoji;
+    try {
+      await messageReact(chatId: widget.card.id, seq: seq, emoji: mine == emoji ? '' : emoji);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Couldn\'t add that reaction.')));
+      }
+    }
+    await _reload();
+  }
+
+  /// Any emoji, typed with the keyboard.
+  Future<void> _reactOther(ChatMessage m) async {
+    final input = TextEditingController();
+    final emoji = await showDialog<String>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('React with'),
+        content: TextField(
+          controller: input,
+          autofocus: true,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 32),
+          decoration: const InputDecoration(hintText: 'Pick an emoji'),
+          onSubmitted: (v) => Navigator.pop(dialog, v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialog, input.text), child: const Text('React')),
+        ],
+      ),
+    );
+    input.dispose();
+    final picked = emoji?.trim() ?? '';
+    if (picked.isNotEmpty) await _react(m, picked.characters.take(2).toString());
+  }
+
   /// Scrolls back until the message at [seq] is built, then shows it.
   Future<void> _reveal(int seq) async {
     for (var i = 0; i < 200 && mounted; i++) {
@@ -217,6 +300,32 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (_canReact(m))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.md, 0, Space.md, Space.sm),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    for (final e in quickReactions)
+                      _EmojiButton(
+                        emoji: e,
+                        selected: m.reactions.any((r) => r.mine && r.emoji == e),
+                        onTap: () {
+                          Navigator.pop(sheet);
+                          _react(m, e);
+                        },
+                      ),
+                    IconButton(
+                      tooltip: 'More reactions',
+                      icon: const Icon(Icons.add_reaction_outlined),
+                      onPressed: () {
+                        Navigator.pop(sheet);
+                        _reactOther(m);
+                      },
+                    ),
+                  ],
+                ),
+              ),
             if (widget.card.source.replies && m.seq != null)
               ListTile(
                 leading: const Icon(Icons.reply_rounded),
@@ -315,6 +424,16 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                     child: _messages.isEmpty ? _EmptyChat(card: widget.card) : _list(accent),
                   ),
                 ),
+                AnimatedSize(
+                  duration: Motion.medium,
+                  curve: Motion.decelerate,
+                  child: _typing.isEmpty
+                      ? const SizedBox(width: double.infinity)
+                      : Align(
+                          alignment: Alignment.centerLeft,
+                          child: _TypingRow(names: _typing.keys.toList(), accent: accent),
+                        ),
+                ),
                 if (widget.card.active)
                   _composer(accent)
                 else
@@ -369,6 +488,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           highlight: m.seq != null && m.seq == _flash,
           onQuoteTap: () => _jumpTo(m.reply?.seq),
           onLongPress: () => _actions(m),
+          onReact: _canReact(m) ? (e) => _react(m, e) : null,
           onChanged: _reload,
           onAlbumTap: _openAlbums,
           chatId: widget.card.id,
@@ -980,6 +1100,7 @@ class _Bubble extends StatefulWidget {
     this.highlight = false,
     this.onQuoteTap,
     this.onLongPress,
+    this.onReact,
     this.onChanged,
     this.onAlbumTap,
     required this.chatId,
@@ -1003,6 +1124,10 @@ class _Bubble extends StatefulWidget {
   final bool highlight;
   final VoidCallback? onQuoteTap;
   final VoidCallback? onLongPress;
+
+  /// Reacting with an emoji (double-tap: ❤️; a pill: that one). Null where
+  /// messages can't be reacted to.
+  final void Function(String emoji)? onReact;
 
   /// A poll in it was answered.
   final VoidCallback? onChanged;
@@ -1153,10 +1278,39 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
         ],
       ),
     );
+    final react = widget.onReact;
+    final withReactions = m.reactions.isEmpty
+        ? bubble
+        : Column(
+            crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              bubble,
+              Transform.translate(
+                offset: const Offset(0, -10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: Space.sm),
+                  child: Wrap(
+                    spacing: Space.xs,
+                    runSpacing: Space.xs,
+                    children: [
+                      for (final r in m.reactions)
+                        _ReactionPill(
+                          reaction: r,
+                          accent: accent,
+                          onTap: react == null ? null : () => react(r.emoji),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          );
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
         onLongPress: widget.onLongPress,
+        onDoubleTap: react == null ? null : () => react('❤️'),
         child: AnimatedScale(
           scale: widget.highlight ? 1.04 : 1,
           duration: Motion.medium,
@@ -1168,7 +1322,7 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
               scale: Tween(begin: 0.9, end: 1.0).animate(_curve),
               child: SlideTransition(
                 position: Tween(begin: const Offset(0, 0.25), end: Offset.zero).animate(_curve),
-                child: bubble,
+                child: withReactions,
               ),
             ),
           ),
@@ -1269,8 +1423,7 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
             left: 4,
             child: Opacity(
               opacity: t,
-              child: Transform.scale(
-                  scale: 0.6 + 0.4 * t, child: Icon(Icons.reply_rounded, color: Palette.textMuted)),
+              child: Transform.scale(scale: 0.6 + 0.4 * t, child: Icon(Icons.reply_rounded, color: Palette.textMuted)),
             ),
           ),
           Transform.translate(offset: Offset(_dx, 0), child: widget.child),
@@ -1524,4 +1677,132 @@ class _AttachButton extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// The reactions offered first when a message is held.
+const quickReactions = ['❤️', '😂', '😮', '😢', '🙏', '👍'];
+
+class _EmojiButton extends StatelessWidget {
+  const _EmojiButton({required this.emoji, required this.selected, required this.onTap});
+
+  final String emoji;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkResponse(
+        onTap: onTap,
+        radius: 26,
+        child: AnimatedContainer(
+          duration: Motion.fast,
+          padding: const EdgeInsets.all(Space.sm),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: selected ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.22) : Colors.transparent,
+          ),
+          child: Text(emoji, style: const TextStyle(fontSize: 26)),
+        ),
+      );
+}
+
+/// One emoji under a message, with how many chose it. Ours is outlined in
+/// the accent; tap to add or take back, hold to see who.
+class _ReactionPill extends StatelessWidget {
+  const _ReactionPill({required this.reaction, required this.accent, this.onTap});
+
+  final ReactionView reaction;
+  final Color accent;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: reaction.names.join(', '),
+        triggerMode: TooltipTriggerMode.longPress,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: reaction.mine
+                  ? Color.alphaBlend(accent.withValues(alpha: 0.25), Palette.surfaceHigh)
+                  : Palette.surfaceHigh,
+              borderRadius: BorderRadius.circular(Radii.sm),
+              border: Border.all(color: reaction.mine ? accent : Palette.bg, width: 1.5),
+            ),
+            child: Text(
+              reaction.count > 1 ? '${reaction.emoji} ${reaction.count}' : reaction.emoji,
+              style: AppText.micro.copyWith(color: Palette.text, fontSize: 13),
+            ),
+          ),
+        ),
+      );
+}
+
+/// "Asha is typing…", with three dots that rise in turn.
+class _TypingRow extends StatefulWidget {
+  const _TypingRow({required this.names, required this.accent});
+
+  final List<String> names;
+  final Color accent;
+
+  @override
+  State<_TypingRow> createState() => _TypingRowState();
+}
+
+class _TypingRowState extends State<_TypingRow> with SingleTickerProviderStateMixin {
+  late final _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final names = widget.names;
+    final who = switch (names.length) {
+      1 => '${names[0]} is typing',
+      2 => '${names[0]} and ${names[1]} are typing',
+      _ => 'Several people are typing',
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.lg, Space.xs, Space.lg, 0),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Palette.surfaceHigh,
+              borderRadius: BorderRadius.circular(Radii.md),
+              border: Border.all(color: Palette.outline),
+            ),
+            child: AnimatedBuilder(
+              animation: _c,
+              builder: (context, _) => Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < 3; i++)
+                    Transform.translate(
+                      offset: Offset(0, -3 * _bump((_c.value - i * 0.15) % 1)),
+                      child: Container(
+                        width: 6,
+                        height: 6,
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        decoration: BoxDecoration(color: widget.accent, shape: BoxShape.circle),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: Space.sm),
+          Flexible(child: Text('$who…', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.caption)),
+        ],
+      ),
+    );
+  }
+
+  /// 0 → 1 → 0 over the first part of each cycle.
+  static double _bump(double t) => t < 0.3 ? (t < 0.15 ? t / 0.15 : (0.3 - t) / 0.15) : 0;
 }
