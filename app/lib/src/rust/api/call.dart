@@ -6,27 +6,43 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `caps`, `info`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`
+// These functions are ignored because they are not marked as `pub`: `caps`, `info`, `offer_routes`, `started`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
-/// Calls the friend in this chat. `play` and `record`: the sound formats
-/// this phone can play and record into, best first ("opus", "amr-wb").
-/// Progress arrives as `Call` events.
+/// Calls the friend in this chat, with the camera on if `video`. `play`
+/// and `record`: the sound formats this phone can play and record into,
+/// best first ("opus", "amr-wb"); `video_play` and `video_record` the same
+/// for pictures ("h264", "vp8"). Progress arrives as `Call` events.
 Future<CallInfo> callStart({
   required PlatformInt64 chatId,
   required List<String> play,
   required List<String> record,
+  required List<String> videoPlay,
+  required List<String> videoRecord,
+  required bool video,
 }) => RustLib.instance.api.crateApiCallCallStart(
   chatId: chatId,
   play: play,
   record: record,
+  videoPlay: videoPlay,
+  videoRecord: videoRecord,
+  video: video,
 );
 
-/// Picks up the call ringing now.
+/// Picks up the call ringing now, with the camera on if `video`.
 Future<void> callAnswer({
   required List<String> play,
   required List<String> record,
-}) => RustLib.instance.api.crateApiCallCallAnswer(play: play, record: record);
+  required List<String> videoPlay,
+  required List<String> videoRecord,
+  required bool video,
+}) => RustLib.instance.api.crateApiCallCallAnswer(
+  play: play,
+  record: record,
+  videoPlay: videoPlay,
+  videoRecord: videoRecord,
+  video: video,
+);
 
 /// Hangs up, declines the call ringing now, or stops calling.
 Future<void> callEnd() => RustLib.instance.api.crateApiCallCallEnd();
@@ -34,6 +50,23 @@ Future<void> callEnd() => RustLib.instance.api.crateApiCallCallEnd();
 /// The call ringing, connecting or going on now, if any (never while the
 /// decoy profile shows).
 Future<CallInfo?> callNow() => RustLib.instance.api.crateApiCallCallNow();
+
+/// How the call going on now is getting along; None unless talking.
+Future<CallMediaInfo?> callMedia() =>
+    RustLib.instance.api.crateApiCallCallMedia();
+
+/// Turns this phone's camera on or off in the call, or pauses it (the app
+/// went to the background). The friend is told at once. False if
+/// pictures can't be sent in this call.
+Future<bool> callCamera({required CameraView state}) =>
+    RustLib.instance.api.crateApiCallCallCamera(state: state);
+
+/// "Faster calls": calls connect straight between the phones when both
+/// have it on. Off by default.
+Future<bool> callsDirect() => RustLib.instance.api.crateApiCallCallsDirect();
+
+Future<void> callsSetDirect({required bool enabled}) =>
+    RustLib.instance.api.crateApiCallCallsSetDirect(enabled: enabled);
 
 class CallInfo {
   /// The call's id, in hex.
@@ -51,6 +84,9 @@ class CallInfo {
 
   /// We called.
   final bool outgoing;
+
+  /// A video call (the caller's camera was on from the start).
+  final bool video;
   final CallPhaseView phase;
 
   /// Ended calls: how it went.
@@ -63,6 +99,10 @@ class CallInfo {
   final String sendCodec;
   final String recvCodec;
 
+  /// The same for pictures; empty when that way can't carry video.
+  final String sendVideoCodec;
+  final String recvVideoCodec;
+
   /// The friend is linked nearby (same Wi-Fi or Bluetooth) right now,
   /// rather than over Tor.
   final bool nearby;
@@ -74,11 +114,14 @@ class CallInfo {
     required this.sigilKey,
     required this.hidden,
     required this.outgoing,
+    required this.video,
     required this.phase,
     this.outcome,
     this.answeredAtMs,
     required this.sendCodec,
     required this.recvCodec,
+    required this.sendVideoCodec,
+    required this.recvVideoCodec,
     required this.nearby,
   });
 
@@ -90,11 +133,14 @@ class CallInfo {
       sigilKey.hashCode ^
       hidden.hashCode ^
       outgoing.hashCode ^
+      video.hashCode ^
       phase.hashCode ^
       outcome.hashCode ^
       answeredAtMs.hashCode ^
       sendCodec.hashCode ^
       recvCodec.hashCode ^
+      sendVideoCodec.hashCode ^
+      recvVideoCodec.hashCode ^
       nearby.hashCode;
 
   @override
@@ -108,12 +154,59 @@ class CallInfo {
           sigilKey == other.sigilKey &&
           hidden == other.hidden &&
           outgoing == other.outgoing &&
+          video == other.video &&
           phase == other.phase &&
           outcome == other.outcome &&
           answeredAtMs == other.answeredAtMs &&
           sendCodec == other.sendCodec &&
           recvCodec == other.recvCodec &&
+          sendVideoCodec == other.sendVideoCodec &&
+          recvVideoCodec == other.recvVideoCodec &&
           nearby == other.nearby;
+}
+
+/// How a call going on is getting along, for the call screen.
+class CallMediaInfo {
+  final CallPathView path;
+  final CameraView camera;
+  final CameraView peerCamera;
+
+  /// This phone can send pictures in this call (a format in common).
+  final bool canSendVideo;
+  final bool canReceiveVideo;
+
+  /// The path is fast enough for sharper pictures (not through Tor).
+  final bool sharp;
+
+  const CallMediaInfo({
+    required this.path,
+    required this.camera,
+    required this.peerCamera,
+    required this.canSendVideo,
+    required this.canReceiveVideo,
+    required this.sharp,
+  });
+
+  @override
+  int get hashCode =>
+      path.hashCode ^
+      camera.hashCode ^
+      peerCamera.hashCode ^
+      canSendVideo.hashCode ^
+      canReceiveVideo.hashCode ^
+      sharp.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CallMediaInfo &&
+          runtimeType == other.runtimeType &&
+          path == other.path &&
+          camera == other.camera &&
+          peerCamera == other.peerCamera &&
+          canSendVideo == other.canSendVideo &&
+          canReceiveVideo == other.canReceiveVideo &&
+          sharp == other.sharp;
 }
 
 enum CallOutcomeView {
@@ -128,6 +221,18 @@ enum CallOutcomeView {
   cancelled,
 }
 
+/// How the call's sound and pictures travel.
+enum CallPathView {
+  /// Through Tor: nobody learns who talks to whom.
+  private,
+
+  /// Over the same Wi-Fi or Bluetooth.
+  nearby,
+
+  /// Straight between the phones ("Faster calls").
+  direct,
+}
+
 enum CallPhaseView {
   /// We're calling; their phone hasn't got the call yet.
   connecting,
@@ -140,4 +245,14 @@ enum CallPhaseView {
 
   /// Over: see `outcome`.
   ended,
+}
+
+enum CameraView {
+  off,
+
+  /// On, sending pictures.
+  live,
+
+  /// On, but the app is in the background: no picture until it's back.
+  paused,
 }

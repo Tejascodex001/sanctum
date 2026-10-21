@@ -60,6 +60,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallLogView dco_decode_box_autoadd_call_log_view(dynamic raw);
 
   @protected
+  CallMediaInfo dco_decode_box_autoadd_call_media_info(dynamic raw);
+
+  @protected
   CallOutcomeView dco_decode_box_autoadd_call_outcome_view(dynamic raw);
 
   @protected
@@ -99,10 +102,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallLogView dco_decode_call_log_view(dynamic raw);
 
   @protected
+  CallMediaInfo dco_decode_call_media_info(dynamic raw);
+
+  @protected
   CallOutcomeView dco_decode_call_outcome_view(dynamic raw);
 
   @protected
+  CallPathView dco_decode_call_path_view(dynamic raw);
+
+  @protected
   CallPhaseView dco_decode_call_phase_view(dynamic raw);
+
+  @protected
+  CameraView dco_decode_camera_view(dynamic raw);
 
   @protected
   CatchUpView dco_decode_catch_up_view(dynamic raw);
@@ -267,6 +279,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallLogView? dco_decode_opt_box_autoadd_call_log_view(dynamic raw);
 
   @protected
+  CallMediaInfo? dco_decode_opt_box_autoadd_call_media_info(dynamic raw);
+
+  @protected
   CallOutcomeView? dco_decode_opt_box_autoadd_call_outcome_view(dynamic raw);
 
   @protected
@@ -412,6 +427,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  CallMediaInfo sse_decode_box_autoadd_call_media_info(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   CallOutcomeView sse_decode_box_autoadd_call_outcome_view(
     SseDeserializer deserializer,
   );
@@ -453,10 +473,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallLogView sse_decode_call_log_view(SseDeserializer deserializer);
 
   @protected
+  CallMediaInfo sse_decode_call_media_info(SseDeserializer deserializer);
+
+  @protected
   CallOutcomeView sse_decode_call_outcome_view(SseDeserializer deserializer);
 
   @protected
+  CallPathView sse_decode_call_path_view(SseDeserializer deserializer);
+
+  @protected
   CallPhaseView sse_decode_call_phase_view(SseDeserializer deserializer);
+
+  @protected
+  CameraView sse_decode_camera_view(SseDeserializer deserializer);
 
   @protected
   CatchUpView sse_decode_catch_up_view(SseDeserializer deserializer);
@@ -649,6 +678,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  CallMediaInfo? sse_decode_opt_box_autoadd_call_media_info(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   CallOutcomeView? sse_decode_opt_box_autoadd_call_outcome_view(
     SseDeserializer deserializer,
   );
@@ -815,6 +849,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_call_media_info(
+    CallMediaInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_call_outcome_view(
     CallOutcomeView self,
     SseSerializer serializer,
@@ -878,13 +918,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_call_log_view(CallLogView self, SseSerializer serializer);
 
   @protected
+  void sse_encode_call_media_info(CallMediaInfo self, SseSerializer serializer);
+
+  @protected
   void sse_encode_call_outcome_view(
     CallOutcomeView self,
     SseSerializer serializer,
   );
 
   @protected
+  void sse_encode_call_path_view(CallPathView self, SseSerializer serializer);
+
+  @protected
   void sse_encode_call_phase_view(CallPhaseView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_camera_view(CameraView self, SseSerializer serializer);
 
   @protected
   void sse_encode_catch_up_view(CatchUpView self, SseSerializer serializer);
@@ -1123,6 +1172,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_call_log_view(
     CallLogView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_call_media_info(
+    CallMediaInfo? self,
     SseSerializer serializer,
   );
 

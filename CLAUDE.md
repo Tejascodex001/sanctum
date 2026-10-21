@@ -13,5 +13,6 @@
 - **Disk space is limited:** use `CARGO_INCREMENTAL=0`; `cargo clean` frees ~16 GB if a build fails for space.
 - **Parallel helpers** work in git worktrees under `.claude/worktrees/` (ignored). Give each a disjoint set of files; after merging, resolve conflicts in generated bindings by regenerating them (`flutter_rust_bridge_codegen generate`), then rebuild the host library. Remove the worktree afterwards.
 - **CI cancels a running build when a newer push arrives**, and the changelog rolls a cancelled or failed build's commits into the next one, so a `Docs:` push right after a feature push is harmless. Avoid pushing many tiny commits in a row.
+- **Kotlin can't be compiled here** (no Android SDK). Helpers have checked Kotlin by compiling against a stand-alone Android framework jar plus Flutter's `flutter.jar`; androidx code still only gets checked in CI. Watch the CI run after Kotlin changes.
 - **Product decisions to keep:** Tor is the default for everything; faster direct modes ("Faster reels", "Faster calls") are opt-in and say what the other side learns. Reels show videos on black even in light mode. Picked Reels interests are a strict filter. Pixelfed and Instagram can't be used without an account. No "Mailbox" (spare always-on phone holding messages): the owner ruled it out; offline delivery comes from group members syncing with each other.
 

@@ -13,7 +13,8 @@
     <!-- Updates: installing a newer release (Android checks it's signed
          with the same key). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <!-- Scanning friends' QR codes, and taking a daily moment's photo. -->
+    <!-- Scanning friends' QR codes, taking a daily moment's photo, and the
+         camera in video calls (only while it's on in a call). -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- Voice notes, recorded only while the mic button is held; and calls. -->
@@ -22,6 +23,7 @@
          app is open, choosing earpiece or speaker, switching the screen off
          near the ear, and ringing over the lock screen. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
@@ -93,7 +95,7 @@
         <service
             android:name=".CallService"
             android:exported="false"
-            android:foregroundServiceType="microphone" />
+            android:foregroundServiceType="microphone|camera" />
         <receiver
             android:name=".CallActionReceiver"
             android:exported="false" />

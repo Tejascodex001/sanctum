@@ -2,12 +2,15 @@
 //! driving the core [`Session`] engine. Transport-agnostic: Tor in the app,
 //! plain TCP in tests.
 
+use crate::direct::DirectSocket;
 use async_trait::async_trait;
-use sanctum_core::call::MediaHub;
+use sanctum_core::call::{MediaHub, Outgoing, Route, VideoSent};
 use sanctum_core::protocol::{encode_frame, take_frame, Frame};
 use sanctum_core::session::{Event, Session};
+use sanctum_core::video::{Backlog, FrameInfo};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -66,10 +69,9 @@ const BACKOFF_MAX_PENDING_BACKGROUND: Duration = Duration::from_secs(120);
 const RESEND_EVERY: u64 = 10;
 /// Tor circuits are expensive; don't build too many at once.
 const MAX_DIALS: usize = 6;
-/// A call's packets waiting to be written on one link, at most: about half
-/// a second of sound. More means the link can't keep up, and old sound is
-/// worse than none, so new packets are dropped until it catches up.
-const MEDIA_BACKLOG: usize = 12;
+/// While a call goes on, its media's housekeeping (direct-path probes,
+/// camera news, keyframe requests) runs this often.
+const CALL_TICK: Duration = Duration::from_millis(50);
 /// A friend linked over Tor who is also nearby is offered the nearby link
 /// at most this often.
 const UPGRADE_EVERY: Duration = Duration::from_secs(60);
@@ -81,9 +83,13 @@ enum Cmd {
     Close,
     /// Send this as is, now (a typing signal: never kept or resent).
     Send(Frame),
-    /// A call's packet: like `Send`, counted against [`MEDIA_BACKLOG`].
+    /// A call's sound: like `Send`, counted in the link's [`Backlog`].
     Media(Frame),
 }
+
+/// A piece of a call's picture, and its share of the bytes counted in the
+/// link's [`Backlog`]. Written only when no sound is waiting.
+type VideoPiece = (Frame, usize);
 
 /// A live connection.
 struct Link {
@@ -95,8 +101,10 @@ struct Link {
     /// Over the local Wi-Fi or Bluetooth rather than Tor: faster, so it
     /// wins over a Tor link to the same friend.
     local: bool,
+    /// Pictures queue here, behind everything on `tx`.
+    video: mpsc::UnboundedSender<VideoPiece>,
     /// Call packets queued on this link and not yet written.
-    backlog: Arc<AtomicUsize>,
+    backlog: Arc<Backlog>,
 }
 
 
@@ -116,6 +124,10 @@ pub struct Node {
     media: MediaHub,
     /// When each friend was last offered a nearby link instead of Tor.
     upgrades: Mutex<HashMap<[u8; 32], Instant>>,
+    /// The call's UDP socket, with "Faster calls" on.
+    direct: Mutex<Option<DirectSocket>>,
+    /// The call's housekeeping is running.
+    pumping: AtomicBool,
 }
 
 enum Role {
@@ -131,6 +143,8 @@ impl Node {
         Arc::new(Self {
             media,
             upgrades: Mutex::default(),
+            direct: Mutex::default(),
+            pumping: AtomicBool::new(false),
             session,
             transport,
             events: broadcast::channel(256).0,
@@ -197,25 +211,148 @@ impl Node {
     }
 
     /// Seals a call's sound and sends it to the friend in the call, over
-    /// the link that's up now. Dropped when there's no call, no link, or
-    /// the link is falling behind. Returns whether it went.
+    /// the direct path if one is up, else the link that's up now. Dropped
+    /// when there's no call, no way to them, or the link is falling
+    /// behind. Returns whether it went.
     pub fn send_call_audio(&self, data: &[u8]) -> bool {
-        let Some((peer, frame)) = self.media.seal_audio(data) else {
+        let Some(out) = self.media.seal_audio(data) else {
             return false;
         };
+        if let Some((to, datagram)) = out.datagram() {
+            return self.send_direct(to, &datagram);
+        }
         let links = self.links.lock().unwrap();
-        let Some(link) = links.get(&peer) else {
+        let Some(link) = links.get(&out.peer) else {
             return false;
         };
-        if link.backlog.load(Ordering::Relaxed) >= MEDIA_BACKLOG {
+        if !link.backlog.take_audio() {
             return false;
         }
-        link.backlog.fetch_add(1, Ordering::Relaxed);
-        if link.tx.send(Cmd::Media(frame)).is_err() {
-            link.backlog.fetch_sub(1, Ordering::Relaxed);
+        if link.tx.send(Cmd::Media(out.frame)).is_err() {
+            link.backlog.audio_done();
             return false;
         }
         true
+    }
+
+    /// Seals an encoded video frame and sends it, in pieces, if our camera
+    /// is on and the path has room: over the direct path if one is up,
+    /// else behind the sound on the link. `want_key`: the encoder should
+    /// make its next frame a keyframe.
+    pub fn send_call_video(&self, data: &[u8], info: FrameInfo) -> VideoSent {
+        let link = self
+            .media
+            .peer()
+            .and_then(|peer| self.links.lock().unwrap().get(&peer).map(|l| (l.video.clone(), l.backlog.clone())));
+        let mut admitted = 0;
+        let sent = self.media.seal_video(data, info, |route, bytes| {
+            let ok = match (route, &link) {
+                (Route::Direct(_), _) => true,
+                (Route::Link, Some((_, backlog))) => backlog.take_video(bytes),
+                (Route::Link, None) => false,
+            };
+            if ok {
+                admitted = bytes;
+            }
+            ok
+        });
+        let count = sent.packets.len();
+        for (i, out) in sent.packets.iter().enumerate() {
+            if let Some((to, datagram)) = out.datagram() {
+                self.send_direct(to, &datagram);
+                continue;
+            }
+            let Some((video, backlog)) = &link else { break };
+            // Each piece carries its share of what was counted.
+            let share = admitted / count + if i + 1 == count { admitted % count } else { 0 };
+            if video.send((out.frame.clone(), share)).is_err() {
+                backlog.video_done(share);
+            }
+        }
+        sent
+    }
+
+    /// Sends what the call's media has queued (probes, answers, camera
+    /// news, keyframe requests).
+    pub fn flush_media(&self) {
+        let out = self.media.take_out();
+        if !out.is_empty() {
+            self.send_out(out);
+        }
+    }
+
+    fn send_out(&self, out: Vec<Outgoing>) {
+        for o in out {
+            match o.datagram() {
+                Some((to, datagram)) => {
+                    self.send_direct(to, &datagram);
+                }
+                None => {
+                    self.send_live(&o.peer, o.frame);
+                }
+            }
+        }
+    }
+
+    fn send_direct(&self, to: SocketAddr, datagram: &[u8]) -> bool {
+        self.direct.lock().unwrap().as_ref().is_some_and(|d| d.send(to, datagram))
+    }
+
+    /// Opens this call's UDP socket for "Faster calls" on `bind` (port 0:
+    /// any free one; an unspecified address: everywhere). Returns its port.
+    pub fn direct_open(self: &Arc<Self>, bind: Option<SocketAddr>) -> std::io::Result<u16> {
+        let node = Arc::downgrade(self);
+        let answered = move || {
+            if let Some(node) = node.upgrade() {
+                node.flush_media();
+            }
+        };
+        let socket = match bind {
+            Some(bind) => DirectSocket::open(bind, self.media.clone(), answered)?,
+            None => DirectSocket::open_any(self.media.clone(), answered)?,
+        };
+        let port = socket.port();
+        *self.direct.lock().unwrap() = Some(socket);
+        Ok(port)
+    }
+
+    /// Closes the call's UDP socket.
+    pub fn direct_close(&self) {
+        self.direct.lock().unwrap().take();
+    }
+
+    /// Whether the call's media goes straight to the friend's phone now.
+    pub fn call_direct(&self) -> bool {
+        self.media.info().is_some_and(|i| i.direct)
+    }
+
+    /// A call began (ringing, or calling out): runs its housekeeping until
+    /// it ends, then closes the UDP socket.
+    pub fn call_started(self: &Arc<Self>) {
+        if self.pumping.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let node = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let mut every = tokio::time::interval(CALL_TICK);
+            every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                every.tick().await;
+                let Some(node) = node.upgrade() else { break };
+                if !node.media.active() {
+                    node.direct_close();
+                    node.pumping.store(false, Ordering::Release);
+                    // A new call may have started just now.
+                    if node.media.active() && !node.pumping.swap(true, Ordering::AcqRel) {
+                        continue;
+                    }
+                    break;
+                }
+                let fast = node.media.peer().is_some_and(|p| node.is_nearby(&p));
+                node.media.tick(Instant::now(), fast);
+                node.flush_media();
+            }
+        });
     }
 
     /// Gets anything waiting for `peer` delivered: over the live connection
@@ -426,7 +563,8 @@ impl Node {
             Role::Reached(local) => (peer < me, local),
         };
         let (tx, mut news) = mpsc::unbounded_channel();
-        let backlog = Arc::new(AtomicUsize::new(0));
+        let (video, mut pictures) = mpsc::unbounded_channel();
+        let backlog = Arc::new(Backlog::default());
         {
             let mut links = self.links.lock().unwrap();
             if let Some(old) = links.get(&peer) {
@@ -438,12 +576,12 @@ impl Node {
                 }
                 let _ = old.tx.send(Cmd::Close);
             }
-            links.insert(peer, Link { id: link, tx, preferred, local, backlog: backlog.clone() });
+            links.insert(peer, Link { id: link, tx, video, preferred, local, backlog: backlog.clone() });
         }
         self.backoff.lock().unwrap().remove(&peer);
         let _ = self.events.send(NetEvent::PeerConnected(peer));
 
-        let result = self.serve(&mut conn, &mut buf, &peer, &mut news, &backlog).await;
+        let result = self.serve(&mut conn, &mut buf, &peer, &mut news, &mut pictures, &backlog).await;
 
         let mut links = self.links.lock().unwrap();
         if links.get(&peer).is_some_and(|l| l.id == link) {
@@ -460,7 +598,8 @@ impl Node {
         buf: &mut Vec<u8>,
         peer: &[u8; 32],
         news: &mut mpsc::UnboundedReceiver<Cmd>,
-        backlog: &AtomicUsize,
+        pictures: &mut mpsc::UnboundedReceiver<VideoPiece>,
+        backlog: &Backlog,
     ) -> anyhow::Result<()> {
         let first = {
             let mut session = self.session.lock().unwrap();
@@ -475,14 +614,9 @@ impl Node {
         let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + KEEPALIVE, KEEPALIVE);
         loop {
             tokio::select! {
-                read = timeout(IDLE_TIMEOUT, conn.read(&mut chunk)) => {
-                    let n = read??;
-                    if n == 0 {
-                        return Ok(());
-                    }
-                    buf.extend_from_slice(&chunk[..n]);
-                    self.handle_buffered(conn, buf, peer).await?;
-                }
+                // Sound and everything else first; pictures only when
+                // nothing else is waiting.
+                biased;
                 cmd = news.recv() => match cmd {
                     Some(Cmd::News) => {
                         let out = self.session.lock().unwrap().on_link_up(peer)?;
@@ -492,11 +626,24 @@ impl Node {
                     Some(Cmd::Send(frame)) => write_frames(conn, &[frame]).await?,
                     Some(Cmd::Media(frame)) => {
                         let written = write_frames(conn, &[frame]).await;
-                        backlog.fetch_sub(1, Ordering::Relaxed);
+                        backlog.audio_done();
                         written?;
                     }
                     Some(Cmd::Close) | None => return Ok(()),
                 },
+                read = timeout(IDLE_TIMEOUT, conn.read(&mut chunk)) => {
+                    let n = read??;
+                    if n == 0 {
+                        return Ok(());
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    self.handle_buffered(conn, buf, peer).await?;
+                }
+                Some((frame, bytes)) = pictures.recv() => {
+                    let written = write_frames(conn, &[frame]).await;
+                    backlog.video_done(bytes);
+                    written?;
+                }
                 _ = ping.tick() => write_frames(conn, &[Frame::Ping]).await?,
             }
         }
@@ -514,7 +661,10 @@ impl Node {
             // A call's sound goes straight to the media, without waiting for
             // the session (which may be busy encrypting or saving).
             if let Frame::CallMedia { call, seq, sealed } = &frame {
-                self.media.receive(peer, call, *seq, sealed);
+                if self.media.receive(peer, call, *seq, sealed) {
+                    // E.g. a keyframe request to answer.
+                    self.flush_media();
+                }
                 continue;
             }
             let out = self.session.lock().unwrap().on_frame(peer, frame)?;
@@ -1025,23 +1175,36 @@ mod tests {
         assert!(bob.events.try_recv().is_err());
     }
 
-    fn call_caps() -> sanctum_core::call::AudioCaps {
-        sanctum_core::call::AudioCaps { play: vec!["opus".into()], record: vec!["opus".into()] }
+    fn call_caps() -> sanctum_core::call::CallCaps {
+        sanctum_core::call::CallCaps {
+            play: vec!["opus".into()],
+            record: vec!["opus".into()],
+            video_play: vec!["h264".into()],
+            video_record: vec!["h264".into()],
+        }
     }
 
     /// Alice calls Bob over the wire and he answers.
     async fn call(alice: &Phone, bob: &Phone, ab: i64) {
+        call_with(alice, bob, ab, false, vec![], vec![]).await;
+    }
+
+    /// Alice calls Bob (a video call with `video`), each offering these
+    /// direct routes, and he answers.
+    async fn call_with(alice: &Phone, bob: &Phone, ab: i64, video: bool, a: Vec<Vec<u8>>, b: Vec<Vec<u8>>) {
         // First contact sets up encryption.
         let p = alice.session.lock().unwrap().send_text(ab, "hi").unwrap().unwrap();
         alice.node.poke(p);
         let session = alice.session.clone();
         until(move || session.lock().unwrap().store.messages(ab, None).unwrap()[0].delivered).await;
-        let (peer, _) = alice.session.lock().unwrap().call_start(ab, &call_caps()).unwrap();
+        let (peer, _) = alice.session.lock().unwrap().call_start(ab, &call_caps(), video, a).unwrap();
         alice.node.poke(peer);
+        alice.node.call_started();
         let session = bob.session.clone();
         until(move || session.lock().unwrap().call_now().is_some()).await;
-        let to = bob.session.lock().unwrap().call_answer(&call_caps()).unwrap().unwrap();
+        let to = bob.session.lock().unwrap().call_answer(&call_caps(), video, b).unwrap().unwrap();
         bob.node.poke(to);
+        bob.node.call_started();
         let session = alice.session.clone();
         until(move || {
             session.lock().unwrap().call_now().is_some_and(|c| c.phase == sanctum_core::call::Phase::Active)
@@ -1077,6 +1240,120 @@ mod tests {
         let queued = alice.session.lock().unwrap().store.outbox_for(&bob.pk).unwrap().len();
         assert!(!alice.node.send_call_audio(&[9; 80]));
         assert_eq!(alice.session.lock().unwrap().store.outbox_for(&bob.pk).unwrap().len(), queued);
+    }
+
+    fn loopback_route(port: u16) -> Vec<u8> {
+        sanctum_core::direct::encode_route(SocketAddr::from(([127, 0, 0, 1], port)))
+    }
+
+    /// Phones on one machine: direct packets may go to loopback.
+    fn allow_loopback(p: &Phone) {
+        p.session.lock().unwrap().media().set_filter(sanctum_core::direct::loopback_too);
+    }
+
+    fn hears(p: &Phone) -> impl Fn() -> bool {
+        let hub = p.session.lock().unwrap().media();
+        move || matches!(hub.pull_audio(), sanctum_core::call::Pulled::Packet(_))
+    }
+
+    /// Keeps sending sound from `from` until `to` hears it.
+    async fn sound_reaches(from: &Phone, to: &Phone) {
+        let heard = hears(to);
+        timeout(Duration::from_secs(10), async {
+            loop {
+                from.node.send_call_audio(&[7; 80]);
+                tokio::time::sleep(Duration::from_millis(40)).await;
+                if heard() {
+                    return;
+                }
+            }
+        })
+        .await
+        .expect("never heard");
+    }
+
+    #[tokio::test]
+    async fn calls_go_direct_when_both_opt_in_and_fall_back_when_it_dies() {
+        let book = Arc::default();
+        let (alice, bob) = (phone(&book).await, phone(&book).await);
+        let (ab, _) = befriend(&alice, &bob).await;
+        allow_loopback(&alice);
+        allow_loopback(&bob);
+        let loopback = Some(SocketAddr::from(([127, 0, 0, 1], 0)));
+        let a = alice.node.direct_open(loopback).unwrap();
+        let b = bob.node.direct_open(loopback).unwrap();
+        call_with(&alice, &bob, ab, false, vec![loopback_route(a)], vec![loopback_route(b)]).await;
+        // Both phones probe at once and meet.
+        let (na, nb) = (alice.node.clone(), bob.node.clone());
+        until(move || na.call_direct() && nb.call_direct()).await;
+
+        // With the link gone, sound still flows: it goes straight across.
+        alice.node.shutdown_links();
+        let node = alice.node.clone();
+        until(move || node.connected().is_empty()).await;
+        sound_reaches(&alice, &bob).await;
+        sound_reaches(&bob, &alice).await;
+
+        // The link comes back; then Bob's side of the direct path goes
+        // away. Alice notices within a few seconds and goes back to the
+        // link, and the call carries on.
+        alice.node.poke(bob.pk);
+        let node = alice.node.clone();
+        until(move || node.connected() == [bob.pk]).await;
+        bob.node.direct_close();
+        let node = alice.node.clone();
+        until(move || !node.call_direct()).await;
+        while hears(&bob)() {}
+        sound_reaches(&alice, &bob).await;
+    }
+
+    #[tokio::test]
+    async fn nothing_goes_direct_unless_both_opt_in() {
+        let book = Arc::default();
+        let (alice, bob) = (phone(&book).await, phone(&book).await);
+        let (ab, _) = befriend(&alice, &bob).await;
+        allow_loopback(&alice);
+        allow_loopback(&bob);
+        // Alice has "Faster calls" on (her route is a socket we watch); Bob
+        // has it off.
+        let spy = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let route = loopback_route(spy.local_addr().unwrap().port());
+        call_with(&alice, &bob, ab, false, vec![route], vec![]).await;
+        sound_reaches(&bob, &alice).await;
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        let mut buf = [0u8; 64];
+        assert!(timeout(Duration::from_millis(200), spy.recv_from(&mut buf)).await.is_err(), "nothing sent direct");
+        assert!(!alice.node.call_direct() && !bob.node.call_direct());
+    }
+
+    #[tokio::test]
+    async fn pictures_cross_a_link_behind_the_sound() {
+        let book = Arc::default();
+        let (alice, bob) = (phone(&book).await, phone(&book).await);
+        let (ab, _) = befriend(&alice, &bob).await;
+        call_with(&alice, &bob, ab, true, vec![], vec![]).await;
+        let info = |key| FrameInfo { key, rotation: 270, width: 320, height: 240 };
+        let keyframe: Vec<u8> = (0..9000u32).map(|i| (i % 251) as u8).collect();
+        let sent = alice.node.send_call_video(&keyframe, info(true));
+        assert_eq!(sent.packets.len(), 9);
+        for n in 0..3u8 {
+            assert!(!alice.node.send_call_video(&[n; 1500], info(false)).packets.is_empty());
+            assert!(alice.node.send_call_audio(&[n; 80]));
+        }
+        let hub = bob.session.lock().unwrap().media();
+        let shown = Arc::new(Mutex::new(Vec::new()));
+        let got = shown.clone();
+        until(move || {
+            if let Some(f) = hub.pull_video() {
+                got.lock().unwrap().push(f);
+            }
+            got.lock().unwrap().len() == 4
+        })
+        .await;
+        let shown = shown.lock().unwrap();
+        assert_eq!(shown[0].data, keyframe);
+        assert_eq!(shown[0].info, info(true));
+        assert_eq!(shown.iter().map(|f| f.number).collect::<Vec<_>>(), [0, 1, 2, 3]);
     }
 
     /// Loopback standing in for both Tor and the local network: each phone

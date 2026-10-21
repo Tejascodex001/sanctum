@@ -2,7 +2,7 @@
 
 Private chat for close friends (a circle of 100–200 people at most), on Android.
 
-There are **no servers and no accounts**, and nothing is tracked. Phones talk directly to each other over **Tor**, so nobody, including your friends, sees your IP address. Everything stays on your phone, encrypted, and there are no cloud backups.
+There are **no servers and no accounts**, and nothing is tracked. Phones talk directly to each other over **Tor**, so nobody, including your friends, sees your IP address (unless you turn on an opt-in faster mode for Reels or calls, which says what it shares). Everything stays on your phone, encrypted, and there are no cloud backups.
 
 The UI is the **Sigil + Deck** design: every person and chat gets its own generated sigil, and chats are stacked cards.
 
@@ -58,13 +58,13 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Search** | Type in the home search box to find any message, poll, plan or file name across your chats. Done on the phone; hidden chats only while revealed |
 | ✅ | **Catch-up** | "While you were away": who wrote, who mentioned you, plans to answer and polls waiting for you |
 
-### Milestone v3: calls (current)
+### Milestone v3: calls
 
 | | Feature | Notes |
 |---|---|---|
 | ✅ | **Voice calls** | Call a friend from their chat. Private through Tor by default (nobody learns who calls whom), faster on the same Wi-Fi, and nobody in between can listen. Rings like a phone call, works from the lock screen without saying who's calling, and leaves a record in the chat ("Voice call · 4:12", "Missed call") |
-| 🚧 | **Video calls** | Being built: start a call with video or turn it on during a call, switch cameras. Low quality through Tor, better on the same Wi-Fi or with Faster calls |
-| 🚧 | **Faster calls** | Being built: an opt-in Settings switch to connect calls straight between your phones when possible (less delay, but your friend's phone learns your internet address). Used only if both of you turn it on |
+| ✅ | **Video calls** | Start a call with video or turn your camera on during a call; switch cameras, answer without video. Lower quality and choppier through Tor; sharp on the same Wi-Fi or with Faster calls. A hidden chat's video waits until you unlock |
+| ✅ | **Faster calls** | An opt-in Settings switch: calls connect straight between your phones when your networks allow it (less delay, sharper video), else stay private through Tor. Your friend's phone learns your internet address. Used only if both of you turn it on. The call screen says Private, Nearby or Direct |
 
 ## How it works
 

@@ -3,6 +3,7 @@
 
 pub mod base32;
 pub mod call;
+pub mod direct;
 mod group;
 pub use group::MAX_GROUP;
 pub mod identity;
@@ -23,3 +24,4 @@ pub mod store;
 pub mod temp_chat;
 pub mod transport;
 pub mod typing;
+pub mod video;

@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.net.wifi.WifiManager
@@ -34,6 +35,17 @@ class SanctumApplication : Application() {
     private lateinit var channel: MethodChannel
     private var bluetooth: BluetoothNearby? = null
     private val callAudio by lazy { CallAudio(this) }
+    private lateinit var engine: FlutterEngine
+
+    /** A call's pictures, drawn into Flutter textures. */
+    private val callVideo by lazy {
+        CallVideo(this, engine.renderer) { which, width, height, rotation, mirror ->
+            channel.invokeMethod(
+                "callVideoFormat",
+                mapOf("which" to which, "width" to width, "height" to height, "rotation" to rotation, "mirror" to mirror),
+            )
+        }
+    }
 
     private val multicast: WifiManager.MulticastLock by lazy {
         (applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager)
@@ -44,7 +56,7 @@ class SanctumApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         createChannels()
-        val engine = FlutterEngine(this)
+        engine = FlutterEngine(this)
         engine.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         FlutterEngineCache.getInstance().put(ENGINE, engine)
         channel = MethodChannel(engine.dartExecutor.binaryMessenger, "sanctum/background")
@@ -103,7 +115,20 @@ class SanctumApplication : Application() {
                     }
                     "canNotify" -> result.success(NotificationManagerCompat.from(this).areNotificationsEnabled())
                     // Calls (see CallAudio.kt; the sound goes to Rust directly).
-                    "callCodecs" -> result.success(CallAudio.codecs())
+                    "callCodecs" -> {
+                        val camera = packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
+                        result.success(CallAudio.codecs() + CallVideo.codecs(camera))
+                    }
+                    "callVideoOpen" -> result.success(
+                        callVideo.open(call.argument<String>("send") ?: "", call.argument<String>("recv") ?: ""),
+                    )
+                    "callVideoClose" -> {
+                        callVideo.close()
+                        result.success(null)
+                    }
+                    "callCamera" -> result.success(
+                        callVideo.camera(call.argument<Boolean>("on") == true, call.argument<Boolean>("front") != false),
+                    )
                     "callAudioStart" -> result.success(
                         callAudio.start(
                             call.argument<String>("send")!!,
@@ -134,6 +159,7 @@ class SanctumApplication : Application() {
                     "callServiceStart" -> {
                         val intent = Intent(this, CallService::class.java)
                             .putExtra(CallService.EXTRA_TITLE, call.argument<String>("title") ?: "Sanctum")
+                            .putExtra(CallService.EXTRA_CAMERA, call.argument<Boolean>("camera") == true)
                         result.success(runCatching { ContextCompat.startForegroundService(this, intent) }.isSuccess)
                     }
                     "callServiceStop" -> {
