@@ -1,5 +1,5 @@
-//! Voice calls between two friends: ringing, answering and hanging up, and
-//! the sealed sound in between.
+//! Calls between two friends: ringing, answering and hanging up, and the
+//! sealed sound and pictures in between.
 //!
 //! **Signaling** travels inside the pair's MLS group like a message
 //! ([`Content::CallInvite`], [`Content::CallAnswer`], [`Content::CallEnd`]),
@@ -20,17 +20,27 @@
 //! network's uneven timing (Tor's especially) by waiting a little longer
 //! when packets come unevenly.
 //!
+//! **Pictures** (video calls, or a camera turned on during a call) travel
+//! the same way, split into fragments (see `video`), held back to match
+//! the sound, and always behind it in the queue. Small control packets in
+//! the same sealed stream say whose camera is on and ask for a keyframe
+//! after a loss. With "Faster calls" on both phones the same packets can go
+//! straight between the phones over UDP (see `direct`).
+//!
 //! The media side ([`MediaHub`]) is shared with the network, which hands it
 //! incoming packets without taking the session's lock, and with the phone's
-//! audio, which seals and pulls packets 25 times a second.
+//! audio and camera code, which seal and pull packets many times a second.
 
+use crate::direct::{self, AddrFilter, DirectPath};
 use crate::protocol::{CallAnswer, CallId, CallOffer, Content, Frame, MessageId};
 use crate::session::{clip, Event, Result, Session, SessionError};
 use crate::store::{CallLog, ChatKind, OutboxItem, OutboxState, StoredMessage};
+use crate::video::{self, FrameInfo, Quality, RateControl, Reassembler, VideoFrame};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -60,8 +70,11 @@ const DONE_KEPT: usize = 64;
 
 /// Packet kinds inside a sealed media packet.
 pub const AUDIO: u8 = 0;
-/// For later builds; this one ignores it.
 pub const VIDEO: u8 = 1;
+/// A [`Control`] message. Older builds ignore it.
+pub const CONTROL: u8 = 2;
+/// Routes offered, and their bytes, at most.
+const MAX_ROUTE_BYTES: usize = 32;
 
 /// Which way a packet goes: part of its nonce and of its key.
 const FROM_CALLER: u8 = 0;
@@ -131,9 +144,11 @@ impl Outcome {
     }
 
     /// What the chat shows for a call that went like this.
-    pub fn describe(self, seconds: u32) -> String {
+    pub fn describe(self, seconds: u32, video: bool) -> String {
         match self {
+            Self::Talked | Self::Dropped if video => format!("Video call · {}", talk_time(seconds)),
             Self::Talked | Self::Dropped => format!("Voice call · {}", talk_time(seconds)),
+            Self::Missed if video => "Missed video call".into(),
             Self::Missed => "Missed call".into(),
             Self::Declined => "Declined call".into(),
             Self::NoAnswer => "No answer".into(),
@@ -179,6 +194,8 @@ pub struct CallView {
     pub name: String,
     /// We called.
     pub outgoing: bool,
+    /// A video call: the caller's camera was on from the start (or, once
+    /// answered, either camera was).
     pub video: bool,
     pub phase: Phase,
     /// When we started talking (Unix milliseconds).
@@ -187,13 +204,22 @@ pub struct CallView {
     /// talking).
     pub send_audio: String,
     pub recv_audio: String,
+    /// The same for pictures; empty if that way can't carry video (one
+    /// phone can't record or play any format the other has).
+    pub send_video: String,
+    pub recv_video: String,
+    /// The friend offered to connect directly ("Faster calls" is on for
+    /// them).
+    pub peer_routes: bool,
 }
 
-/// The sound formats this phone can play and record, best first.
+/// The sound and video formats this phone can play and record, best first.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct AudioCaps {
+pub struct CallCaps {
     pub play: Vec<String>,
     pub record: Vec<String>,
+    pub video_play: Vec<String>,
+    pub video_record: Vec<String>,
 }
 
 pub(crate) struct Call {
@@ -241,6 +267,12 @@ fn tidy(list: &mut Vec<String>) {
     }
 }
 
+/// Routes from the other phone (or ours): a few short ones at most.
+fn tidy_routes(routes: &mut Vec<Vec<u8>>) {
+    routes.retain(|r| r.len() <= MAX_ROUTE_BYTES);
+    routes.truncate(direct::MAX_ROUTES);
+}
+
 impl Session {
     /// The call ringing, connecting or talking now, if any.
     pub fn call_now(&self) -> Option<CallView> {
@@ -253,12 +285,27 @@ impl Session {
         self.media.clone()
     }
 
-    /// Calls the friend in this chat. Returns the friend to reach now.
-    pub fn call_start(&mut self, chat_id: i64, caps: &AudioCaps) -> Result<([u8; 32], CallView)> {
-        self.call_start_at(chat_id, caps, now_ms())
+    /// Calls the friend in this chat, with our camera on if `video`.
+    /// `routes` are ways to reach this phone directly (see `direct`),
+    /// offered only with "Faster calls" on. Returns the friend to reach now.
+    pub fn call_start(
+        &mut self,
+        chat_id: i64,
+        caps: &CallCaps,
+        video: bool,
+        routes: Vec<Vec<u8>>,
+    ) -> Result<([u8; 32], CallView)> {
+        self.call_start_at(chat_id, caps, video, routes, now_ms())
     }
 
-    pub(crate) fn call_start_at(&mut self, chat_id: i64, caps: &AudioCaps, at: u64) -> Result<([u8; 32], CallView)> {
+    pub(crate) fn call_start_at(
+        &mut self,
+        chat_id: i64,
+        caps: &CallCaps,
+        video: bool,
+        mut routes: Vec<Vec<u8>>,
+        at: u64,
+    ) -> Result<([u8; 32], CallView)> {
         let meta = self.chat(chat_id)?;
         // Friends' own chats only: not notes, groups or temp chats; and only
         // once they've added us back, so the call can be encrypted.
@@ -269,14 +316,17 @@ impl Session {
         if self.calls.now.is_some() {
             return Err(SessionError::InCall);
         }
+        tidy_routes(&mut routes);
         let offer = CallOffer {
             call: rand::random(),
             key: rand::random(),
             sent_at: at,
-            video: false,
+            video: video && !caps.video_record.is_empty(),
             audio_in: caps.play.clone(),
             audio_out: caps.record.clone(),
-            ..Default::default()
+            video_in: caps.video_play.clone(),
+            video_out: caps.video_record.clone(),
+            routes,
         };
         let invite = self.queue_call(peer, Content::CallInvite(offer.clone()))?;
         // Ready to hear them from their very first packet.
@@ -287,19 +337,24 @@ impl Session {
             peer,
             name: meta.title,
             outgoing: true,
-            video: false,
+            video: offer.video,
             phase: Phase::Connecting,
             answered_at: None,
             send_audio: String::new(),
             recv_audio: String::new(),
+            send_video: String::new(),
+            recv_video: String::new(),
+            peer_routes: false,
         };
         self.calls.now = Some(Call { view: view.clone(), offer, since: at, invite: Some(invite) });
         self.events.push(Event::Call(view.clone()));
         Ok((peer, view))
     }
 
-    /// Picks up the call ringing now. Returns the friend to reach.
-    pub fn call_answer(&mut self, caps: &AudioCaps) -> Result<Option<[u8; 32]>> {
+    /// Picks up the call ringing now, with our camera on if `video`.
+    /// `routes` (with "Faster calls" on) are only offered back if the
+    /// caller offered theirs. Returns the friend to reach.
+    pub fn call_answer(&mut self, caps: &CallCaps, video: bool, mut routes: Vec<Vec<u8>>) -> Result<Option<[u8; 32]>> {
         let Some(call) = self.calls.now.as_mut() else {
             return Ok(None);
         };
@@ -313,17 +368,45 @@ impl Session {
         let (Some(caller_audio), Some(callee_audio)) = (caller_audio, callee_audio) else {
             return self.finish_call(Outcome::Failed, Some(EndReason::Failed));
         };
+        // Pictures the same way; a direction with nothing in common has none.
+        let caller_video = pick(&caps.video_play, &call.offer.video_out).unwrap_or_default();
+        let callee_video = pick(&call.offer.video_in, &caps.video_record).unwrap_or_default();
+        let camera = video && !callee_video.is_empty();
+        // Direct only if both want it: never offer ours unless they did.
+        tidy_routes(&mut routes);
+        if call.offer.routes.is_empty() {
+            routes.clear();
+        }
         let (peer, id, key) = (call.view.peer, call.view.id, call.offer.key);
         call.view.phase = Phase::Active;
         call.view.answered_at = Some(now_ms());
         call.view.send_audio = callee_audio.clone();
         call.view.recv_audio = caller_audio.clone();
+        call.view.send_video = callee_video.clone();
+        call.view.recv_video = caller_video.clone();
+        call.view.video |= camera;
+        let setup = Setup {
+            send_video: !callee_video.is_empty(),
+            recv_video: !caller_video.is_empty(),
+            camera,
+            peer_camera: call.offer.video && !caller_video.is_empty(),
+            routes: if routes.is_empty() { Vec::new() } else { call.offer.routes.clone() },
+        };
         let view = call.view.clone();
         self.queue_call(
             peer,
-            Content::CallAnswer(CallAnswer { call: id, caller_audio, callee_audio, ..Default::default() }),
+            Content::CallAnswer(CallAnswer {
+                call: id,
+                video: camera,
+                caller_audio,
+                callee_audio,
+                caller_video,
+                callee_video,
+                routes,
+            }),
         )?;
         self.media.start(MediaStream::new(id, peer, &key, false));
+        self.media.configure(setup);
         self.media.set_live();
         self.events.push(Event::Call(view));
         Ok(Some(peer))
@@ -386,13 +469,13 @@ impl Session {
         for list in [&mut offer.audio_in, &mut offer.audio_out, &mut offer.video_in, &mut offer.video_out] {
             tidy(list);
         }
-        offer.routes.clear();
+        tidy_routes(&mut offer.routes);
         let now = now_ms();
         let at = offer.sent_at.min(now);
         // Too late to ring (they were offline, or we were): a missed call.
         if now.saturating_sub(offer.sent_at) > RING_WINDOW_MS {
             self.calls.remember(offer.call);
-            return self.log_call(chat_id, false, Outcome::Missed, at, 0);
+            return self.log_call(chat_id, false, Outcome::Missed, at, 0, offer.video);
         }
         if let Some(current) = &self.calls.now {
             if current.view.id == offer.call {
@@ -419,7 +502,7 @@ impl Session {
                 self.calls.remember(offer.call);
                 self.queue_call(*peer, Content::CallEnd { call: offer.call, reason: EndReason::Busy as u8 })?;
                 self.pokes.push(*peer);
-                return self.log_call(chat_id, false, Outcome::Missed, at, 0);
+                return self.log_call(chat_id, false, Outcome::Missed, at, 0, offer.video);
             }
         }
         let view = CallView {
@@ -428,12 +511,14 @@ impl Session {
             peer: *peer,
             name: self.friend_name(peer),
             outgoing: false,
-            // This build answers with sound only.
-            video: false,
+            video: offer.video,
             phase: Phase::Ringing,
             answered_at: None,
             send_audio: String::new(),
             recv_audio: String::new(),
+            send_video: String::new(),
+            recv_video: String::new(),
+            peer_routes: !offer.routes.is_empty(),
         };
         self.calls.now = Some(Call { view: view.clone(), offer, since: now, invite: None });
         self.events.push(Event::Call(view));
@@ -458,12 +543,31 @@ impl Session {
             }
             return Ok(());
         }
+        // Pictures: only formats we offered; anything else means none that
+        // way (the call goes on with sound).
+        let send_video = Some(answer.caller_video).filter(|c| call.offer.video_out.contains(c)).unwrap_or_default();
+        let recv_video = Some(answer.callee_video).filter(|c| call.offer.video_in.contains(c)).unwrap_or_default();
+        let mut routes = answer.routes;
+        tidy_routes(&mut routes);
+        let setup = Setup {
+            send_video: !send_video.is_empty(),
+            recv_video: !recv_video.is_empty(),
+            camera: call.offer.video && !send_video.is_empty(),
+            peer_camera: answer.video && !recv_video.is_empty(),
+            // Direct only if both offered.
+            routes: if call.offer.routes.is_empty() { Vec::new() } else { routes },
+        };
         call.invite = None;
         call.view.phase = Phase::Active;
         call.view.answered_at = Some(now_ms());
         call.view.send_audio = answer.caller_audio;
         call.view.recv_audio = answer.callee_audio;
+        call.view.video = setup.camera || setup.peer_camera;
+        call.view.send_video = send_video;
+        call.view.recv_video = recv_video;
+        call.view.peer_routes = !setup.routes.is_empty();
         let view = call.view.clone();
+        self.media.configure(setup);
         self.media.set_live();
         self.events.push(Event::Call(view));
         Ok(())
@@ -497,13 +601,14 @@ impl Session {
         let Some(call) = self.calls.now.take() else {
             return Ok(None);
         };
+        let video = call.view.video || self.media.had_video();
         self.media.stop();
         self.calls.remember(call.view.id);
         let seconds = call.view.answered_at.map_or(0, |at| (now_ms().saturating_sub(at) / 1000) as u32);
         // Removed as a friend meanwhile: nowhere to record it.
         if self.chat(call.view.chat).is_ok() {
             let at = call.offer.sent_at.min(call.since);
-            self.log_call(call.view.chat, call.view.outgoing, outcome, at, seconds)?;
+            self.log_call(call.view.chat, call.view.outgoing, outcome, at, seconds, video)?;
         }
         let peer = call.view.peer;
         let mut view = call.view;
@@ -517,15 +622,23 @@ impl Session {
     }
 
     /// The call's record in the chat, kept on this phone only.
-    fn log_call(&mut self, chat_id: i64, outgoing: bool, outcome: Outcome, at_ms: u64, seconds: u32) -> Result<()> {
+    fn log_call(
+        &mut self,
+        chat_id: i64,
+        outgoing: bool,
+        outcome: Outcome,
+        at_ms: u64,
+        seconds: u32,
+        video: bool,
+    ) -> Result<()> {
         self.store.add_message(
             chat_id,
             &StoredMessage {
                 from_me: outgoing,
-                body: outcome.describe(seconds),
+                body: outcome.describe(seconds, video),
                 sent_at: at_ms / 1000,
                 delivered: true,
-                call: Some(CallLog { video: false, outcome: outcome as u8, seconds }),
+                call: Some(CallLog { video, outcome: outcome as u8, seconds }),
                 ..Default::default()
             },
         )?;
@@ -567,17 +680,70 @@ impl Session {
 /// What a sealed media packet holds.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MediaPacket {
-    /// [`AUDIO`], or (later builds) [`VIDEO`]. Others are ignored.
+    /// [`AUDIO`], [`VIDEO`] or [`CONTROL`]. Others are ignored.
     pub kind: u8,
-    /// This stream's own count: audio packet `i` plays at `i` × 40 ms.
+    /// This stream's own count: audio packet `i` plays at `i` × 40 ms; a
+    /// video packet's frame number.
     pub index: u32,
-    /// The sender's media clock in milliseconds, for keeping sound and
-    /// pictures together later.
+    /// The sender's media clock in milliseconds (since it started
+    /// talking), shared by its sound and pictures to keep them together.
     pub at_ms: u32,
-    /// Encoded sound: [`AUDIO_PACKET_MS`] of it, in the agreed format, as
-    /// the phone's audio code packs it.
+    /// Encoded sound ([`AUDIO_PACKET_MS`] of it, in the agreed format, as
+    /// the phone's audio code packs it), a fragment of a video frame, or a
+    /// [`Control`] message.
     pub data: Vec<u8>,
 }
+
+/// Small messages inside the sealed stream. Lost now and then like any
+/// packet, so whatever matters is repeated.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+enum Control {
+    /// The sender's camera, as [`Camera`]. Sent on every change and every
+    /// couple of seconds.
+    Camera(u8),
+    /// Please send a keyframe: something was lost.
+    Keyframe,
+    /// A direct-path probe (see `direct`), and its answer.
+    Probe(u32),
+    ProbeAck(u32),
+}
+
+/// A phone's camera in a call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Camera {
+    Off = 0,
+    On = 1,
+    /// On, but the app went to the background: the picture stops until it
+    /// comes back.
+    Paused = 2,
+}
+
+impl Camera {
+    fn from_wire(b: u8) -> Self {
+        match b {
+            1 => Self::On,
+            2 => Self::Paused,
+            _ => Self::Off,
+        }
+    }
+}
+
+/// Our camera's state is repeated this often, in case a packet was lost.
+const CAMERA_EVERY: Duration = Duration::from_secs(2);
+/// A keyframe is forced at most this often.
+const KEY_EVERY: Duration = Duration::from_millis(700);
+/// Control packets waiting for the network, at most.
+const OUT_MAX: usize = 64;
+/// Sound leaves the speaker about this long after it's handed over.
+const AUDIO_OUT_MS: i64 = 80;
+/// A picture may show this much before its sound.
+const VIDEO_LEAD_MS: i64 = 20;
+/// A picture waits for its sound at most this long.
+const VIDEO_HOLD: Duration = Duration::from_millis(600);
+/// More pictures than this waiting: they're shown at once to catch up.
+const VIDEO_BEHIND: usize = 6;
+/// Sealing adds about this much to each packet, on top of what it carries.
+const PACKET_OVERHEAD: usize = 64;
 
 /// One direction's key, derived from the call key.
 fn direction_cipher(key: &[u8; 32], dir: u8) -> ChaCha20Poly1305 {
@@ -668,8 +834,76 @@ impl ReplayWindow {
     }
 }
 
-/// The media of the call going on now: keys, packet numbers and what's
-/// waiting to be played.
+/// Which way a call packet goes out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    /// Over the friends' own link (Tor, or nearby).
+    Link,
+    /// Straight to the friend's phone over UDP (see `direct`).
+    Direct(SocketAddr),
+}
+
+/// A sealed call packet to send.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Outgoing {
+    pub peer: [u8; 32],
+    pub route: Route,
+    /// Always a [`Frame::CallMedia`].
+    pub frame: Frame,
+}
+
+impl Outgoing {
+    /// For [`Route::Direct`]: where to, and the UDP datagram.
+    pub fn datagram(&self) -> Option<(SocketAddr, Vec<u8>)> {
+        let (Route::Direct(to), Frame::CallMedia { call, seq, sealed }) = (self.route, &self.frame) else {
+            return None;
+        };
+        Some((to, direct::encode_datagram(call, *seq, sealed)))
+    }
+}
+
+/// A video frame handed over for sending: what went out, and whether the
+/// encoder should make its next frame a keyframe.
+#[derive(Debug, Default)]
+pub struct VideoSent {
+    pub packets: Vec<Outgoing>,
+    pub want_key: bool,
+}
+
+/// What the encoder should do now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoTarget {
+    pub quality: Quality,
+    /// Make the next frame a keyframe.
+    pub key_now: bool,
+}
+
+/// How the call's media is going, for the call screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MediaInfo {
+    /// Packets go straight between the phones.
+    pub direct: bool,
+    pub camera: Camera,
+    pub peer_camera: Camera,
+    /// This phone can send pictures to the friend (a format in common).
+    pub can_send_video: bool,
+    pub can_receive_video: bool,
+    pub quality: Quality,
+}
+
+/// What each side does, once the call is answered.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Setup {
+    pub send_video: bool,
+    pub recv_video: bool,
+    pub camera: bool,
+    pub peer_camera: bool,
+    /// The friend's routes; empty unless both phones offered theirs.
+    pub routes: Vec<Vec<u8>>,
+}
+
+/// The media of the call going on now: keys, packet numbers, what's
+/// waiting to be played and shown, and the direct path.
 pub struct MediaStream {
     call: CallId,
     peer: [u8; 32],
@@ -678,11 +912,32 @@ pub struct MediaStream {
     send_dir: u8,
     next_seq: u64,
     replay: ReplayWindow,
-    /// Since when we're talking; nothing is sent or played before.
+    /// Since when we're talking; nothing is sent or played before. Also
+    /// the start of our media clock.
     live_since: Option<Instant>,
     last_heard: Option<Instant>,
     audio_index: u32,
     jitter: JitterBuffer,
+    // Pictures.
+    send_video: bool,
+    recv_video: bool,
+    camera: Camera,
+    peer_camera: Camera,
+    camera_told: Option<Instant>,
+    video_number: u32,
+    /// A frame was dropped (or the camera just came on): only a keyframe
+    /// may go next.
+    need_key: bool,
+    /// The friend asked for a keyframe.
+    key_asked: bool,
+    key_forced: Option<Instant>,
+    rate: RateControl,
+    frames: Reassembler,
+    had_video: bool,
+    // The direct path, if both phones offered one.
+    direct: Option<DirectPath>,
+    /// Control packets for the network to send.
+    out: VecDeque<Outgoing>,
 }
 
 impl MediaStream {
@@ -700,6 +955,104 @@ impl MediaStream {
             last_heard: None,
             audio_index: 0,
             jitter: JitterBuffer::new(AUDIO_PACKET_MS),
+            send_video: false,
+            recv_video: false,
+            camera: Camera::Off,
+            peer_camera: Camera::Off,
+            camera_told: None,
+            video_number: 0,
+            need_key: true,
+            key_asked: false,
+            key_forced: None,
+            rate: RateControl::new(video::PRIVATE, Instant::now()),
+            frames: Reassembler::new(),
+            had_video: false,
+            direct: None,
+            out: VecDeque::new(),
+        }
+    }
+
+    /// Our media clock: milliseconds since we started talking.
+    fn clock_ms(&self, now: Instant) -> u32 {
+        self.live_since.map_or(0, |t| now.saturating_duration_since(t).as_millis() as u32)
+    }
+
+    fn route(&self) -> Route {
+        self.direct.as_ref().and_then(|d| d.up()).map_or(Route::Link, Route::Direct)
+    }
+
+    fn seal(&mut self, packet: &MediaPacket, route: Route) -> Outgoing {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        let sealed = seal_with(&self.send, self.send_dir, &self.call, seq, packet);
+        Outgoing { peer: self.peer, route, frame: Frame::CallMedia { call: self.call, seq, sealed } }
+    }
+
+    /// Queues a control message for the friend.
+    fn tell(&mut self, control: Control, route: Route, now: Instant) {
+        let packet = MediaPacket {
+            kind: CONTROL,
+            index: 0,
+            at_ms: self.clock_ms(now),
+            data: postcard::to_stdvec(&control).expect("serializable"),
+        };
+        let out = self.seal(&packet, route);
+        self.out.push_back(out);
+        while self.out.len() > OUT_MAX {
+            self.out.pop_front();
+        }
+    }
+
+    fn tell_camera(&mut self, now: Instant) {
+        self.camera_told = Some(now);
+        let route = self.route();
+        self.tell(Control::Camera(self.camera as u8), route, now);
+    }
+
+    /// Takes a packet that opened with this call's key; `via` is where it
+    /// came from over UDP (None: the link).
+    fn take(&mut self, packet: MediaPacket, via: Option<SocketAddr>, now: Instant) {
+        self.last_heard = Some(now);
+        let control = if packet.kind == CONTROL { postcard::from_bytes::<Control>(&packet.data).ok() } else { None };
+        if let (Some(from), Some(d)) = (via, self.direct.as_mut()) {
+            d.on_packet(from, matches!(control, Some(Control::ProbeAck(_))), now);
+        }
+        match packet.kind {
+            AUDIO => self.jitter.push_at(packet.index, packet.at_ms, packet.data, now),
+            VIDEO if self.recv_video => {
+                self.frames.push(packet.index, packet.at_ms, &packet.data, now);
+                self.ask_for_key(now);
+            }
+            CONTROL => match control {
+                Some(Control::Camera(c)) => {
+                    let camera = Camera::from_wire(c);
+                    if camera != self.peer_camera && camera != Camera::On {
+                        // Gone: the next picture will start afresh.
+                        self.frames.reset();
+                    }
+                    self.peer_camera = camera;
+                }
+                Some(Control::Keyframe) => {
+                    self.key_asked = true;
+                    // They lost a frame: the path may be too full.
+                    self.rate.congested(now);
+                }
+                Some(Control::Probe(n)) => {
+                    if let Some(from) = via {
+                        self.tell(Control::ProbeAck(n), Route::Direct(direct::canonical(from)), now);
+                    }
+                }
+                Some(Control::ProbeAck(_)) | None => {}
+            },
+            _ => {}
+        }
+    }
+
+    /// Asks the friend for a keyframe if we need one (and not too often).
+    fn ask_for_key(&mut self, now: Instant) {
+        if self.peer_camera == Camera::On && self.frames.wants_key(now) {
+            let route = self.route();
+            self.tell(Control::Keyframe, route, now);
         }
     }
 }
@@ -715,77 +1068,288 @@ pub enum Pulled {
     Silence,
 }
 
+struct Hub {
+    stream: Option<MediaStream>,
+    /// Where direct packets may go (loopback is refused, except in tests).
+    filter: AddrFilter,
+}
+
+impl Default for Hub {
+    fn default() -> Self {
+        Self { stream: None, filter: direct::public_only }
+    }
+}
+
 /// The call's media, shared by the session (which starts and stops it),
-/// the network (which hands it packets) and the phone's audio.
+/// the network (which hands it packets and sends what it seals) and the
+/// phone's audio and camera.
 #[derive(Clone, Default)]
-pub struct MediaHub(Arc<Mutex<Option<MediaStream>>>);
+pub struct MediaHub(Arc<Mutex<Hub>>);
 
 impl MediaHub {
+    fn with<T>(&self, f: impl FnOnce(&mut MediaStream) -> T) -> Option<T> {
+        self.0.lock().unwrap().stream.as_mut().map(f)
+    }
+
+    /// As [`with`](Self::with), only while talking.
+    fn live<T>(&self, f: impl FnOnce(&mut MediaStream) -> T) -> Option<T> {
+        self.0.lock().unwrap().stream.as_mut().filter(|s| s.live_since.is_some()).map(f)
+    }
+
     pub(crate) fn start(&self, stream: MediaStream) {
-        *self.0.lock().unwrap() = Some(stream);
+        self.0.lock().unwrap().stream = Some(stream);
     }
 
     pub(crate) fn stop(&self) {
-        self.0.lock().unwrap().take();
+        self.0.lock().unwrap().stream.take();
     }
 
     pub(crate) fn set_live(&self) {
-        if let Some(s) = self.0.lock().unwrap().as_mut() {
-            s.live_since = Some(Instant::now());
-        }
+        self.with(|s| {
+            let now = Instant::now();
+            s.live_since = Some(now);
+            if s.camera == Camera::On {
+                s.tell_camera(now);
+            }
+        });
+    }
+
+    /// Settles what each side does once the call is answered.
+    pub(crate) fn configure(&self, setup: Setup) {
+        let mut hub = self.0.lock().unwrap();
+        let filter = hub.filter;
+        let Some(s) = hub.stream.as_mut() else { return };
+        let now = Instant::now();
+        s.send_video = setup.send_video;
+        s.recv_video = setup.recv_video;
+        s.camera = if setup.camera && setup.send_video { Camera::On } else { Camera::Off };
+        s.peer_camera = if setup.peer_camera && setup.recv_video { Camera::On } else { Camera::Off };
+        s.had_video = s.camera == Camera::On || s.peer_camera == Camera::On;
+        let routes = direct::routes_from(&setup.routes, filter);
+        s.direct = (!routes.is_empty()).then(|| DirectPath::new(routes, now));
+    }
+
+    /// Which addresses direct packets may go to. Tests on one machine allow
+    /// loopback ([`direct::loopback_too`]); phones never do.
+    pub fn set_filter(&self, filter: AddrFilter) {
+        self.0.lock().unwrap().filter = filter;
+    }
+
+    /// A call is ringing, connecting or going on.
+    pub fn active(&self) -> bool {
+        self.0.lock().unwrap().stream.is_some()
     }
 
     /// The friend we're talking to, if talking.
     pub fn peer(&self) -> Option<[u8; 32]> {
-        self.0.lock().unwrap().as_ref().filter(|s| s.live_since.is_some()).map(|s| s.peer)
+        self.live(|s| s.peer)
     }
 
-    /// Seals [`AUDIO_PACKET_MS`] of encoded sound for the friend: the frame
-    /// and who to send it to. None unless talking.
-    pub fn seal_audio(&self, data: &[u8]) -> Option<([u8; 32], Frame)> {
-        let mut guard = self.0.lock().unwrap();
-        let s = guard.as_mut()?;
-        s.live_since?;
+    /// Seals [`AUDIO_PACKET_MS`] of encoded sound for the friend. None
+    /// unless talking.
+    pub fn seal_audio(&self, data: &[u8]) -> Option<Outgoing> {
+        self.seal_audio_at(data, Instant::now())
+    }
+
+    pub fn seal_audio_at(&self, data: &[u8], now: Instant) -> Option<Outgoing> {
         if data.len() > MAX_MEDIA {
             return None;
         }
-        let packet = MediaPacket {
-            kind: AUDIO,
-            index: s.audio_index,
-            at_ms: s.audio_index.wrapping_mul(AUDIO_PACKET_MS),
-            data: data.to_vec(),
-        };
-        s.audio_index = s.audio_index.wrapping_add(1);
-        let seq = s.next_seq;
-        s.next_seq += 1;
-        let sealed = seal_with(&s.send, s.send_dir, &s.call, seq, &packet);
-        Some((s.peer, Frame::CallMedia { call: s.call, seq, sealed }))
+        self.live(|s| {
+            let packet =
+                MediaPacket { kind: AUDIO, index: s.audio_index, at_ms: s.clock_ms(now), data: data.to_vec() };
+            s.audio_index = s.audio_index.wrapping_add(1);
+            let route = s.route();
+            s.seal(&packet, route)
+        })
     }
 
-    /// A [`Frame::CallMedia`] from `peer`. Taken only from the friend in
-    /// the call, sealed with this call's key, and once. Returns whether it
-    /// was taken.
+    /// Seals an encoded video frame, in fragments, if our camera is on and
+    /// `admit` (the network) has room for `bytes` on the route. A refused
+    /// frame means nothing more goes until a keyframe.
+    pub fn seal_video(&self, data: &[u8], info: FrameInfo, admit: impl FnOnce(Route, usize) -> bool) -> VideoSent {
+        self.seal_video_at(data, info, admit, Instant::now())
+    }
+
+    pub fn seal_video_at(
+        &self,
+        data: &[u8],
+        info: FrameInfo,
+        admit: impl FnOnce(Route, usize) -> bool,
+        now: Instant,
+    ) -> VideoSent {
+        self.live(|s| {
+            if !s.send_video || s.camera != Camera::On {
+                return VideoSent::default();
+            }
+            if s.need_key && !info.key {
+                return VideoSent { packets: Vec::new(), want_key: true };
+            }
+            let pieces = video::fragment(data, info);
+            if pieces.is_empty() {
+                return VideoSent::default();
+            }
+            let route = s.route();
+            let bytes = pieces.iter().map(|p| p.len() + PACKET_OVERHEAD).sum();
+            if !admit(route, bytes) {
+                s.need_key = true;
+                s.rate.congested(now);
+                return VideoSent { packets: Vec::new(), want_key: true };
+            }
+            let (number, at_ms) = (s.video_number, s.clock_ms(now));
+            s.video_number = s.video_number.wrapping_add(1);
+            let packets = pieces
+                .into_iter()
+                .map(|data| s.seal(&MediaPacket { kind: VIDEO, index: number, at_ms, data }, route))
+                .collect();
+            if info.key {
+                s.need_key = false;
+                s.key_asked = false;
+            }
+            s.had_video = true;
+            VideoSent { packets, want_key: false }
+        })
+        .unwrap_or_default()
+    }
+
+    /// What the camera's encoder should aim for; None while our camera is
+    /// off (or we can't send pictures).
+    pub fn video_target(&self) -> Option<VideoTarget> {
+        self.video_target_at(Instant::now())
+    }
+
+    pub fn video_target_at(&self, now: Instant) -> Option<VideoTarget> {
+        self.live(|s| {
+            if !s.send_video || s.camera != Camera::On {
+                return None;
+            }
+            let wanted = s.need_key || s.key_asked;
+            let key_now = wanted && s.key_forced.is_none_or(|t| now.saturating_duration_since(t) >= KEY_EVERY);
+            if key_now {
+                s.key_forced = Some(now);
+                s.key_asked = false;
+            }
+            Some(VideoTarget { quality: s.rate.quality(), key_now })
+        })
+        .flatten()
+    }
+
+    /// Our camera turned on, off, or paused (the app went to the
+    /// background). Tells the friend at once. Returns false if pictures
+    /// can't be sent in this call.
+    pub fn set_camera(&self, camera: Camera) -> bool {
+        self.set_camera_at(camera, Instant::now())
+    }
+
+    pub fn set_camera_at(&self, camera: Camera, now: Instant) -> bool {
+        self.with(|s| {
+            if camera != Camera::Off && !s.send_video {
+                return false;
+            }
+            if camera == Camera::On && s.camera != Camera::On {
+                // A fresh start: the friend needs a keyframe first.
+                s.need_key = true;
+                s.key_forced = None;
+            }
+            s.camera = camera;
+            s.had_video |= camera == Camera::On;
+            if s.live_since.is_some() {
+                s.tell_camera(now);
+            }
+            true
+        })
+        .unwrap_or(false)
+    }
+
+    /// A [`Frame::CallMedia`] from `peer` over the link. Taken only from
+    /// the friend in the call, sealed with this call's key, and once.
+    /// Returns whether it was taken.
     pub fn receive(&self, peer: &[u8; 32], call: &CallId, seq: u64, sealed: &[u8]) -> bool {
         self.receive_at(peer, call, seq, sealed, Instant::now())
     }
 
     pub fn receive_at(&self, peer: &[u8; 32], call: &CallId, seq: u64, sealed: &[u8], now: Instant) -> bool {
-        let mut guard = self.0.lock().unwrap();
-        let Some(s) = guard.as_mut() else {
-            return false;
-        };
-        if &s.peer != peer || &s.call != call || sealed.len() > MAX_MEDIA + 64 || !s.replay.fresh(seq) {
-            return false;
-        }
-        let Some(packet) = open_with(&s.recv, s.send_dir ^ 1, call, seq, sealed) else {
-            return false;
-        };
-        s.replay.mark(seq);
-        s.last_heard = Some(now);
-        if packet.kind == AUDIO {
-            s.jitter.push(packet.index, packet.data, now);
-        }
-        true
+        self.open(Some(peer), None, call, seq, sealed, now)
+    }
+
+    /// A call packet that came over UDP from `from`: taken only from one of
+    /// the friend's addresses, in a call where both offered a direct path.
+    pub fn receive_direct(&self, from: SocketAddr, call: &CallId, seq: u64, sealed: &[u8]) -> bool {
+        self.receive_direct_at(from, call, seq, sealed, Instant::now())
+    }
+
+    pub fn receive_direct_at(&self, from: SocketAddr, call: &CallId, seq: u64, sealed: &[u8], now: Instant) -> bool {
+        self.open(None, Some(from), call, seq, sealed, now)
+    }
+
+    fn open(
+        &self,
+        peer: Option<&[u8; 32]>,
+        via: Option<SocketAddr>,
+        call: &CallId,
+        seq: u64,
+        sealed: &[u8],
+        now: Instant,
+    ) -> bool {
+        self.with(|s| {
+            if peer.is_some_and(|p| *p != s.peer) || &s.call != call || sealed.len() > MAX_MEDIA + 64 {
+                return false;
+            }
+            if let Some(from) = via {
+                if !s.direct.as_ref().is_some_and(|d| d.knows(&from)) {
+                    return false;
+                }
+            }
+            if !s.replay.fresh(seq) {
+                return false;
+            }
+            let Some(packet) = open_with(&s.recv, s.send_dir ^ 1, call, seq, sealed) else {
+                return false;
+            };
+            s.replay.mark(seq);
+            s.take(packet, via, now);
+            true
+        })
+        .unwrap_or(false)
+    }
+
+    /// Housekeeping, a few times a second while a call goes on: probes and
+    /// keepalives for the direct path, our camera's state, keyframe
+    /// requests, and the quality the path allows. `link_fast`: the link is
+    /// nearby rather than over Tor.
+    pub fn tick(&self, now: Instant, link_fast: bool) {
+        self.live(|s| {
+            let probes = s.direct.as_mut().map(|d| d.due(now)).unwrap_or_default();
+            for (to, n) in probes {
+                s.tell(Control::Probe(n), Route::Direct(to), now);
+            }
+            let fast = link_fast || matches!(s.route(), Route::Direct(_));
+            s.rate.set_profile(if fast { video::FAST } else { video::PRIVATE }, now);
+            s.rate.tick(now);
+            let camera_due = s.camera_told.is_none_or(|t| now.saturating_duration_since(t) >= CAMERA_EVERY);
+            if s.send_video && camera_due {
+                s.tell_camera(now);
+            }
+            s.frames.advance(now);
+            s.ask_for_key(now);
+        });
+    }
+
+    /// Asks the friend for a keyframe now (the phone's decoder had to start
+    /// over).
+    pub fn ask_keyframe(&self) {
+        self.live(|s| {
+            if s.peer_camera == Camera::On {
+                let route = s.route();
+                s.tell(Control::Keyframe, route, Instant::now());
+            }
+        });
+    }
+
+    /// Control packets waiting to go (probes and their answers, camera
+    /// news, keyframe requests).
+    pub fn take_out(&self) -> Vec<Outgoing> {
+        self.with(|s| s.out.drain(..).collect()).unwrap_or_default()
     }
 
     /// The next [`AUDIO_PACKET_MS`] of sound to play. Call it once per
@@ -795,24 +1359,61 @@ impl MediaHub {
     }
 
     pub fn pull_audio_at(&self, now: Instant) -> Pulled {
-        match self.0.lock().unwrap().as_mut() {
-            Some(s) if s.live_since.is_some() => s.jitter.pull(now),
-            _ => Pulled::Silence,
-        }
+        self.live(|s| s.jitter.pull(now)).unwrap_or(Pulled::Silence)
+    }
+
+    /// The next video frame to decode and show, once its sound is playing
+    /// (or it has waited long enough).
+    pub fn pull_video(&self) -> Option<VideoFrame> {
+        self.pull_video_at(Instant::now())
+    }
+
+    pub fn pull_video_at(&self, now: Instant) -> Option<VideoFrame> {
+        self.live(|s| {
+            s.frames.advance(now);
+            let (frame, ready_at) = s.frames.peek()?;
+            let due = match s.jitter.clock(now) {
+                Some(audio_ms) => frame.at_ms as i64 <= audio_ms + VIDEO_LEAD_MS,
+                None => true,
+            };
+            let waited = now.saturating_duration_since(*ready_at) >= VIDEO_HOLD;
+            if due || waited || s.frames.ready_len() > VIDEO_BEHIND {
+                s.frames.pop()
+            } else {
+                None
+            }
+        })
+        .flatten()
+    }
+
+    /// How the media is going, while talking.
+    pub fn info(&self) -> Option<MediaInfo> {
+        self.live(|s| MediaInfo {
+            direct: matches!(s.route(), Route::Direct(_)),
+            camera: s.camera,
+            peer_camera: s.peer_camera,
+            can_send_video: s.send_video,
+            can_receive_video: s.recv_video,
+            quality: s.rate.quality(),
+        })
+    }
+
+    /// Pictures went one way or the other at some point in this call.
+    pub(crate) fn had_video(&self) -> bool {
+        self.with(|s| s.had_video).unwrap_or(false)
     }
 
     /// How long nothing has been heard while talking.
     pub(crate) fn quiet_for(&self, now: Instant) -> Duration {
-        let guard = self.0.lock().unwrap();
-        let Some(s) = guard.as_ref() else {
-            return Duration::ZERO;
-        };
-        let since = match (s.live_since, s.last_heard) {
-            (Some(live), Some(heard)) => live.max(heard),
-            (Some(live), None) => live,
-            _ => return Duration::ZERO,
-        };
-        now.saturating_duration_since(since)
+        self.with(|s| {
+            let since = match (s.live_since, s.last_heard) {
+                (Some(live), Some(heard)) => live.max(heard),
+                (Some(live), None) => live,
+                _ => return Duration::ZERO,
+            };
+            now.saturating_duration_since(since)
+        })
+        .unwrap_or(Duration::ZERO)
     }
 }
 
@@ -843,7 +1444,8 @@ const STALL_AFTER: u32 = 3;
 /// packet plays when it comes (a little later than planned).
 pub struct JitterBuffer {
     packet_ms: u32,
-    packets: BTreeMap<u32, Vec<u8>>,
+    /// By index: (the sender's media time, the sound).
+    packets: BTreeMap<u32, (u32, Vec<u8>)>,
     /// The packet to play next.
     next: Option<u32>,
     playing: bool,
@@ -854,6 +1456,8 @@ pub struct JitterBuffer {
     delays: VecDeque<i64>,
     target_ms: u32,
     last_trim: Option<Instant>,
+    /// The last packet handed to the player: (its media time, when).
+    played: Option<(u32, Instant)>,
 }
 
 impl JitterBuffer {
@@ -868,7 +1472,19 @@ impl JitterBuffer {
             delays: VecDeque::new(),
             target_ms: JITTER_MIN_MS,
             last_trim: None,
+            played: None,
         }
+    }
+
+    /// The sender's media time of the sound leaving the speaker now, for
+    /// keeping pictures with it. None if nothing has played lately.
+    pub fn clock(&self, now: Instant) -> Option<i64> {
+        let (at_ms, when) = self.played?;
+        let since = now.saturating_duration_since(when);
+        if since > Duration::from_secs(1) {
+            return None;
+        }
+        Some(at_ms as i64 + since.as_millis() as i64 - AUDIO_OUT_MS)
     }
 
     /// How long it waits before playing, now.
@@ -886,10 +1502,15 @@ impl JitterBuffer {
     }
 
     pub fn push(&mut self, index: u32, data: Vec<u8>, now: Instant) {
+        self.push_at(index, index.wrapping_mul(self.packet_ms), data, now);
+    }
+
+    /// A packet made at `at_ms` on the sender's media clock.
+    pub fn push_at(&mut self, index: u32, at_ms: u32, data: Vec<u8>, now: Instant) {
         if self.next.is_some_and(|next| index < next) {
             return; // Too late: its turn is over.
         }
-        self.packets.insert(index, data);
+        self.packets.insert(index, (at_ms, data));
         while self.held_ms() > HELD_MAX_MS {
             let Some((first, _)) = self.packets.pop_first() else { break };
             if self.next.is_none_or(|next| next <= first) {
@@ -927,9 +1548,10 @@ impl JitterBuffer {
             self.misses = 0;
         }
         let n = self.next.expect("set while playing");
-        if let Some(data) = self.packets.remove(&n) {
+        if let Some((at_ms, data)) = self.packets.remove(&n) {
             self.next = Some(n + 1);
             self.misses = 0;
+            self.played = Some((at_ms, now));
             // Waiting longer than needed: skip a packet, at most once a
             // second, so the delay shrinks back.
             let trimmed_lately = self.last_trim.is_some_and(|t| now.saturating_duration_since(t) < Duration::from_secs(1));
@@ -962,14 +1584,15 @@ mod tests {
     use crate::session::tests::{befriend, connect, Phone};
     use crate::session::Event;
 
-    fn caps(play: &[&str], record: &[&str]) -> AudioCaps {
-        AudioCaps {
+    fn caps(play: &[&str], record: &[&str]) -> CallCaps {
+        CallCaps {
             play: play.iter().map(|s| s.to_string()).collect(),
             record: record.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
         }
     }
 
-    fn both() -> AudioCaps {
+    fn both() -> CallCaps {
         caps(&[OPUS, AMR_WB], &[OPUS, AMR_WB])
     }
 
@@ -1000,9 +1623,9 @@ mod tests {
     /// Alice calls Bob and he answers.
     fn talking() -> (Phone, Phone, i64, i64) {
         let (mut alice, mut bob, ab, ba) = friends();
-        alice.s.call_start(ab, &both()).unwrap();
+        alice.s.call_start(ab, &both(), false, vec![]).unwrap();
         connect(&mut alice, &mut bob);
-        bob.s.call_answer(&both()).unwrap().unwrap();
+        bob.s.call_answer(&both(), false, vec![]).unwrap().unwrap();
         connect(&mut bob, &mut alice);
         assert_eq!(alice.s.call_now().unwrap().phase, Phase::Active);
         alice.s.take_events();
@@ -1013,7 +1636,7 @@ mod tests {
     #[test]
     fn a_call_rings_is_answered_and_ends_on_both_phones() {
         let (mut alice, mut bob, ab, ba) = friends();
-        let (peer, view) = alice.s.call_start(ab, &caps(&[OPUS, AMR_WB], &[AMR_WB])).unwrap();
+        let (peer, view) = alice.s.call_start(ab, &caps(&[OPUS, AMR_WB], &[AMR_WB]), false, vec![]).unwrap();
         assert_eq!((peer, view.phase, view.outgoing), (bob.pk(), Phase::Connecting, true));
         assert_eq!(alice.s.pending_peers().unwrap(), vec![bob.pk()]);
 
@@ -1025,7 +1648,7 @@ mod tests {
         assert_eq!(calls(&alice.s.take_events()), [Phase::Connecting, Phase::Ringing]);
 
         // Bob records Opus only; Alice only AMR-WB. Each plays both.
-        assert_eq!(bob.s.call_answer(&caps(&[OPUS, AMR_WB], &[OPUS])).unwrap(), Some(alice.pk()));
+        assert_eq!(bob.s.call_answer(&caps(&[OPUS, AMR_WB], &[OPUS]), false, vec![]).unwrap(), Some(alice.pk()));
         let b = bob.s.call_now().unwrap();
         assert_eq!((b.phase, b.send_audio.as_str(), b.recv_audio.as_str()), (Phase::Active, OPUS, AMR_WB));
         connect(&mut bob, &mut alice);
@@ -1046,7 +1669,7 @@ mod tests {
     #[test]
     fn declining_and_giving_up() {
         let (mut alice, mut bob, ab, ba) = friends();
-        alice.s.call_start(ab, &both()).unwrap();
+        alice.s.call_start(ab, &both(), false, vec![]).unwrap();
         connect(&mut alice, &mut bob);
         bob.s.call_end().unwrap();
         connect(&mut bob, &mut alice);
@@ -1055,7 +1678,7 @@ mod tests {
         assert_eq!(logs(&bob, ba), [(false, "Declined call".to_string())]);
 
         // Alice gives up before Bob answers: a missed call for him.
-        alice.s.call_start(ab, &both()).unwrap();
+        alice.s.call_start(ab, &both(), false, vec![]).unwrap();
         connect(&mut alice, &mut bob);
         alice.s.call_end().unwrap();
         connect(&mut alice, &mut bob);
@@ -1070,7 +1693,7 @@ mod tests {
     #[test]
     fn a_late_invite_is_a_missed_call_and_never_rings() {
         let (mut alice, mut bob, ab, ba) = friends();
-        alice.s.call_start_at(ab, &both(), now_ms() - RING_WINDOW_MS - 5_000).unwrap();
+        alice.s.call_start_at(ab, &both(), false, vec![], now_ms() - RING_WINDOW_MS - 5_000).unwrap();
         connect(&mut alice, &mut bob);
         assert!(bob.s.call_now().is_none());
         let events = bob.s.take_events();
@@ -1082,7 +1705,7 @@ mod tests {
     #[test]
     fn calling_someone_unreachable_gives_up_and_they_see_a_missed_call() {
         let (mut alice, mut bob, ab, ba) = friends();
-        alice.s.call_start(ab, &both()).unwrap();
+        alice.s.call_start(ab, &both(), false, vec![]).unwrap();
         alice.s.call_tick(now_ms() + 10_000, Instant::now()).unwrap();
         assert_eq!(alice.s.call_now().unwrap().phase, Phase::Connecting, "still trying");
         alice.s.call_tick(now_ms() + UNREACHABLE_AFTER_MS + 1_000, Instant::now()).unwrap();
@@ -1100,7 +1723,7 @@ mod tests {
     #[test]
     fn unanswered_calls_time_out_on_both_phones() {
         let (mut alice, mut bob, ab, ba) = friends();
-        alice.s.call_start(ab, &both()).unwrap();
+        alice.s.call_start(ab, &both(), false, vec![]).unwrap();
         connect(&mut alice, &mut bob);
         alice.s.call_tick(now_ms() + RING_FOR_MS + 1_000, Instant::now()).unwrap();
         assert_eq!(logs(&alice, ab), [(true, "No answer".to_string())]);
@@ -1119,7 +1742,7 @@ mod tests {
         let mut carol = Phone::new();
         let (cb, bc) = befriend(&mut carol, &mut bob);
         connect(&mut carol, &mut bob);
-        carol.s.call_start(cb, &both()).unwrap();
+        carol.s.call_start(cb, &both(), false, vec![]).unwrap();
         connect(&mut carol, &mut bob);
         assert_eq!(bob.s.call_now().unwrap().peer, alice.pk(), "still talking to Alice");
         connect(&mut bob, &mut carol);
@@ -1134,8 +1757,8 @@ mod tests {
     #[test]
     fn calling_each_other_at_once_settles_on_one_call() {
         let (mut alice, mut bob, ab, ba) = friends();
-        alice.s.call_start(ab, &both()).unwrap();
-        bob.s.call_start(ba, &both()).unwrap();
+        alice.s.call_start(ab, &both(), false, vec![]).unwrap();
+        bob.s.call_start(ba, &both(), false, vec![]).unwrap();
         connect(&mut alice, &mut bob);
         let (a, b) = (alice.s.call_now().unwrap(), bob.s.call_now().unwrap());
         assert_eq!(a.id, b.id, "one call");
@@ -1151,15 +1774,15 @@ mod tests {
         let (mut alice, _bob, ab, _) = friends();
         let notes = alice.s.store.chats().unwrap().into_iter().find(|(_, m)| m.kind == ChatKind::Notes);
         if let Some((notes, _)) = notes {
-            assert!(alice.s.call_start(notes, &both()).is_err());
+            assert!(alice.s.call_start(notes, &both(), false, vec![]).is_err());
         }
         // A friend who hasn't added us back yet.
         let mut dave = Phone::new();
         let ad = alice.s.add_friend(&dave.s.my_code("Dave"), true).unwrap().chat_id;
-        assert!(alice.s.call_start(ad, &both()).is_err());
-        alice.s.call_start(ab, &both()).unwrap();
+        assert!(alice.s.call_start(ad, &both(), false, vec![]).is_err());
+        alice.s.call_start(ab, &both(), false, vec![]).unwrap();
         let _ = &mut dave;
-        assert!(matches!(alice.s.call_start(ab, &both()), Err(SessionError::InCall)));
+        assert!(matches!(alice.s.call_start(ab, &both(), false, vec![]), Err(SessionError::InCall)));
     }
 
     #[test]
@@ -1167,7 +1790,7 @@ mod tests {
         let (alice, bob, _, _) = talking();
         let t0 = Instant::now();
         for i in 0..4u8 {
-            let (to, frame) = alice.s.media().seal_audio(&[i; 60]).unwrap();
+            let Outgoing { peer: to, frame, .. } = alice.s.media().seal_audio(&[i; 60]).unwrap();
             assert_eq!(to, bob.pk());
             let Frame::CallMedia { call, seq, sealed } = &frame else { panic!() };
             assert!(!sealed.windows(60).any(|w| w == [i; 60]), "sealed");
@@ -1178,7 +1801,7 @@ mod tests {
         assert_eq!(hub.pull_audio_at(t), Pulled::Packet(vec![0; 60]));
         assert_eq!(hub.pull_audio_at(t), Pulled::Packet(vec![1; 60]));
         // And back, through the session like any frame.
-        let (_, frame) = bob.s.media().seal_audio(b"hello").unwrap();
+        let frame = bob.s.media().seal_audio(b"hello").unwrap().frame;
         let mut alice = alice;
         assert!(alice.s.on_frame(&bob.pk(), frame.clone()).unwrap().is_empty());
         let Frame::CallMedia { call, seq, sealed } = frame else { panic!() };
@@ -1189,7 +1812,7 @@ mod tests {
     fn media_is_taken_only_once_only_from_the_peer_and_only_with_the_key() {
         let (alice, bob, _, _) = talking();
         let hub = bob.s.media();
-        let (_, frame) = alice.s.media().seal_audio(b"one").unwrap();
+        let frame = alice.s.media().seal_audio(b"one").unwrap().frame;
         let Frame::CallMedia { call, seq, sealed } = frame else { panic!() };
         // From someone else (even with the right bytes): refused.
         let carol = Phone::new();
@@ -1197,7 +1820,7 @@ mod tests {
         assert!(hub.receive(&alice.pk(), &call, seq, &sealed));
         assert!(!hub.receive(&alice.pk(), &call, seq, &sealed), "replayed");
         // Changed on the way, or under another number: refused.
-        let (_, frame) = alice.s.media().seal_audio(b"two").unwrap();
+        let frame = alice.s.media().seal_audio(b"two").unwrap().frame;
         let Frame::CallMedia { call, seq, mut sealed } = frame else { panic!() };
         assert!(!hub.receive(&alice.pk(), &call, seq + 5, &sealed));
         sealed[0] ^= 1;
@@ -1208,7 +1831,7 @@ mod tests {
         assert!(!hub.receive(&alice.pk(), &call, 50, &forged));
         assert!(!hub.receive(&alice.pk(), &[1; 16], 51, &sealed));
         // Our own packets reflected back: the wrong direction.
-        let (_, own) = bob.s.media().seal_audio(b"mine").unwrap();
+        let own = bob.s.media().seal_audio(b"mine").unwrap().frame;
         let Frame::CallMedia { call, seq, sealed } = own else { panic!() };
         assert!(!hub.receive(&alice.pk(), &call, seq + 100, &sealed));
     }
@@ -1217,12 +1840,12 @@ mod tests {
     fn nothing_is_sent_or_kept_unless_talking() {
         let (mut alice, mut bob, ab, _) = friends();
         assert!(alice.s.media().seal_audio(b"hi").is_none());
-        alice.s.call_start(ab, &both()).unwrap();
+        alice.s.call_start(ab, &both(), false, vec![]).unwrap();
         assert!(alice.s.media().seal_audio(b"hi").is_none(), "not answered yet");
         connect(&mut alice, &mut bob);
         assert!(bob.s.media().seal_audio(b"hi").is_none(), "ringing");
-        bob.s.call_answer(&both()).unwrap();
-        let (_, frame) = bob.s.media().seal_audio(b"hi").unwrap();
+        bob.s.call_answer(&both(), false, vec![]).unwrap();
+        let frame = bob.s.media().seal_audio(b"hi").unwrap().frame;
         bob.s.call_end().unwrap();
         assert!(bob.s.media().seal_audio(b"hi").is_none(), "hung up");
         // Media never lands in the outbox.
@@ -1404,5 +2027,334 @@ mod tests {
             jb.push(i, vec![], t0);
         }
         assert!(jb.held_ms() <= HELD_MAX_MS);
+    }
+
+    // ---- Video ----
+
+    use crate::video::{Backlog, FrameInfo, AUDIO_BACKLOG, H264, VP8};
+
+    fn vcaps(play: &[&str], record: &[&str]) -> CallCaps {
+        CallCaps {
+            video_play: play.iter().map(|s| s.to_string()).collect(),
+            video_record: record.iter().map(|s| s.to_string()).collect(),
+            ..both()
+        }
+    }
+
+    fn video_caps() -> CallCaps {
+        vcaps(&[H264, VP8], &[H264])
+    }
+
+    /// Alice video-calls Bob and he answers with his camera on too.
+    fn video_talking() -> (Phone, Phone, i64, i64) {
+        let (mut alice, mut bob, ab, ba) = friends();
+        alice.s.call_start(ab, &video_caps(), true, vec![]).unwrap();
+        connect(&mut alice, &mut bob);
+        bob.s.call_answer(&video_caps(), true, vec![]).unwrap().unwrap();
+        connect(&mut bob, &mut alice);
+        alice.s.take_events();
+        bob.s.take_events();
+        // Camera news queued at the start isn't needed here.
+        alice.s.media().take_out();
+        bob.s.media().take_out();
+        (alice, bob, ab, ba)
+    }
+
+    /// Hands `out` (over the link) to the other phone's media.
+    fn deliver(out: Vec<Outgoing>, from: &Phone, to: &Phone, at: Instant) -> usize {
+        let hub = to.s.media();
+        out.into_iter()
+            .filter(|o| o.route == Route::Link)
+            .filter(|o| {
+                let Frame::CallMedia { call, seq, sealed } = &o.frame else { panic!() };
+                hub.receive_at(&from.pk(), call, *seq, sealed, at)
+            })
+            .count()
+    }
+
+    fn key(key: bool) -> FrameInfo {
+        FrameInfo { key, rotation: 90, width: 320, height: 240 }
+    }
+
+    #[test]
+    fn video_calls_agree_on_formats_each_way() {
+        let (mut alice, mut bob, ab, ba) = friends();
+        // Alice records H.264 only; Bob records VP8 and plays only H.264.
+        let (_, view) = alice.s.call_start(ab, &vcaps(&[H264, VP8], &[H264]), true, vec![]).unwrap();
+        assert!(view.video);
+        connect(&mut alice, &mut bob);
+        assert!(bob.s.call_now().unwrap().video, "rings as a video call");
+        bob.s.call_answer(&vcaps(&[H264], &[VP8]), true, vec![]).unwrap();
+        let b = bob.s.call_now().unwrap();
+        assert_eq!((b.send_video.as_str(), b.recv_video.as_str()), (VP8, H264));
+        connect(&mut bob, &mut alice);
+        let a = alice.s.call_now().unwrap();
+        assert_eq!((a.send_video.as_str(), a.recv_video.as_str(), a.video), (H264, VP8, true));
+        let (ai, bi) = (alice.s.media().info().unwrap(), bob.s.media().info().unwrap());
+        assert_eq!((ai.camera, ai.peer_camera), (Camera::On, Camera::On));
+        assert_eq!((bi.camera, bi.peer_camera), (Camera::On, Camera::On));
+        assert!(ai.can_send_video && ai.can_receive_video);
+        alice.s.call_end().unwrap();
+        connect(&mut alice, &mut bob);
+        assert_eq!(logs(&alice, ab), [(true, "Video call · 0:00".to_string())]);
+        assert_eq!(logs(&bob, ba), [(false, "Video call · 0:00".to_string())]);
+    }
+
+    #[test]
+    fn a_phone_without_video_answers_with_sound_only() {
+        let (mut alice, mut bob, ab, _) = friends();
+        alice.s.call_start(ab, &video_caps(), true, vec![]).unwrap();
+        connect(&mut alice, &mut bob);
+        // An older or camera-less phone: no video formats at all.
+        bob.s.call_answer(&both(), true, vec![]).unwrap();
+        connect(&mut bob, &mut alice);
+        let a = alice.s.call_now().unwrap();
+        assert_eq!((a.phase, a.send_video.as_str(), a.recv_video.as_str()), (Phase::Active, "", ""));
+        let hub = alice.s.media();
+        let info = hub.info().unwrap();
+        assert_eq!((info.camera, info.can_send_video), (Camera::Off, false));
+        assert!(!hub.set_camera(Camera::On), "nothing to send pictures to");
+        assert!(hub.seal_video(&[1; 100], key(true), |_, _| true).packets.is_empty());
+        assert!(hub.seal_audio(b"still talking").is_some());
+    }
+
+    #[test]
+    fn either_side_turns_its_camera_on_and_off_during_a_voice_call() {
+        let (mut alice, mut bob, ab, _) = friends();
+        alice.s.call_start(ab, &video_caps(), false, vec![]).unwrap();
+        connect(&mut alice, &mut bob);
+        assert!(!bob.s.call_now().unwrap().video, "a voice call");
+        bob.s.call_answer(&video_caps(), false, vec![]).unwrap();
+        connect(&mut bob, &mut alice);
+        let (a, b) = (alice.s.media(), bob.s.media());
+        assert_eq!(b.info().unwrap().peer_camera, Camera::Off);
+        let t = Instant::now();
+        for state in [Camera::On, Camera::Paused, Camera::Off, Camera::On] {
+            assert!(a.set_camera_at(state, t));
+            assert_eq!(deliver(a.take_out(), &alice, &bob, t), 1);
+            assert_eq!(b.info().unwrap().peer_camera, state);
+        }
+        // And Bob's way.
+        assert!(b.set_camera_at(Camera::On, t));
+        deliver(b.take_out(), &bob, &alice, t);
+        assert_eq!(a.info().unwrap().peer_camera, Camera::On);
+        // A lost "camera off" is repeated every couple of seconds.
+        b.set_camera_at(Camera::Off, t);
+        b.take_out();
+        b.tick(t + Duration::from_millis(500), false);
+        assert!(b.take_out().is_empty(), "not yet");
+        b.tick(t + CAMERA_EVERY, false);
+        deliver(b.take_out(), &bob, &alice, t);
+        assert_eq!(a.info().unwrap().peer_camera, Camera::Off);
+        alice.s.call_end().unwrap();
+        assert!(logs(&alice, ab)[0].1.starts_with("Video call"), "pictures went both ways");
+    }
+
+    #[test]
+    fn frames_cross_sealed_and_a_loss_brings_a_keyframe() {
+        let (alice, bob, _, _) = video_talking();
+        let (a, b) = (alice.s.media(), bob.s.media());
+        let t = Instant::now();
+        // The first frame must be a keyframe.
+        let sent = a.seal_video_at(&[7; 3000], key(false), |_, _| true, t);
+        assert!(sent.packets.is_empty() && sent.want_key);
+        let frame = |n: u8, len: usize| -> Vec<u8> { (0..len).map(|i| (i as u8).wrapping_mul(n)).collect() };
+        let mut packets = Vec::new();
+        for n in 0..5u8 {
+            let sent = a.seal_video_at(&frame(n + 1, 2500), key(n == 0), |r, _| r == Route::Link, t);
+            assert_eq!(sent.packets.len(), 3, "fragments");
+            assert!(!sent.want_key);
+            packets.push(sent.packets);
+        }
+        // Frame 2 loses a fragment on the way.
+        packets[2].remove(1);
+        for p in packets {
+            deliver(p, &alice, &bob, t);
+        }
+        let first = b.pull_video_at(t).unwrap();
+        assert_eq!((first.number, first.info, first.data.clone()), (0, key(true), frame(1, 2500)));
+        assert_eq!(b.pull_video_at(t).unwrap().number, 1);
+        assert!(b.pull_video_at(t + Duration::from_millis(200)).is_none(), "3 and 4 can't be shown");
+        // Bob asks for a keyframe; Alice's encoder hears about it.
+        b.tick(t + Duration::from_millis(200), false);
+        assert_eq!(deliver(b.take_out(), &bob, &alice, t), 1);
+        let target = a.video_target_at(t).unwrap();
+        assert!(target.key_now);
+        assert!(target.quality.bitrate < video::PRIVATE.start, "and steps down");
+        assert!(!a.video_target_at(t + Duration::from_millis(10)).unwrap().key_now, "once");
+        let sent = a.seal_video_at(&frame(9, 900), key(true), |_, _| true, t);
+        deliver(sent.packets, &alice, &bob, t);
+        assert_eq!(b.pull_video_at(t + Duration::from_millis(300)).unwrap().data, frame(9, 900));
+    }
+
+    #[test]
+    fn pictures_wait_for_their_sound() {
+        let (alice, bob, _, _) = video_talking();
+        let (a, b) = (alice.s.media(), bob.s.media());
+        let (t, r) = (Instant::now(), Instant::now() + Duration::from_secs(1));
+        let ms = |n: u64| Duration::from_millis(n);
+        let mut shown = None;
+        for k in 0..20u64 {
+            // Sound made every 40 ms arrives steadily...
+            let out = a.seal_audio_at(&[k as u8; 50], t + ms(40 * k)).unwrap();
+            deliver(vec![out], &alice, &bob, r + ms(40 * k));
+            // ...and a picture made at 300 ms arrives with it.
+            if k == 8 {
+                let sent = a.seal_video_at(&[1; 500], key(true), |_, _| true, t + ms(300));
+                deliver(sent.packets, &alice, &bob, r + ms(40 * k));
+            }
+            assert!(matches!(b.pull_audio_at(r + ms(40 * k)), Pulled::Packet(_) | Pulled::Silence));
+            if shown.is_none() && b.pull_video_at(r + ms(40 * k)).is_some() {
+                shown = Some(k);
+            }
+        }
+        // Shown once the sound made at about 300 ms leaves the speaker, not
+        // as soon as it arrived (k = 8).
+        let shown = shown.expect("shown");
+        assert!((10..=12).contains(&shown), "{shown}");
+    }
+
+    #[test]
+    fn a_full_link_drops_pictures_and_never_sound() {
+        let (alice, _bob, _, _) = video_talking();
+        let hub = alice.s.media();
+        let link = Backlog::default(); // a link that writes nothing for now
+        let t = Instant::now();
+        let start = hub.video_target_at(t).unwrap().quality.bitrate;
+        let sent = hub.seal_video_at(&[1; 12_000], key(true), |_, bytes| link.take_video(bytes), t);
+        assert!(!sent.packets.is_empty());
+        // Ordinary frames until the queue is full.
+        let mut taken = 0;
+        let refused = loop {
+            let sent = hub.seal_video_at(&[2; 3000], key(false), |_, bytes| link.take_video(bytes), t);
+            if sent.packets.is_empty() {
+                break sent;
+            }
+            taken += 1;
+        };
+        assert!(taken > 3, "{taken}");
+        assert!(refused.want_key, "a fresh keyframe next");
+        // Sound still goes, as much as a link may hold.
+        for _ in 0..AUDIO_BACKLOG {
+            assert!(hub.seal_audio_at(b"sound", t).is_some());
+            assert!(link.take_audio());
+        }
+        // Even with room again, only a keyframe goes now.
+        let sent = hub.seal_video_at(&[3; 3000], key(false), |_, _| true, t);
+        assert!(sent.packets.is_empty() && sent.want_key);
+        assert!(hub.seal_video_at(&[3; 3000], key(true), |_, _| true, t).packets.len() == 3);
+        assert!(hub.video_target_at(t).unwrap().quality.bitrate < start, "quality stepped down");
+    }
+
+    // ---- Faster calls ----
+
+    fn route(a: &str) -> Vec<u8> {
+        crate::direct::encode_route(a.parse().unwrap())
+    }
+
+    /// Where a phone's media wants to send probes now.
+    fn probes(p: &Phone, at: Instant) -> Vec<SocketAddr> {
+        let hub = p.s.media();
+        hub.tick(at, false);
+        hub.take_out()
+            .into_iter()
+            .filter_map(|o| if let Route::Direct(to) = o.route { Some(to) } else { None })
+            .collect()
+    }
+
+    /// Alice calls Bob offering `a` routes; Bob answers offering `b`.
+    fn direct_call(a: Vec<Vec<u8>>, b: Vec<Vec<u8>>) -> (Phone, Phone) {
+        let (mut alice, mut bob, ab, _) = friends();
+        alice.s.call_start(ab, &both(), false, a).unwrap();
+        assert!(probes(&alice, Instant::now()).is_empty(), "nothing direct before an answer");
+        connect(&mut alice, &mut bob);
+        assert!(probes(&bob, Instant::now()).is_empty(), "nor while ringing");
+        bob.s.call_answer(&both(), false, b).unwrap();
+        connect(&mut bob, &mut alice);
+        (alice, bob)
+    }
+
+    #[test]
+    fn direct_routes_are_used_only_when_both_phones_offer_them() {
+        let (a, b) = ("192.168.1.10:4000", "[2401:4900:1c2a::17]:5000");
+        let (alice, bob) = direct_call(vec![route(a)], vec![route(b)]);
+        let t = Instant::now();
+        assert_eq!(probes(&alice, t), [b.parse::<SocketAddr>().unwrap()]);
+        assert_eq!(probes(&bob, t), [a.parse::<SocketAddr>().unwrap()]);
+        assert!(alice.s.call_now().unwrap().peer_routes && bob.s.call_now().unwrap().peer_routes);
+
+        // Alice has it off: Bob keeps his address to himself.
+        let (alice, bob) = direct_call(vec![], vec![route(b)]);
+        assert!(!bob.s.call_now().unwrap().peer_routes);
+        assert!(!alice.s.call_now().unwrap().peer_routes, "Bob's answer carried no routes");
+        assert!(probes(&alice, t).is_empty() && probes(&bob, t).is_empty());
+
+        // Bob has it off: Alice's offer goes unused.
+        let (alice, bob) = direct_call(vec![route(a)], vec![]);
+        assert!(bob.s.call_now().unwrap().peer_routes, "Alice offered");
+        assert!(probes(&alice, t).is_empty() && probes(&bob, t).is_empty());
+
+        // Only the friend's own addresses elsewhere are ever sent to.
+        let (alice, _bob) = direct_call(vec![route(a)], vec![route("127.0.0.1:5000"), route("224.0.0.9:5000")]);
+        assert!(probes(&alice, t).is_empty());
+    }
+
+    /// Hands every direct packet in `out` to `to`, as arriving from `from`.
+    fn over_udp(out: Vec<Outgoing>, from: SocketAddr, to: &Phone, at: Instant) -> usize {
+        let hub = to.s.media();
+        out.iter()
+            .filter_map(|o| o.datagram())
+            .filter(|(_, d)| {
+                let (call, seq, sealed) = crate::direct::decode_datagram(d).unwrap();
+                hub.receive_direct_at(from, &call, seq, sealed, at)
+            })
+            .count()
+    }
+
+    #[test]
+    fn probes_find_a_direct_path_and_the_call_falls_back_when_it_dies() {
+        let (a, b): (SocketAddr, SocketAddr) = ("192.168.1.10:4000".parse().unwrap(), "192.168.1.11:5000".parse().unwrap());
+        let (alice, bob) = direct_call(vec![route(&a.to_string())], vec![route(&b.to_string())]);
+        let (ha, hb) = (alice.s.media(), bob.s.media());
+        let t = Instant::now();
+        assert_eq!(ha.seal_audio_at(b"x", t).unwrap().route, Route::Link, "over the link at first");
+        // Both probe at once; each answers the other's probes.
+        ha.tick(t, false);
+        hb.tick(t, false);
+        let (from_alice, from_bob) = (ha.take_out(), hb.take_out());
+        assert_eq!(over_udp(from_alice, a, &bob, t), 1);
+        assert_eq!(over_udp(from_bob, b, &alice, t), 1);
+        let (acks_from_alice, acks_from_bob) = (ha.take_out(), hb.take_out());
+        assert_eq!(over_udp(acks_from_bob, b, &alice, t), 1);
+        assert_eq!(over_udp(acks_from_alice, a, &bob, t), 1);
+        assert!(ha.info().unwrap().direct && hb.info().unwrap().direct);
+        let out = ha.seal_audio_at(b"direct", t).unwrap();
+        assert_eq!(out.route, Route::Direct(b));
+        // The same sealed packets: the friend hears them over UDP.
+        assert_eq!(over_udp(vec![out.clone()], a, &bob, t), 1);
+        assert_eq!(over_udp(vec![out], a, &bob, t), 0, "once");
+        // Not from an address the friend didn't list (a spoofed source).
+        let stray = ha.seal_audio_at(b"stray", t).unwrap();
+        assert_eq!(over_udp(vec![stray], "10.9.9.9:4000".parse().unwrap(), &bob, t), 0);
+        // On a nearby or direct path, pictures may be sharper.
+        ha.tick(t, false);
+        ha.take_out();
+        assert_eq!(ha.info().unwrap().quality.height, crate::video::FAST.height);
+
+        // Keepalives keep it up...
+        let t2 = t + Duration::from_secs(2);
+        hb.tick(t2, false);
+        assert_eq!(over_udp(hb.take_out(), b, &alice, t2), 1);
+        ha.take_out();
+        ha.tick(t + Duration::from_secs(4), false);
+        ha.take_out();
+        assert!(ha.info().unwrap().direct);
+        // ...and when nothing comes for a while, back to the link, probing
+        // again.
+        let t3 = t2 + crate::direct::DEAD_AFTER + Duration::from_millis(10);
+        assert_eq!(probes(&alice, t3), [b]);
+        assert!(!ha.info().unwrap().direct);
+        assert_eq!(ha.seal_audio_at(b"x", t3).unwrap().route, Route::Link);
+        assert_eq!(ha.info().unwrap().quality.height, crate::video::PRIVATE.height);
     }
 }

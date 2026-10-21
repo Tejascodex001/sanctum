@@ -4,6 +4,7 @@
 //! the app that is [`tor::Tor`], where every phone is an onion service
 //! whose key is its identity key.
 
+pub mod direct;
 pub mod engine;
 pub mod fedi;
 pub mod https;

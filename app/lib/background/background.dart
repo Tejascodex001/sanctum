@@ -3,6 +3,13 @@ import 'package:flutter/services.dart';
 import '../identity/secrets.dart';
 import '../security/app_lock.dart';
 
+/// What a phone can play and record in calls, best first.
+typedef CallCodecs = ({List<String> play, List<String> record, List<String> videoPlay, List<String> videoRecord});
+
+/// How to show a call's picture: its size, how far to turn it clockwise,
+/// and whether to mirror it (our own front camera).
+typedef VideoFormat = ({String which, int width, int height, int rotation, bool mirror});
+
 /// Staying reachable while the app is closed: an Android foreground service
 /// keeps the process (and Tor) alive, and notifications are posted on the
 /// phone itself. See SanctumApplication.kt and ConnectionService.kt.
@@ -127,13 +134,19 @@ abstract final class Background {
     _bg.setMethodCallHandler((call) async => _handlers[call.method]?.call(call.arguments));
   }
 
-  // ---- Calls (see CallAudio.kt and SanctumApplication.kt) ----
+  // ---- Calls (see CallAudio.kt, CallVideo.kt and SanctumApplication.kt) ----
 
-  /// The sound formats this phone can play and record into, best first.
-  static Future<({List<String> play, List<String> record})> callCodecs() async {
+  /// The sound and video formats this phone can play and record into,
+  /// best first (no video recording without a camera).
+  static Future<CallCodecs> callCodecs() async {
     final m = await _call<Map<Object?, Object?>>(_bg, 'callCodecs');
     List<String> list(Object? l) => [for (final c in (l as List<Object?>?) ?? const []) c! as String];
-    return (play: list(m?['play']), record: list(m?['record']));
+    return (
+      play: list(m?['play']),
+      record: list(m?['record']),
+      videoPlay: list(m?['videoPlay']),
+      videoRecord: list(m?['videoRecord']),
+    );
   }
 
   static Future<bool> callAudioStart({required String send, required String recv, required bool speaker}) async =>
@@ -146,9 +159,45 @@ abstract final class Background {
   static Future<void> callRing(String title) => _call(_bg, 'callRing', {'title': title});
   static Future<void> callRingStop() => _call(_bg, 'callRingStop');
 
-  /// Keeps the microphone going with the screen off or in another app.
-  static Future<void> callServiceStart(String title) => _call(_bg, 'callServiceStart', {'title': title});
+  /// Keeps the microphone (and, with `camera`, the camera) going with the
+  /// screen off or in another app. Called again when the camera turns on
+  /// or off.
+  static Future<void> callServiceStart(String title, {bool camera = false}) =>
+      _call(_bg, 'callServiceStart', {'title': title, 'camera': camera});
   static Future<void> callServiceStop() => _call(_bg, 'callServiceStop');
+
+  /// Opens the call's two pictures (ours and the friend's) as textures to
+  /// show with `Texture`. `send` and `recv`: the agreed video formats.
+  static Future<({int local, int remote})?> callVideoOpen({required String send, required String recv}) async {
+    final m = await _call<Map<Object?, Object?>>(_bg, 'callVideoOpen', {'send': send, 'recv': recv});
+    if (m == null) return null;
+    return (local: m['local']! as int, remote: m['remote']! as int);
+  }
+
+  static Future<void> callVideoClose() => _call(_bg, 'callVideoClose');
+
+  /// Turns our camera on (front or back) or off. False if it couldn't start.
+  static Future<bool> callCamera({required bool on, bool front = true}) async =>
+      await _call<bool>(_bg, 'callCamera', {'on': on, 'front': front}) ?? false;
+
+  /// The camera permission (asked once).
+  static Future<bool> requestCamera() =>
+      AppLock.whileAway(() async => await _call<bool>(_app, 'requestCamera') ?? false);
+
+  /// A picture's shape changed: which ("local" or "remote"), its size, how
+  /// far to turn it clockwise, and whether to mirror it.
+  static void onCallVideoFormat(void Function(VideoFormat format) handler) {
+    _listen('callVideoFormat', (args) {
+      final m = args! as Map<Object?, Object?>;
+      handler((
+        which: m['which']! as String,
+        width: m['width']! as int,
+        height: m['height']! as int,
+        rotation: m['rotation']! as int,
+        mirror: m['mirror'] == true,
+      ));
+    });
+  }
 
   /// Shows the app over the lock screen (while a call rings or goes on).
   static Future<void> callShowOverLock(bool on) => _call(_app, 'callShowOverLock', {'on': on});

@@ -5,6 +5,7 @@ import '../identity/secrets.dart';
 import '../security/panic.dart';
 import '../security/pin_settings.dart';
 import '../sigil/sigil_painter.dart';
+import '../src/rust/api/call.dart';
 import '../src/rust/api/fedi.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
@@ -14,8 +15,8 @@ import 'connection_settings.dart';
 import '../sigil/sigil_look.dart';
 
 /// Everything you can change, opened from your sigil: your name, how the
-/// app looks, the lock, staying connected, nearby, updates and the panic
-/// wipe.
+/// app looks, calls, Reels, the lock, staying connected, nearby, updates and
+/// the panic wipe.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.mySigil});
 
@@ -119,6 +120,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const _Section('APPEARANCE'),
           _Group(children: [_AppearanceSettings(sigilAccent: sigil.accent.color)]),
+          const _Section('CALLS'),
+          const _Group(children: [CallsSettings()]),
           const _Section('REELS'),
           const _Group(children: [_ReelsSettings()]),
           const _Section('LOCK'),
@@ -283,6 +286,53 @@ class _Swatch extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// Calls through Tor (private, a little slower) or straight between the
+/// phones when both friends allow it ("Faster calls").
+class CallsSettings extends StatefulWidget {
+  const CallsSettings({super.key});
+
+  @override
+  State<CallsSettings> createState() => _CallsSettingsState();
+}
+
+class _CallsSettingsState extends State<CallsSettings> {
+  bool? _direct;
+
+  @override
+  void initState() {
+    super.initState();
+    callsDirect().then((on) {
+      if (mounted) setState(() => _direct = on);
+    }, onError: (_) {
+      if (mounted) setState(() => _direct = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final direct = _direct;
+    if (direct == null) return const SizedBox(height: 64);
+    return SwitchListTile(
+      value: direct,
+      title: const Text('Faster calls'),
+      subtitle: Text(
+        direct
+            ? 'When a friend has this on too, calls connect straight between your phones: less delay and sharper '
+                'video, but their phone learns your internet address. Your messages stay private either way.'
+            : 'Calls go privately through Tor, so nobody learns who you talk to, with a little delay. Turn on to '
+                'connect straight between your phones when a friend has it on too: less delay, but their phone '
+                'learns your internet address.',
+        style: AppText.caption,
+      ),
+      onChanged: (v) async {
+        HapticFeedback.selectionClick();
+        setState(() => _direct = v);
+        await callsSetDirect(enabled: v);
+      },
+    );
+  }
 }
 
 /// Reels through Tor (private, slower) or straight from the sites (fast).

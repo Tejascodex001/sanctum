@@ -3,6 +3,7 @@
 
 pub mod base32;
 pub mod call;
+pub mod direct;
 mod group;
 pub mod identity;
 pub mod invite;
@@ -22,3 +23,4 @@ pub mod store;
 pub mod temp_chat;
 pub mod transport;
 pub mod typing;
+pub mod video;

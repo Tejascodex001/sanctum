@@ -173,13 +173,20 @@ class AlbumView {
 class CallLogView {
   final CallOutcomeView outcome;
 
+  /// A video call.
+  final bool video;
+
   /// How long we talked.
   final int seconds;
 
-  const CallLogView({required this.outcome, required this.seconds});
+  const CallLogView({
+    required this.outcome,
+    required this.video,
+    required this.seconds,
+  });
 
   @override
-  int get hashCode => outcome.hashCode ^ seconds.hashCode;
+  int get hashCode => outcome.hashCode ^ video.hashCode ^ seconds.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -187,6 +194,7 @@ class CallLogView {
       other is CallLogView &&
           runtimeType == other.runtimeType &&
           outcome == other.outcome &&
+          video == other.video &&
           seconds == other.seconds;
 }
 

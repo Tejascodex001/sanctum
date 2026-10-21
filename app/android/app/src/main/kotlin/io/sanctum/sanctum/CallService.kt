@@ -10,12 +10,15 @@ import androidx.core.app.NotificationCompat
 
 /**
  * Runs while a call is ringing out or going on, so Android keeps the
- * microphone and the process going when the screen is off or another app
- * is open. Its notification says a call is on and offers to hang up.
+ * microphone (and, while our camera is on, the camera) and the process
+ * going when the screen is off or another app is open. Its notification
+ * says a call is on and offers to hang up. Started again whenever the
+ * camera turns on or off, to say which it uses.
  */
 class CallService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Sanctum"
+        val camera = intent?.getBooleanExtra(EXTRA_CAMERA, false) == true
         val hangUp = PendingIntent.getBroadcast(
             this,
             7,
@@ -25,7 +28,7 @@ class CallService : Service() {
         val notification = NotificationCompat.Builder(this, SanctumApplication.CHANNEL_CALL_ONGOING)
             .setSmallIcon(R.drawable.ic_stat_sanctum)
             .setContentTitle(title)
-            .setContentText("Call in progress")
+            .setContentText(if (camera) "Video call in progress" else "Call in progress")
             .setOngoing(true)
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_CALL)
@@ -35,7 +38,14 @@ class CallService : Service() {
             .build()
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                val microphone = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                val types = if (camera) microphone or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA else microphone
+                try {
+                    startForeground(ID, notification, types)
+                } catch (e: Exception) {
+                    // The camera isn't allowed right now: sound only.
+                    startForeground(ID, notification, microphone)
+                }
             } else {
                 startForeground(ID, notification)
             }
@@ -52,5 +62,6 @@ class CallService : Service() {
     companion object {
         const val ID = 4
         const val EXTRA_TITLE = "title"
+        const val EXTRA_CAMERA = "camera"
     }
 }

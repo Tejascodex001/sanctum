@@ -62,6 +62,8 @@ pub struct MessageView {
 
 pub struct CallLogView {
     pub outcome: CallOutcomeView,
+    /// A video call.
+    pub video: bool,
     /// How long we talked.
     pub seconds: u32,
 }
@@ -79,7 +81,7 @@ fn call_log_view(log: sanctum_core::store::CallLog) -> CallLogView {
         Outcome::Dropped => CallOutcomeView::Dropped,
         Outcome::Cancelled => CallOutcomeView::Cancelled,
     };
-    CallLogView { outcome, seconds: log.seconds }
+    CallLogView { outcome, video: log.video, seconds: log.seconds }
 }
 
 /// Everyone who reacted to a message with one emoji.

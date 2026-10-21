@@ -373,10 +373,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// Calls the friend (the call screen takes over from here).
-  Future<void> _call() async {
+  /// Calls the friend, with the camera on for a video call (the call
+  /// screen takes over from here).
+  Future<void> _call({bool video = false}) async {
     HapticFeedback.selectionClick();
-    final problem = await CallController.instance.startCall(widget.card.id, widget.card.title);
+    final problem = await CallController.instance.startCall(widget.card.id, widget.card.title, video: video);
     if (problem != null && mounted) {
       ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(problem)));
     }
@@ -416,6 +417,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   card: widget.card,
                   onBack: widget.close,
                   onCall: widget.card.friend && !widget.card.temp && !widget.card.group ? _call : null,
+                  onVideoCall:
+                      widget.card.friend && !widget.card.temp && !widget.card.group ? () => _call(video: true) : null,
                   onWipe: widget.onWipe == null ? null : _doWipe,
                   onInfo: widget.onGroupInfo,
                 ),
@@ -497,7 +500,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
             key: ValueKey(index),
             message: m,
             accent: accent,
-            onTap: _call,
+            onTap: () => _call(video: m.call?.video ?? false),
             onLongPress: () => _actions(m),
           );
         }
@@ -909,15 +912,23 @@ class _RotatingImageState extends State<_RotatingImage> with SingleTickerProvide
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.card, required this.onBack, this.onWipe, this.onInfo, this.onCall});
+  const _Header({
+    required this.card,
+    required this.onBack,
+    this.onWipe,
+    this.onInfo,
+    this.onCall,
+    this.onVideoCall,
+  });
 
   final ChatCard card;
   final VoidCallback onBack;
   final VoidCallback? onWipe;
   final VoidCallback? onInfo;
 
-  /// Friends' chats: a voice call.
+  /// Friends' chats: a voice call, or a video call.
   final VoidCallback? onCall;
+  final VoidCallback? onVideoCall;
 
   @override
   Widget build(BuildContext context) {
@@ -988,6 +999,12 @@ class _Header extends StatelessWidget {
           ),
           if (onInfo != null)
             IconButton(tooltip: 'Group info', icon: const Icon(Icons.groups_rounded, size: 20), onPressed: onInfo),
+          if (onVideoCall != null)
+            IconButton(
+              tooltip: 'Video call',
+              icon: const Icon(Icons.videocam_rounded, size: 21),
+              onPressed: onVideoCall,
+            ),
           if (onCall != null)
             IconButton(tooltip: 'Call', icon: const Icon(Icons.call_rounded, size: 20), onPressed: onCall),
           _ShotsButton(chatKey: card.temp ? Notifier.tempKey(card.id) : Notifier.chatKey(card.id)),
@@ -1859,11 +1876,14 @@ class _CallRecord extends StatelessWidget {
     final missed = !m.fromMe && outcome == CallOutcomeView.missed;
     final talked = outcome == CallOutcomeView.talked || outcome == CallOutcomeView.dropped;
     final color = missed ? Palette.danger : (talked ? accent : Palette.textMuted);
-    final icon = missed
-        ? Icons.phone_missed_rounded
-        : m.fromMe
-            ? Icons.call_made_rounded
-            : Icons.call_received_rounded;
+    final video = m.call?.video ?? false;
+    final icon = switch ((missed, video, m.fromMe)) {
+      (true, true, _) => Icons.missed_video_call_rounded,
+      (true, false, _) => Icons.phone_missed_rounded,
+      (false, true, _) => Icons.videocam_rounded,
+      (false, false, true) => Icons.call_made_rounded,
+      (false, false, false) => Icons.call_received_rounded,
+    };
     final t = m.sentAt;
     final time = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
     return Center(
