@@ -6,7 +6,9 @@
 //!
 //! There's no account and nothing is posted: the app only reads public
 //! feeds, and which servers it reads stays on the phone. Every request goes
-//! through Tor, so servers see a Tor exit, never the phone.
+//! through the `Connect` it's given: Tor by default, so servers see a Tor
+//! exit, never the phone. (In the opt-in fast mode the app passes
+//! [`https::direct`] instead, and servers see the phone's address.)
 
 use crate::https::{self, Connect};
 use serde_json::Value;

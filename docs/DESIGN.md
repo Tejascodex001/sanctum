@@ -119,6 +119,24 @@ Polls, date polls and plans (`core/src/poll.rs`), in friends' chats and groups.
 - In groups an answer can arrive before its poll. It waits in the sealed key-value table (up to 200 per poll) until the poll comes.
 - Choices are checked on every phone: unknown ones are dropped, and only the first counts when a poll allows one answer.
 
+## Reactions
+Emoji reactions to any message with an id, in friends' chats and groups (`core/src/reaction.rs`). Not in temp chats.
+- **One per person per message.** Reacting again replaces it; reacting with nothing takes it back.
+- **On the wire:** `Content::React { id, emoji, at }` inside MLS, to everyone in the chat. It names the message by its shared id, as answers name their poll. Like answers, each carries a millisecond time and a phone keeps only each person's newest, so reactions that arrive out of order settle the same everywhere.
+- **Stored with the message** (`StoredMessage::reactions`, one `Reaction { who, emoji, at }` per person), so deleting or clearing removes them too. A reaction taken back stays as an empty entry, so an older one arriving late can't bring it back. The app shows them grouped by emoji (`ReactionView`).
+- **Checked on every phone:** trimmed, at most 32 bytes (enough for any emoji with modifiers), no control characters or line breaks. Only someone in the chat can react: it comes inside the chat's MLS group, from them.
+- In groups a reaction can arrive before its message. It waits in the sealed key-value table (up to 200 per message) until the message comes.
+- **Quiet:** a reaction refreshes the chat (`Event::Chat`) but never notifies.
+
+## Typing
+"Asha is typing…" in friends' chats and groups (`core/src/typing.rs`).
+- **Ephemeral:** `Frame::Typing` is sent only to people in the chat whose link is up right now. It is never stored, never put in the outbox and never resent; anyone not connected simply doesn't see it. It carries no text, only which chat: empty for the pair's own chat, or the group's id (which `Frame::GroupMls` already carries).
+- **Why a frame and not MLS:** an MLS message advances the sender's message counter. A signal encrypted but dropped (the friend wasn't connected) or overtaking a queued message could leave the counter ahead of a message still waiting in the outbox, and MLS keeps only a few skipped keys, so that message could become unreadable. The link already gives what a typing signal needs: over Tor it reaches the friend's own onion address, encrypted end to end, and the signed hello proves who dialed. On a nearby link (local Wi-Fi or Bluetooth) frames aren't encrypted by the link, so someone on that network could see that a signal passed, as they can already see that messages pass.
+- **Checked on arrival:** a pair's signal counts only from that friend; a group's only from a current member of it. Anything else is ignored.
+- **Pace:** the app calls `chat_typing` about every 4 seconds while someone writes. Rust sends at most one signal per chat every 3 seconds, and passes on at most one per person per chat each second. The receiver shows it until about 6 seconds pass without another, or the person's message arrives.
+- **Decoy profile:** while the decoy shows, typing is neither sent nor shown for the real profile.
+- **Older builds** don't know this frame and drop the link when one arrives; it reconnects on its own. Everyone should update.
+
 ## Shared albums
 - An album is the photos and videos in a chat that carry its id and name (`Album`, on `StoredMessage::album`). Whoever adds the first photo creates it: there's no separate album record to keep in step.
 - Album photos travel as `Content::AlbumMedia`, which is otherwise exactly like `Content::Media` (same encryption, chunks and limits). They show in the chat too, labelled with the album's name.
@@ -136,6 +154,11 @@ One photo a day for all your friends, gone 24 hours after it was shared (`core/s
 ## Reels (the Fediverse)
 A fourth tab of short public videos, full screen, one after another (`net/src/fedi.rs`, `net/src/relay.rs`).
 - **Anonymous and through Tor:** no account and nothing is posted. Every request (feeds, pictures, videos) goes through Tor with the HTTPS client, so sites see a Tor exit. The list of sites is kept sealed on the phone (`kv` "fedi:sources").
+- **Fast mode (opt-in, off by default):** Reels connect to the sites directly, without Tor, which is much quicker. The trade-off: **the sites see the phone's IP address**. It affects Reels only; friends, messages and updates always go through Tor.
+  - The setting is kept sealed on the phone (`kv` "fedi:direct"; `fedi_direct` / `fedi_set_direct`).
+  - Feeds and pictures use `https::direct()`: plain TCP to the site, then the same TLS checks as always. It refuses addresses on the phone or the local network (loopback, private, link-local, carrier NAT), so a post can't point the app at the user's router.
+  - Videos skip the relay: `fedi_video` returns the real `https://` address and the player streams it itself (Android still forbids plain HTTP anywhere but 127.0.0.1).
+  - Feeds don't wait for Tor: there's no "not connected" problem in fast mode.
 - **Only short videos** (3 minutes or less, `MAX_REEL_S`):
   - PeerTube: its search with `durationMax`, newest first, including videos the site knows from others. If a site's search won't do that, its video list is read 100 at a time and the short ones kept.
   - Mastodon-compatible sites: the local public timeline with media only, keeping short videos. Sensitive posts and live streams are left out.

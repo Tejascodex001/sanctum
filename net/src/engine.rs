@@ -60,6 +60,8 @@ enum Cmd {
     News,
     /// A better link to the same friend replaced this one.
     Close,
+    /// Send this as is, now (a typing signal: never kept or resent).
+    Send(Frame),
 }
 
 /// A live connection.
@@ -134,6 +136,22 @@ impl Node {
             return;
         }
         self.dial(peer);
+    }
+
+    /// We're writing in this chat: tells whoever in it is connected right
+    /// now. Nobody is dialed and nothing is kept for anyone else. At most
+    /// one signal per chat every few seconds (see `sanctum_core::typing`).
+    /// Returns how many got it.
+    pub fn typing(&self, chat_id: i64) -> anyhow::Result<usize> {
+        let Some((frame, to)) = self.session.lock().unwrap().typing(chat_id)? else {
+            return Ok(0);
+        };
+        Ok(to.iter().filter(|peer| self.send_live(peer, frame.clone())).count())
+    }
+
+    /// Sends `frame` to `peer` if a link to them is up; otherwise drops it.
+    fn send_live(&self, peer: &[u8; 32], frame: Frame) -> bool {
+        self.links.lock().unwrap().get(peer).is_some_and(|link| link.tx.send(Cmd::Send(frame)).is_ok())
     }
 
     /// Keeps a link open to every friend: reconnects dropped ones, and
@@ -377,6 +395,7 @@ impl Node {
                         write_frames(conn, &out).await?;
                         self.emit_session_events();
                     }
+                    Some(Cmd::Send(frame)) => write_frames(conn, &[frame]).await?,
                     Some(Cmd::Close) | None => return Ok(()),
                 },
                 _ = ping.tick() => write_frames(conn, &[Frame::Ping]).await?,
@@ -848,6 +867,46 @@ mod tests {
             *e == NetEvent::Session(Event::Chat(ba))
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn typing_goes_only_over_a_live_link() {
+        let book = Arc::default();
+        let (alice, mut bob, carol) = (phone(&book).await, phone(&book).await, phone(&book).await);
+        let (ab, ba) = befriend(&alice, &bob).await;
+        let (ac, _) = befriend(&alice, &carol).await;
+        // Alice is connected to both, with encryption set up.
+        for chat in [ab, ac] {
+            let p = alice.session.lock().unwrap().send_text(chat, "hi").unwrap().unwrap();
+            alice.node.poke(p);
+            let session = alice.session.clone();
+            until(move || session.lock().unwrap().store.messages(chat, None).unwrap()[0].delivered).await;
+        }
+        // Then Carol drops off the network.
+        book.lock().unwrap().remove(&carol.pk);
+        carol.node.shutdown_links();
+        let a = alice.node.clone();
+        until(move || !a.connected().contains(&carol.pk)).await;
+
+        assert_eq!(alice.node.typing(ab).unwrap(), 1);
+        expect(&mut bob.events, |e| {
+            *e == NetEvent::Session(Event::Typing { chat: ba, who: alice.pk, name: "Alice".into() })
+        })
+        .await;
+        assert_eq!(bob.session.lock().unwrap().store.messages(ba, None).unwrap().len(), 1, "nothing stored");
+        // Again right away: dropped on Alice's side.
+        assert_eq!(alice.node.typing(ab).unwrap(), 0);
+
+        // Carol isn't connected: she's not dialed, and nothing waits for her.
+        assert_eq!(alice.node.typing(ac).unwrap(), 0);
+        assert!(!alice.node.dialing.lock().unwrap().contains(&carol.pk));
+        {
+            let s = alice.session.lock().unwrap();
+            assert!(s.store.outbox_for(&carol.pk).unwrap().is_empty());
+            assert!(!s.pending_peers().unwrap().contains(&carol.pk));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!alice.node.connected().contains(&carol.pk));
     }
 
     #[tokio::test]

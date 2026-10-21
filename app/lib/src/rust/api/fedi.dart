@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `connect`, `kind_code`, `problem`, `save`
+// These functions are ignored because they are not marked as `pub`: `connect`, `connector`, `kind_code`, `player_url`, `problem`, `relayed`, `save`, `tor`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `eq`
 
 /// The servers Explore reads.
@@ -21,8 +21,17 @@ Future<String?> fediAddSource({required FediKind kind, required String host}) =>
 Future<void> fediRemoveSource({required FediKind kind, required String host}) =>
     RustLib.instance.api.crateApiFediFediRemoveSource(kind: kind, host: host);
 
-/// One page of a server's feed, through Tor. `next` comes from the
-/// previous page.
+/// Whether Reels use fast mode: straight to the sites, without Tor. Off
+/// unless chosen.
+Future<bool> fediDirect() => RustLib.instance.api.crateApiFediFediDirect();
+
+/// Turns Reels' fast mode on or off. On, the sites see this phone's IP
+/// address; friends and updates still go through Tor either way.
+Future<void> fediSetDirect({required bool enabled}) =>
+    RustLib.instance.api.crateApiFediFediSetDirect(enabled: enabled);
+
+/// One page of a server's feed, through Tor (or directly in fast mode).
+/// `next` comes from the previous page.
 Future<FediPage> fediFeed({
   required FediKind kind,
   required String host,
@@ -33,12 +42,15 @@ Future<FediPage> fediFeed({
   next: next,
 );
 
-/// A picture, through Tor (None if it couldn't be fetched).
+/// A picture, through Tor or directly in fast mode (None if it couldn't
+/// be fetched).
 Future<Uint8List?> fediImage({required String url}) =>
     RustLib.instance.api.crateApiFediFediImage(url: url);
 
-/// A local address the video player can stream from; the relay fetches it
-/// through Tor. For PeerTube pass `video_id` (and an empty `url`).
+/// The address the video player streams from. Normally a local one: the
+/// relay fetches the video through Tor. In fast mode, the video's own
+/// `https://` address, which the player opens directly. For PeerTube pass
+/// `video_id` (and an empty `url`).
 Future<String?> fediVideo({
   required String host,
   required String url,
@@ -169,7 +181,7 @@ class FediPost {
 
 /// Why a server's feed couldn't be shown.
 enum FediProblem {
-  /// Not connected to Tor yet.
+  /// Not connected to Tor yet (never in fast mode).
   offline,
 
   /// The server shows its feed only to people signed in to it.

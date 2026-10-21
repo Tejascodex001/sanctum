@@ -52,6 +52,62 @@ pub struct MessageView {
     pub poll: Option<PollView>,
     /// The shared album a photo or video is in.
     pub album: Option<AlbumView>,
+    /// Reactions, one entry per emoji, most used first.
+    pub reactions: Vec<ReactionView>,
+}
+
+/// Everyone who reacted to a message with one emoji.
+pub struct ReactionView {
+    pub emoji: String,
+    pub count: u32,
+    /// We reacted with this one (at most one entry is ours).
+    pub mine: bool,
+    /// Who reacted with it ("You" first).
+    pub names: Vec<String>,
+}
+
+/// Reactions grouped by emoji: most used first, ties by who was first.
+fn reaction_views(
+    reactions: &[sanctum_core::store::Reaction],
+    me: &[u8; 32],
+    name_of: impl Fn(&[u8; 32]) -> String,
+) -> Vec<ReactionView> {
+    let mut groups: Vec<(&str, u64, Vec<&sanctum_core::store::Reaction>)> = Vec::new();
+    for r in reactions.iter().filter(|r| !r.emoji.is_empty()) {
+        match groups.iter_mut().find(|(emoji, _, _)| *emoji == r.emoji) {
+            Some((_, first, who)) => {
+                *first = (*first).min(r.at);
+                who.push(r);
+            }
+            None => groups.push((&r.emoji, r.at, vec![r])),
+        }
+    }
+    groups.sort_by(|a, b| b.2.len().cmp(&a.2.len()).then(a.1.cmp(&b.1)));
+    groups
+        .into_iter()
+        .map(|(emoji, _, who)| {
+            let mine = who.iter().any(|r| &r.who == me);
+            let mut names: Vec<String> = who.iter().filter(|r| &r.who != me).map(|r| name_of(&r.who)).collect();
+            names.sort();
+            if mine {
+                names.insert(0, "You".into());
+            }
+            ReactionView {
+                emoji: emoji.to_string(),
+                count: who.len() as u32,
+                mine,
+                names,
+            }
+        })
+        .collect()
+}
+
+/// Reacts to the message at `seq` with `emoji`, replacing our earlier
+/// reaction; an empty `emoji` takes it back. Shows on every phone in the
+/// chat; nobody is notified.
+pub fn message_react(chat_id: i64, seq: i64, emoji: String) -> anyhow::Result<()> {
+    reach(session::with(|s| Ok(s.react(chat_id, seq, &emoji)?))?);
+    Ok(())
 }
 
 /// A shared album: every photo and video in the chat with its id.
@@ -310,6 +366,7 @@ pub fn message_list(chat_id: i64, limit: Option<u32>) -> anyhow::Result<Vec<Mess
                     thumb: media.thumb,
                 }),
                 poll: m.poll.map(|p| super::poll::view(p, &m.votes, &me, |k| name_of(k))),
+                reactions: reaction_views(&m.reactions, &me, |k| name_of(k)),
                 album: m.album.map(|a| AlbumView {
                     id: a.id.to_vec(),
                     title: a.title,
@@ -328,4 +385,27 @@ fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sanctum_core::store::Reaction;
+
+    #[test]
+    fn reactions_are_grouped_by_emoji() {
+        let r = |who: u8, emoji: &str, at| Reaction { who: [who; 32], emoji: emoji.into(), at };
+        let reactions = [r(1, "👍", 5), r(2, "❤️", 1), r(3, "👍", 7), r(4, "", 2), r(9, "❤️", 3), r(5, "😂", 0)];
+        let views = reaction_views(&reactions, &[9; 32], |k| format!("P{}", k[0]));
+        let summary: Vec<(&str, u32, bool, Vec<String>)> =
+            views.iter().map(|v| (v.emoji.as_str(), v.count, v.mine, v.names.clone())).collect();
+        assert_eq!(
+            summary,
+            [
+                ("❤️", 2, true, vec!["You".to_string(), "P2".into()]),
+                ("👍", 2, false, vec!["P1".into(), "P3".into()]),
+                ("😂", 1, false, vec!["P5".into()]),
+            ]
+        );
+    }
 }

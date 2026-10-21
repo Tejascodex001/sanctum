@@ -168,7 +168,7 @@ impl Session {
             }
             self.store.kv_delete(&name)?;
         }
-        self.store.add_message(chat_id, &msg)?;
+        self.add_received(chat_id, msg)?;
         self.events.push(Event::Chat(chat_id));
         self.events.push(Event::Message(chat_id));
         Ok(())

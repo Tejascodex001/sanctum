@@ -190,6 +190,35 @@ pub struct StoredMessage {
     pub votes: Vec<Vote>,
     /// The shared album a photo or video is in.
     pub album: Option<Album>,
+    /// Everyone's latest reaction (ours under our own key). One per
+    /// person; an empty emoji is a reaction taken back, kept so an older
+    /// one arriving late can't bring it back.
+    pub reactions: Vec<Reaction>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Reaction {
+    pub who: [u8; 32],
+    /// Empty: taken back.
+    pub emoji: String,
+    /// When they reacted (milliseconds), so a late older reaction loses.
+    pub at: u64,
+}
+
+/// The sixth message format, before reactions.
+#[derive(Deserialize)]
+struct StoredMessageV5 {
+    from_me: bool,
+    body: String,
+    sent_at: u64,
+    delivered: bool,
+    id: Option<MessageId>,
+    reply: Option<Quote>,
+    sender: Option<[u8; 32]>,
+    media: Option<Media>,
+    poll: Option<Poll>,
+    votes: Vec<Vote>,
+    album: Option<Album>,
 }
 
 /// The fifth message format, before shared albums.
@@ -635,6 +664,22 @@ impl Store {
         if let Ok(m) = postcard::from_bytes::<StoredMessage>(&plain) {
             return Ok(m);
         }
+        if let Ok(v5) = postcard::from_bytes::<StoredMessageV5>(&plain) {
+            return Ok(StoredMessage {
+                from_me: v5.from_me,
+                body: v5.body,
+                sent_at: v5.sent_at,
+                delivered: v5.delivered,
+                id: v5.id,
+                reply: v5.reply,
+                sender: v5.sender,
+                media: v5.media,
+                poll: v5.poll,
+                votes: v5.votes,
+                album: v5.album,
+                reactions: Vec::new(),
+            });
+        }
         if let Ok(v4) = postcard::from_bytes::<StoredMessageV4>(&plain) {
             return Ok(StoredMessage {
                 from_me: v4.from_me,
@@ -647,7 +692,7 @@ impl Store {
                 media: v4.media,
                 poll: v4.poll,
                 votes: v4.votes,
-                album: None,
+                ..Default::default()
             });
         }
         if let Ok(v3) = postcard::from_bytes::<StoredMessageV3>(&plain) {
@@ -929,6 +974,57 @@ mod tests {
         hidden.admin = Some([5; 32]);
         s.update_chat(7, &hidden).unwrap();
         assert_eq!(s.chats().unwrap().remove(0).1, hidden);
+    }
+
+    #[test]
+    fn messages_from_before_reactions_upgrade() {
+        #[derive(Serialize)]
+        struct V5 {
+            from_me: bool,
+            body: String,
+            sent_at: u64,
+            delivered: bool,
+            id: Option<MessageId>,
+            reply: Option<Quote>,
+            sender: Option<[u8; 32]>,
+            media: Option<Media>,
+            poll: Option<Poll>,
+            votes: Vec<Vote>,
+            album: Option<Album>,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[7; 32]).unwrap();
+        let chat = s.create_chat(&meta("Bob")).unwrap();
+        let old = V5 {
+            from_me: false,
+            body: "beach!".into(),
+            sent_at: 4,
+            delivered: true,
+            id: Some([1; 16]),
+            reply: None,
+            sender: Some([3; 32]),
+            media: Some(Media { name: "b.jpg".into(), ..Default::default() }),
+            poll: None,
+            votes: Vec::new(),
+            album: Some(Album { id: [9; 16], title: "Goa".into() }),
+        };
+        s.db.execute(
+            "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, 0, ?2)",
+            params![chat, s.seal(&message_aad(chat, 0), &old).unwrap()],
+        )
+        .unwrap();
+        let m = s.message(chat, 0).unwrap().unwrap();
+        assert_eq!((m.body.as_str(), m.sender, m.id), ("beach!", Some([3; 32]), Some([1; 16])));
+        assert_eq!(m.album.unwrap().title, "Goa");
+        assert_eq!(m.media.unwrap().name, "b.jpg");
+        assert!(m.reactions.is_empty());
+        let liked = StoredMessage {
+            body: "hi".into(),
+            reactions: vec![Reaction { who: [2; 32], emoji: "🔥".into(), at: 9 }],
+            ..Default::default()
+        };
+        let seq = s.add_message(chat, &liked).unwrap();
+        assert_eq!(s.message(chat, seq).unwrap().unwrap(), liked);
     }
 
     #[test]

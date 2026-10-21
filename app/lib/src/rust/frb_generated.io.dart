@@ -179,6 +179,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  List<ReactionView> dco_decode_list_reaction_view(dynamic raw);
+
+  @protected
   List<ReleaseNotes> dco_decode_list_release_notes(dynamic raw);
 
   @protected
@@ -270,6 +273,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PollView dco_decode_poll_view(dynamic raw);
+
+  @protected
+  ReactionView dco_decode_reaction_view(dynamic raw);
 
   @protected
   ReleaseNotes dco_decode_release_notes(dynamic raw);
@@ -479,6 +485,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  List<ReactionView> sse_decode_list_reaction_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<ReleaseNotes> sse_decode_list_release_notes(
     SseDeserializer deserializer,
   );
@@ -586,6 +597,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PollView sse_decode_poll_view(SseDeserializer deserializer);
+
+  @protected
+  ReactionView sse_decode_reaction_view(SseDeserializer deserializer);
 
   @protected
   ReleaseNotes sse_decode_release_notes(SseDeserializer deserializer);
@@ -852,6 +866,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_reaction_view(
+    List<ReactionView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_release_notes(
     List<ReleaseNotes> self,
     SseSerializer serializer,
@@ -991,6 +1011,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_poll_view(PollView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reaction_view(ReactionView self, SseSerializer serializer);
 
   @protected
   void sse_encode_release_notes(ReleaseNotes self, SseSerializer serializer);

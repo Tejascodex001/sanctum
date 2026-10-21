@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `emit_session`, `emit`, `ensure_node`, `forward_events`, `minute`, `panic_text`, `poke`, `real_session`, `runtime`, `session`, `set_status`, `to_key`, `with`
+// These functions are ignored because they are not marked as `pub`: `emit_named`, `emit_session`, `emit`, `ensure_node`, `forward_events`, `minute`, `panic_text`, `poke`, `real_session`, `runtime`, `session`, `set_status`, `to_key`, `with`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Opens the encrypted store at `dir` and restores MLS state. Call once at
@@ -86,6 +86,14 @@ Future<void> netRefresh() => RustLib.instance.api.crateApiSessionNetRefresh();
 Future<Int64List> onlineChats() =>
     RustLib.instance.api.crateApiSessionOnlineChats();
 
+/// The user is writing in this chat: tells whoever in it is connected
+/// right now that they're typing. Call it every ~4 seconds while the
+/// composer has text and changes; calls less than 3 seconds apart for a
+/// chat are ignored. Never queued: friends who aren't connected don't see
+/// it. Does nothing while the decoy profile shows.
+Future<void> chatTyping({required PlatformInt64 chatId}) =>
+    RustLib.instance.api.crateApiSessionChatTyping(chatId: chatId);
+
 /// Your friend code, to show as a QR or share.
 Future<String> myCode({required String myName}) =>
     RustLib.instance.api.crateApiSessionMyCode(myName: myName);
@@ -155,10 +163,20 @@ class AppEvent {
   final PlatformInt64 id;
   final NetInfo net;
 
-  const AppEvent({required this.kind, required this.id, required this.net});
+  /// `Typing`: who is writing, as this phone knows them (empty for other
+  /// kinds).
+  final String name;
+
+  const AppEvent({
+    required this.kind,
+    required this.id,
+    required this.net,
+    required this.name,
+  });
 
   @override
-  int get hashCode => kind.hashCode ^ id.hashCode ^ net.hashCode;
+  int get hashCode =>
+      kind.hashCode ^ id.hashCode ^ net.hashCode ^ name.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -167,11 +185,12 @@ class AppEvent {
           runtimeType == other.runtimeType &&
           kind == other.kind &&
           id == other.id &&
-          net == other.net;
+          net == other.net &&
+          name == other.name;
 }
 
 enum AppEventKind {
-  /// A chat got a message or a delivery receipt.
+  /// A chat got a message, a delivery receipt or a reaction.
   chat,
 
   /// A temp chat appeared or changed.
@@ -197,6 +216,12 @@ enum AppEventKind {
 
   /// Today's moments changed.
   moments,
+
+  /// Someone is writing in a chat (`id`: the chat; `name`: who). Comes
+  /// every few seconds while they write: show it until about 6 seconds
+  /// pass without another, or their message arrives. Never stored, never
+  /// notified, and not sent while the decoy profile shows.
+  typing,
 }
 
 class FriendView {

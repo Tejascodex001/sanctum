@@ -62,7 +62,7 @@ pub enum NetStatus {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AppEventKind {
-    /// A chat got a message or a delivery receipt.
+    /// A chat got a message, a delivery receipt or a reaction.
     Chat,
     /// A temp chat appeared or changed.
     Temp,
@@ -80,6 +80,11 @@ pub enum AppEventKind {
     TempMessage,
     /// Today's moments changed.
     Moments,
+    /// Someone is writing in a chat (`id`: the chat; `name`: who). Comes
+    /// every few seconds while they write: show it until about 6 seconds
+    /// pass without another, or their message arrives. Never stored, never
+    /// notified, and not sent while the decoy profile shows.
+    Typing,
 }
 
 /// Where the connection to Tor stands.
@@ -98,11 +103,18 @@ pub struct AppEvent {
     /// The chat or temp chat concerned.
     pub id: i64,
     pub net: NetInfo,
+    /// `Typing`: who is writing, as this phone knows them (empty for other
+    /// kinds).
+    pub name: String,
 }
 
 fn emit(kind: AppEventKind, id: i64) {
+    emit_named(kind, id, String::new());
+}
+
+fn emit_named(kind: AppEventKind, id: i64, name: String) {
     let net = STATUS.lock().unwrap().clone();
-    let _ = EVENTS.send(AppEvent { kind, id, net });
+    let _ = EVENTS.send(AppEvent { kind, id, net, name });
 }
 
 fn set_status(status: NetStatus, progress: u8, detail: impl Into<String>) {
@@ -396,7 +408,30 @@ fn emit_session(e: Event) {
         Event::Message(id) => emit(AppEventKind::Message, id),
         Event::TempMessage(id) => emit(AppEventKind::TempMessage, id as i64),
         Event::Moments => emit(AppEventKind::Moments, 0),
+        // Only for the real profile, and only while it shows: the decoy
+        // must not reveal that anyone is writing.
+        Event::Typing { chat, name, .. } => {
+            if !profile_is_decoy() {
+                emit_named(AppEventKind::Typing, chat, name);
+            }
+        }
     }
+}
+
+/// The user is writing in this chat: tells whoever in it is connected
+/// right now that they're typing. Call it every ~4 seconds while the
+/// composer has text and changes; calls less than 3 seconds apart for a
+/// chat are ignored. Never queued: friends who aren't connected don't see
+/// it. Does nothing while the decoy profile shows.
+pub fn chat_typing(chat_id: i64) -> anyhow::Result<()> {
+    if profile_is_decoy() {
+        return Ok(());
+    }
+    let Some(node) = NODE.lock().unwrap().clone() else {
+        return Ok(());
+    };
+    node.typing(chat_id)?;
+    Ok(())
 }
 
 /// Asks the network to deliver anything waiting for `peer` now.
