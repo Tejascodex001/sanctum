@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../src/rust/api/sigil.dart';
+import 'sigil_look.dart';
 
 extension HslColorX on HslColor {
   Color get color => HSLColor.fromAHSL(1, h, s.clamp(0, 1), l.clamp(0, 1)).toColor();
@@ -76,8 +77,7 @@ class SigilPainter extends CustomPainter {
     canvas.restore();
   }
 
-  double _stroke(double r, [double scale = 1]) =>
-      r * (0.007 + 0.016 * spec.weight) * scale;
+  double _stroke(double r, [double scale = 1]) => r * (0.007 + 0.016 * spec.weight) * scale;
 
   Paint _line(Color c, double width) => Paint()
     ..color = c
@@ -105,8 +105,7 @@ class SigilPainter extends CustomPainter {
       }
       canvas.drawPath(
         path,
-        _line(_layerColor(layer).withValues(alpha: layer == 0 ? 1 : 0.75),
-            _stroke(r, layer == 0 ? 1.2 : 0.8)),
+        _line(_layerColor(layer).withValues(alpha: layer == 0 ? 1 : 0.75), _stroke(r, layer == 0 ? 1.2 : 0.8)),
       );
     }
     canvas.drawCircle(Offset.zero, r * 0.05, Paint()..color = _accent);
@@ -120,8 +119,7 @@ class SigilPainter extends CustomPainter {
       final count = spec.symmetry * (1 + (ring.isOdd && spec.density > 0.5 ? 1 : 0));
       final offset = rnd.nextDouble() * math.pi;
       rings.add([
-        for (var i = 0; i < count; i++)
-          Offset.fromDirection(offset + i * 2 * math.pi / count, radius),
+        for (var i = 0; i < count; i++) Offset.fromDirection(offset + i * 2 * math.pi / count, radius),
       ]);
     }
     final edge = _line(_palette[0].withValues(alpha: 0.7), _stroke(r, 0.6));
@@ -158,8 +156,7 @@ class SigilPainter extends CustomPainter {
     for (var s = 0; s < count; s++) {
       final path = Path();
       for (var v = 0; v < 3; v++) {
-        final p = Offset.fromDirection(
-            rnd.nextDouble() * wedge / 2, r * (0.15 + rnd.nextDouble() * 0.85));
+        final p = Offset.fromDirection(rnd.nextDouble() * wedge / 2, r * (0.15 + rnd.nextDouble() * 0.85));
         v == 0 ? path.moveTo(p.dx, p.dy) : path.lineTo(p.dx, p.dy);
       }
       path.close();
@@ -191,12 +188,11 @@ class SigilPainter extends CustomPainter {
       final sweep = 2 * math.pi / segments;
       final paint = _line(_layerColor(i % 4), width);
       for (var s = 0; s < segments; s++) {
-        canvas.drawArc(Rect.fromCircle(center: Offset.zero, radius: radius),
-            start + s * sweep, sweep * (1 - gap), false, paint);
+        canvas.drawArc(
+            Rect.fromCircle(center: Offset.zero, radius: radius), start + s * sweep, sweep * (1 - gap), false, paint);
       }
       if (rnd.nextDouble() < 0.4) {
-        canvas.drawCircle(Offset.fromDirection(start - 0.2, radius), width * 1.6,
-            Paint()..color = _accent);
+        canvas.drawCircle(Offset.fromDirection(start - 0.2, radius), width * 1.6, Paint()..color = _accent);
       }
     }
   }
@@ -256,8 +252,7 @@ class SigilPainter extends CustomPainter {
 
     // A soft under-stroke in a palette colour gives the rune depth.
     for (final mirrored in [false, true]) {
-      canvas.drawPath(trace(mirrored),
-          _line(_palette[1].withValues(alpha: 0.45), _stroke(r, 5)));
+      canvas.drawPath(trace(mirrored), _line(_palette[1].withValues(alpha: 0.45), _stroke(r, 5)));
     }
     for (final mirrored in [false, true]) {
       canvas.drawPath(trace(mirrored), _line(_accent, _stroke(r, 2.4)));
@@ -273,15 +268,14 @@ class SigilPainter extends CustomPainter {
     if (spec.layers > 3) canvas.drawCircle(Offset.zero, r * 0.92, frame);
     if (spec.symmetry.isEven) {
       for (var i = 0; i < spec.symmetry; i++) {
-        canvas.drawCircle(Offset.fromDirection(i * 2 * math.pi / spec.symmetry, r),
-            _stroke(r, 1.6), Paint()..color = _palette[0]);
+        canvas.drawCircle(
+            Offset.fromDirection(i * 2 * math.pi / spec.symmetry, r), _stroke(r, 1.6), Paint()..color = _palette[0]);
       }
     }
   }
 
   @override
-  bool shouldRepaint(SigilPainter old) =>
-      old.spec != spec || old.phase != phase || old.opacity != opacity;
+  bool shouldRepaint(SigilPainter old) => old.spec != spec || old.phase != phase || old.opacity != opacity;
 }
 
 /// Rendered sigils, kept as GPU images. Drawing a sigil is expensive
@@ -322,19 +316,24 @@ abstract final class _SigilImages {
 /// A sigil, drawn once into an image and cached. Cheap enough for long,
 /// fast-scrolling lists and for animation.
 class SigilView extends StatelessWidget {
-  const SigilView({super.key, required this.spec, this.opacity = 1, this.background = true});
+  const SigilView({super.key, required this.spec, this.opacity = 1, this.background = true, this.exact = false});
 
   final SigilSpec spec;
   final double opacity;
   final bool background;
 
+  /// Its own colours, not the picked accent or light mode (comparing with
+  /// a friend).
+  final bool exact;
+
   @override
   Widget build(BuildContext context) {
+    final spec = exact ? this.spec : this.spec.look;
     final dpr = MediaQuery.devicePixelRatioOf(context);
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (background) SigilBackground(spec: spec),
+        if (background) SigilBackground(spec: spec, exact: true),
         LayoutBuilder(builder: (context, box) {
           final side = box.biggest.shortestSide;
           if (!side.isFinite || side <= 0) return const SizedBox.shrink();
@@ -363,10 +362,13 @@ class SigilView extends StatelessWidget {
 /// A slowly turning sigil (lock screen, chat backdrops). Only the cached
 /// image rotates, on the GPU; nothing is redrawn per frame.
 class LivingSigil extends StatefulWidget {
-  const LivingSigil({super.key, required this.spec, this.opacity = 1, this.period = 90});
+  const LivingSigil({super.key, required this.spec, this.opacity = 1, this.period = 90, this.exact = false});
 
   final SigilSpec spec;
   final double opacity;
+
+  /// Its own colours (see [SigilView.exact]).
+  final bool exact;
 
   /// Seconds per full turn.
   final int period;
@@ -389,14 +391,15 @@ class _LivingSigilState extends State<LivingSigil> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
+    final spec = widget.exact ? widget.spec : widget.spec.look;
     return Stack(
       fit: StackFit.expand,
       children: [
-        SigilBackground(spec: widget.spec),
+        SigilBackground(spec: spec, exact: true),
         RepaintBoundary(
           child: RotationTransition(
             turns: _controller,
-            child: SigilView(spec: widget.spec, opacity: widget.opacity, background: false),
+            child: SigilView(spec: spec, opacity: widget.opacity, background: false, exact: true),
           ),
         ),
       ],
@@ -405,12 +408,16 @@ class _LivingSigilState extends State<LivingSigil> with SingleTickerProviderStat
 }
 
 class SigilBackground extends StatelessWidget {
-  const SigilBackground({super.key, required this.spec});
+  const SigilBackground({super.key, required this.spec, this.exact = false});
 
   final SigilSpec spec;
 
+  /// Its own colours (see [SigilView.exact]).
+  final bool exact;
+
   @override
   Widget build(BuildContext context) {
+    final spec = exact ? this.spec : this.spec.look;
     final bg = spec.background.color;
     return DecoratedBox(
       decoration: BoxDecoration(

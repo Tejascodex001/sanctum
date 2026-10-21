@@ -8,6 +8,7 @@ import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
 import '../sigil/sigil_painter.dart';
 import '../theme/tokens.dart';
+import '../sigil/sigil_look.dart';
 
 /// Pick friends and a name; returns the new group's chat id.
 Future<int?> showNewGroupSheet(
@@ -321,7 +322,7 @@ class _GroupSheetState extends State<_GroupSheet> {
             ListTile(
               contentPadding: const EdgeInsets.symmetric(horizontal: Space.xs),
               leading: CircleAvatar(
-                backgroundColor: widget.sigil.accent.color.withValues(alpha: 0.2),
+                backgroundColor: widget.sigil.look.accent.color.withValues(alpha: 0.2),
                 child: Text(m.name.isEmpty ? '?' : m.name.characters.first.toUpperCase()),
               ),
               title: Text(m.name),

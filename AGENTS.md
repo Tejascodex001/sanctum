@@ -47,7 +47,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `net/src/relay.rs` | The on-phone relay that streams Reels videos through Tor |
 | `app/rust/src/api/` | The Dart-facing API (flutter_rust_bridge). Keep it thin; logic belongs in `core` |
 | `app/lib/settings/` | The Settings screen (opened from your sigil) |
-| `app/lib/theme/appearance.dart` | Light, dark or like the phone, and the accent colour. `Palette` is read at build time, so `Restyler` redraws every screen when it changes: don't make widgets using `Palette` colours `const` |
+| `app/lib/theme/appearance.dart` | Light, dark or like the phone, and the accent colour. `Palette` is read at build time, so `Restyler` redraws every screen when it changes: don't make widgets using `Palette` colours `const`. Sigils are shown through `SigilLook` (`spec.look`): in the picked accent and light in light mode. Use `spec.look.accent.color` for UI colours taken from a sigil; only comparing sigils with a friend uses `exact: true` |
 | `app/lib/` | The Flutter UI. Design tokens are in `app/lib/theme/tokens.dart`; use them, never one-off values |
 | `app/android/app/src/main/kotlin/` | The scanner, background service, notifications, installer, OEM battery settings and Bluetooth nearby (`BluetoothNearby.kt`) |
 

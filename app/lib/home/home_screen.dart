@@ -29,6 +29,7 @@ import '../src/rust/api/sigil.dart';
 import '../src/rust/api/store.dart';
 import '../src/rust/api/temp_chat.dart';
 import '../theme/tokens.dart';
+import '../sigil/sigil_look.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.publicKey, required this.mySigil});
@@ -71,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.initState();
     _pages.addListener(() => setState(() => _page = _pages.page ?? 0));
     _search.addListener(() => setState(() {}));
+    reelsImmersive.addListener(_reelsChanged);
     // Temp messages burn on their own; refresh the countdowns.
     _purge = Timer.periodic(const Duration(minutes: 1), (_) => _loadTemp());
     _events = NetBus.instance.events.listen(_onEvent);
@@ -160,8 +162,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _closed(card);
   }
 
+  void _reelsChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    reelsImmersive.removeListener(_reelsChanged);
     WidgetsBinding.instance.removeObserver(this);
     _purge?.cancel();
     _events?.cancel();
@@ -198,7 +205,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _loadRequests();
       // Dots, badges and notifications update themselves (NetBus, Notifier).
       // So do moments (MomentsStrip).
-      case AppEventKind.presence || AppEventKind.message || AppEventKind.tempMessage || AppEventKind.moments || AppEventKind.typing:
+      case AppEventKind.presence ||
+            AppEventKind.message ||
+            AppEventKind.tempMessage ||
+            AppEventKind.moments ||
+            AppEventKind.typing:
         break;
     }
   }
@@ -336,7 +347,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _actions(ChatCard card) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Palette.card(card.sigil.background.color, card.sigil.accent.color),
+      backgroundColor: Palette.card(card.sigil.look.background.color, card.sigil.look.accent.color),
       showDragHandle: true,
       builder: (context) => SafeArea(
         child: Column(
@@ -654,7 +665,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _onExplore ? Colors.black : null,
+      backgroundColor: _onExplore && reelsImmersive.value ? Colors.black : null,
       body: Column(
         children: [
           // Reels fill the screen; everything else sits under the header.
@@ -707,7 +718,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     padding: const EdgeInsets.all(1.5),
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
-                                      border: Border.all(color: widget.mySigil.accent.color.withValues(alpha: 0.6)),
+                                      border:
+                                          Border.all(color: widget.mySigil.look.accent.color.withValues(alpha: 0.6)),
                                     ),
                                     child: ClipOval(child: SigilView(spec: widget.mySigil)),
                                   ),
@@ -822,7 +834,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         builder: (context, unread, _) => _NavBar(
           page: _page.round().clamp(0, 3),
           onTap: _goTo,
-          dark: _onExplore,
+          dark: _onExplore && reelsImmersive.value,
           chats: _visibleChats.where((c) => unread.containsKey(Notifier.chatKey(c.id))).length,
           temp: _temp.where((c) => unread.containsKey(Notifier.tempKey(c.id))).length,
           requests: _requests.length,

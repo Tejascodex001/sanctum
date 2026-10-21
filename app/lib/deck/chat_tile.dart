@@ -5,6 +5,7 @@ import '../notify/notifier.dart';
 import '../sigil/sigil_painter.dart';
 import '../theme/tokens.dart';
 import 'chat_card.dart';
+import '../sigil/sigil_look.dart';
 
 /// The face of a chat card: emblem, name, last message, and the chat's sigil
 /// as a large cropped watermark so every card looks like its own object.
@@ -17,7 +18,7 @@ class ChatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = Palette.card(card.sigil.background.color, card.sigil.accent.color);
+    final bg = Palette.card(card.sigil.look.background.color, card.sigil.look.accent.color);
     return SizedBox(
       height: height,
       child: Stack(
@@ -78,7 +79,7 @@ class _Emblem extends StatelessWidget {
       padding: const EdgeInsets.all(1.5),
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        border: Border.all(color: card.sigil.accent.color.withValues(alpha: 0.55), width: 1.2),
+        border: Border.all(color: card.sigil.look.accent.color.withValues(alpha: 0.55), width: 1.2),
       ),
       child: ClipOval(child: SigilView(spec: card.sigil)),
     );
@@ -103,7 +104,7 @@ class _Text extends StatelessWidget {
               const SizedBox(width: Space.xs),
             ],
             if (card.pinned) ...[
-              Icon(Icons.push_pin_rounded, size: 13, color: card.sigil.accent.color),
+              Icon(Icons.push_pin_rounded, size: 13, color: card.sigil.look.accent.color),
               const SizedBox(width: Space.xs),
             ],
             Flexible(
@@ -138,7 +139,7 @@ class _Trailing extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = card.sigil.accent.color;
+    final accent = card.sigil.look.accent.color;
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.end,

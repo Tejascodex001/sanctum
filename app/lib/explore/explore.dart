@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../src/rust/api/fedi.dart';
+import '../theme/appearance.dart';
 import '../theme/tokens.dart';
 import 'share_sheet.dart';
 
@@ -27,6 +28,10 @@ class _Pictures {
     });
   }
 }
+
+/// Reels is showing videos (black around them, whatever the theme): the
+/// tab bar goes black with it.
+final reelsImmersive = ValueNotifier<bool>(false);
 
 /// Sound on or off, for every reel.
 final _muted = ValueNotifier<bool>(false);
@@ -155,7 +160,7 @@ class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
       showDragHandle: true,
       builder: (sheet) => _InterestPicker(
         items: interests.items,
-        dark: false,
+        firstTime: false,
         onDone: (ids) => Navigator.pop(sheet, ids),
       ),
     );
@@ -172,55 +177,70 @@ class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
     await _restart();
   }
 
+  /// Videos on screen: black around them, like any video player, in
+  /// light mode too. Everything else (picking interests, loading, nothing
+  /// to show) follows the theme.
+  bool get _immersive => _posts.isNotEmpty && !_picking;
+
   @override
   Widget build(BuildContext context) {
-    return ColoredBox(
-      color: Colors.black,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          _body(),
-          // Over the video, below the status bar.
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: DecoratedBox(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.black54, Colors.transparent],
+    final immersive = _immersive;
+    if (reelsImmersive.value != immersive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => reelsImmersive.value = _immersive);
+    }
+    final fg = immersive ? Colors.white : Palette.text;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: immersive ? SystemUiOverlayStyle.light : Appearance.systemBars,
+      child: ColoredBox(
+        color: immersive ? Colors.black : Palette.bg,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _body(),
+            // Over the video, below the status bar.
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: immersive
+                      ? const LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.black54, Colors.transparent],
+                        )
+                      : null,
                 ),
-              ),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(Space.xl, Space.sm, Space.sm, Space.lg),
-                  child: Row(
-                    children: [
-                      Text('Reels', style: AppText.title.copyWith(color: Colors.white)),
-                      const Spacer(),
-                      if (!_picking)
+                child: SafeArea(
+                  bottom: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(Space.xl, Space.sm, Space.sm, Space.lg),
+                    child: Row(
+                      children: [
+                        Text('Reels', style: AppText.title.copyWith(color: fg)),
+                        const Spacer(),
+                        if (!_picking)
+                          IconButton(
+                            tooltip: 'What you like',
+                            color: fg,
+                            icon: const Icon(Icons.interests_rounded),
+                            onPressed: _editInterests,
+                          ),
                         IconButton(
-                          tooltip: 'What you like',
-                          color: Colors.white,
-                          icon: const Icon(Icons.interests_rounded),
-                          onPressed: _editInterests,
+                          tooltip: 'Where reels come from',
+                          color: fg,
+                          icon: const Icon(Icons.tune_rounded),
+                          onPressed: _editSources,
                         ),
-                      IconButton(
-                        tooltip: 'Where reels come from',
-                        color: Colors.white,
-                        icon: const Icon(Icons.tune_rounded),
-                        onPressed: _editSources,
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -231,7 +251,7 @@ class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
       return SafeArea(
         child: Padding(
           padding: const EdgeInsets.only(top: 56),
-          child: _InterestPicker(items: interests.items, dark: true, onDone: _pickInterests),
+          child: _InterestPicker(items: interests.items, firstTime: true, onDone: _pickInterests),
         ),
       );
     }
@@ -323,12 +343,12 @@ class _Nothing extends StatelessWidget {
 /// What do you like watching? Picked before the first reels (and changed
 /// from the top bar): Reels looks for these first and sticks to them.
 class _InterestPicker extends StatefulWidget {
-  const _InterestPicker({required this.items, required this.dark, required this.onDone});
+  const _InterestPicker({required this.items, required this.firstTime, required this.onDone});
 
   final List<ReelInterest> items;
 
-  /// Over the black Reels page, rather than in a sheet.
-  final bool dark;
+  /// Before the first reels, rather than changing them later in a sheet.
+  final bool firstTime;
   final void Function(List<String> ids) onDone;
 
   @override
@@ -343,16 +363,16 @@ class _InterestPickerState extends State<_InterestPicker> {
 
   @override
   Widget build(BuildContext context) {
-    final dark = widget.dark;
+    final first = widget.firstTime;
     final accent = Theme.of(context).colorScheme.primary;
-    final fg = dark ? Colors.white : Palette.text;
-    final muted = dark ? Colors.white70 : Palette.textMuted;
+    final fg = Palette.text;
+    final muted = Palette.textMuted;
     return SafeArea(
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(Space.xl, Space.sm, Space.xl, Space.lg),
         child: Column(
-          mainAxisSize: dark ? MainAxisSize.max : MainAxisSize.min,
+          mainAxisSize: first ? MainAxisSize.max : MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text('What do you love watching?', style: AppText.title.copyWith(color: fg)),
@@ -374,7 +394,7 @@ class _InterestPickerState extends State<_InterestPicker> {
                         selected: _chosen.contains(i.id),
                         accent: accent,
                         fg: fg,
-                        outline: dark ? Colors.white24 : Palette.outlineStrong,
+                        outline: Palette.outlineStrong,
                         onTap: () {
                           HapticFeedback.selectionClick();
                           setState(() => _chosen.contains(i.id) ? _chosen.remove(i.id) : _chosen.add(i.id));
@@ -392,7 +412,7 @@ class _InterestPickerState extends State<_InterestPicker> {
             TextButton(
               onPressed: () => widget.onDone(const []),
               style: TextButton.styleFrom(foregroundColor: muted),
-              child: Text(dark ? 'Skip, show me anything' : 'No preference'),
+              child: Text(first ? 'Skip, show me anything' : 'No preference'),
             ),
           ],
         ),

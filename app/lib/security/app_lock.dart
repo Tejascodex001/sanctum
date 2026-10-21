@@ -10,6 +10,7 @@ import '../src/rust/api/sigil.dart';
 import '../theme/tokens.dart';
 import 'panic.dart';
 import 'profile.dart';
+import '../sigil/sigil_look.dart';
 
 /// Covers the app until the user unlocks with biometrics or the device
 /// PIN/pattern, and locks again whenever the app leaves the foreground.
@@ -192,7 +193,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
   }
 
   Widget _pinScreen() {
-    final accent = widget.sigil.accent.color;
+    final accent = widget.sigil.look.accent.color;
     final waiting = _waitUntil != null && DateTime.now().isBefore(_waitUntil!);
     Widget key(Widget label, VoidCallback? onTap, {String? tooltip}) => SizedBox(
           width: 76,
@@ -205,7 +206,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
         );
     Widget digit(String d) => key(Text(d, style: AppText.title.copyWith(fontSize: 26)), () => _digit(d));
     return Material(
-      color: widget.sigil.background.color,
+      color: widget.sigil.look.background.color,
       child: SafeArea(
         child: Column(
           children: [
@@ -288,7 +289,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
   Widget _lockScreen() {
     if (_pinMode) return _pinScreen();
     return Material(
-      color: widget.sigil.background.color,
+      color: widget.sigil.look.background.color,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _unlock,

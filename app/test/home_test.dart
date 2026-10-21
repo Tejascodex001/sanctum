@@ -16,8 +16,10 @@ import 'package:sanctum/src/rust/api/sigil.dart';
 import 'package:sanctum/src/rust/api/session.dart';
 import 'package:sanctum/src/rust/api/store.dart';
 import 'package:sanctum/src/rust/frb_generated.dart';
+import 'package:sanctum/sigil/sigil_look.dart';
 import 'package:sanctum/sigil/sigil_painter.dart';
 import 'package:sanctum/theme/sigil_theme.dart';
+import 'package:sanctum/theme/tokens.dart';
 
 /// Rust calls finish on real threads, so also let real time pass between
 /// frames for their continuations to land.
@@ -89,8 +91,7 @@ void main() {
     await tester.pumpWidget(RepaintBoundary(
       key: _shotKey,
       child: Restyler(
-        builder: (_) =>
-            MaterialApp(theme: sanctumTheme(accent: Appearance.accent.value ?? mine.accent.color), home: home),
+        builder: (_) => MaterialApp(theme: sanctumTheme(accent: mine.look.accent.color), home: home),
       ),
     ));
     await settle(tester);
@@ -220,6 +221,7 @@ void main() {
     expect(find.text('APPEARANCE'), findsOneWidget);
     await shot(tester, '8-settings');
     await tester.tap(find.text('Light'));
+    await tester.runAsync(() => Appearance.setAccent(Palette.accents[1]));
     await settle(tester);
     await shot(tester, '9-settings-light');
     await tester.tap(find.byTooltip('Back'));
@@ -232,6 +234,14 @@ void main() {
     await shot(tester, '11-chat-light');
     await tester.tap(find.byTooltip('Back'));
     await settle(tester);
+    for (final (tab, name) in [('Temp', '14-temp-light'), ('Friends', '15-friends-light'), ('Reels', '16-reels-light')]) {
+      await tester.tap(find.text(tab));
+      await settle(tester);
+      await shot(tester, name);
+    }
+    await tester.tap(find.text('Chats'));
+    await settle(tester);
+    await tester.runAsync(() => Appearance.setAccent(null));
     await tester.runAsync(() => Appearance.setTheme(ThemeChoice.dark));
     await settle(tester);
 

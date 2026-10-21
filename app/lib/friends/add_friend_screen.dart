@@ -13,6 +13,7 @@ import '../src/rust/api/store.dart';
 import '../theme/tokens.dart';
 import 'qr_codec.dart';
 import 'scanner.dart';
+import '../sigil/sigil_look.dart';
 
 /// Adding a friend: each person reads the other's code. In person, scan
 /// each other's QR; far away, share your code and type or paste theirs.
@@ -169,7 +170,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
   }
 
   Widget _exchange() {
-    final accent = widget.mySigil.accent.color;
+    final accent = widget.mySigil.look.accent.color;
     return ListView(
       key: const ValueKey('exchange'),
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
@@ -308,7 +309,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
 
   Widget _confirm() {
     final paired = _paired!;
-    final accent = widget.mySigil.accent.color;
+    final accent = widget.mySigil.look.accent.color;
     const verifiedColor = Color(0xFF3DDC97);
     const pendingColor = Color(0xFFFFC145);
     return ListView(
@@ -411,7 +412,7 @@ class _SigilEquation extends StatelessWidget {
         );
     Widget small(SigilSpec spec, String label) => Column(
           children: [
-            SizedBox.square(dimension: 60, child: ClipOval(child: SigilView(spec: spec))),
+            SizedBox.square(dimension: 60, child: ClipOval(child: SigilView(spec: spec, exact: true))),
             const SizedBox(height: 6),
             Text(label, style: AppText.micro, maxLines: 1, overflow: TextOverflow.ellipsis),
           ],
@@ -434,7 +435,7 @@ class _SigilEquation extends StatelessWidget {
           0.75,
           Column(
             children: [
-              SizedBox.square(dimension: 170, child: ClipOval(child: LivingSigil(spec: shared, period: 40))),
+              SizedBox.square(dimension: 170, child: ClipOval(child: LivingSigil(spec: shared, period: 40, exact: true))),
               const SizedBox(height: 8),
               Text('YOUR CHAT\'S SIGIL', style: AppText.overline),
             ],

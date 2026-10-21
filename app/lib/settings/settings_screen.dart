@@ -11,6 +11,7 @@ import '../src/rust/api/sigil.dart';
 import '../theme/appearance.dart';
 import '../theme/tokens.dart';
 import 'connection_settings.dart';
+import '../sigil/sigil_look.dart';
 
 /// Everything you can change, opened from your sigil: your name, how the
 /// app looks, the lock, staying connected, nearby, updates and the panic
@@ -74,9 +75,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Container(
             padding: const EdgeInsets.all(Space.lg),
             decoration: BoxDecoration(
-              color: sigil.background.color,
+              color: sigil.look.background.color,
               borderRadius: BorderRadius.circular(Radii.xl),
-              border: Border.all(color: sigil.accent.color.withValues(alpha: 0.35)),
+              border: Border.all(color: sigil.look.accent.color.withValues(alpha: 0.35)),
             ),
             child: Row(
               children: [
@@ -91,13 +92,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: [
                       Text(
                         _name.isEmpty ? 'Add your name' : _name,
-                        style: AppText.title.copyWith(color: Palette.onColor(sigil.background.color)),
+                        style: AppText.title.copyWith(color: Palette.onColor(sigil.look.background.color)),
                       ),
                       const SizedBox(height: Space.xs),
                       Text(
                         'Your sigil is made just for you. A friend and you see the same one for your chat.',
                         style: AppText.caption.copyWith(
-                          color: Palette.onColor(sigil.background.color).withValues(alpha: 0.7),
+                          color: Palette.onColor(sigil.look.background.color).withValues(alpha: 0.7),
                         ),
                       ),
                       const SizedBox(height: Space.sm),
@@ -105,7 +106,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onPressed: _rename,
                         style: OutlinedButton.styleFrom(
                           minimumSize: const Size(0, 36),
-                          foregroundColor: Palette.onColor(sigil.background.color),
+                          foregroundColor: Palette.onColor(sigil.look.background.color),
                         ),
                         icon: const Icon(Icons.edit_rounded, size: 16),
                         label: const Text('Change name'),

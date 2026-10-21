@@ -16,6 +16,7 @@ import 'src/rust/api/sigil.dart';
 import 'src/rust/frb_generated.dart';
 import 'theme/appearance.dart';
 import 'theme/sigil_theme.dart';
+import 'sigil/sigil_look.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -79,7 +80,7 @@ class SanctumApp extends StatelessWidget {
         title: 'Sanctum',
         debugShowCheckedModeBanner: false,
         navigatorKey: AppLock.navigator,
-        theme: sanctumTheme(accent: Appearance.accent.value ?? mySigil.accent.color),
+        theme: sanctumTheme(accent: mySigil.look.accent.color),
         builder: (context, child) => AppLock(sigil: mySigil, child: child!),
         home: home,
       ),

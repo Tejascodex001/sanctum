@@ -19,6 +19,7 @@ import '../src/rust/api/session.dart';
 import '../src/rust/api/store.dart';
 import '../theme/tokens.dart';
 import 'message_source.dart';
+import '../sigil/sigil_look.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -378,7 +379,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   @override
   Widget build(BuildContext context) {
     final sigil = widget.card.sigil;
-    final accent = sigil.accent.color;
+    final accent = sigil.look.accent.color;
     return Scaffold(
       backgroundColor: Palette.bg,
       body: Stack(
@@ -572,7 +573,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _openAlbums([AlbumView? album]) async {
-    final accent = widget.card.sigil.accent.color;
+    final accent = widget.card.sigil.look.accent.color;
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => album == null
           ? AlbumsScreen(chatId: widget.card.id, title: widget.card.title, accent: accent)
@@ -604,7 +605,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 _AttachButton(
                   icon: icon,
                   label: label,
-                  color: widget.card.sigil.accent.color,
+                  color: widget.card.sigil.look.accent.color,
                   onTap: () => Navigator.pop(sheet, key),
                 ),
             ],
@@ -618,7 +619,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       return;
     }
     if (kind == 'poll') {
-      final sent = await showPollComposer(context, chatId: widget.card.id, accent: widget.card.sigil.accent.color);
+      final sent = await showPollComposer(context, chatId: widget.card.id, accent: widget.card.sigil.look.accent.color);
       if (sent) await _reload();
       return;
     }
@@ -1019,7 +1020,7 @@ class _VerifyButtonState extends State<_VerifyButton> {
                 Text('SAFETY NUMBER', style: AppText.overline),
                 const SizedBox(height: 6),
                 SelectableText(number,
-                    style: AppText.mono.copyWith(fontSize: 26, letterSpacing: 3, color: card.sigil.accent.color)),
+                    style: AppText.mono.copyWith(fontSize: 26, letterSpacing: 3, color: card.sigil.look.accent.color)),
                 const SizedBox(height: Space.xl),
                 SizedBox(
                   width: double.infinity,

@@ -11,6 +11,7 @@ import '../src/rust/api/moment.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
 import '../theme/tokens.dart';
+import '../sigil/sigil_look.dart';
 
 DateTime _fromUnix(int s) => DateTime.fromMillisecondsSinceEpoch(s * 1000);
 
@@ -162,7 +163,7 @@ class _MomentsStripState extends State<MomentsStrip> {
           _Bubble(
             label: mine == null ? 'Your moment' : 'You',
             sigil: widget.mySigil,
-            ring: mine == null ? null : widget.mySigil.accent.color,
+            ring: mine == null ? null : widget.mySigil.look.accent.color,
             add: mine == null,
             thumb: mine?.thumb,
             onTap: mine == null ? _share : () => _view(_moments.indexOf(mine)),
@@ -173,7 +174,7 @@ class _MomentsStripState extends State<MomentsStrip> {
               builder: (context, snap) => _Bubble(
                 label: m.name,
                 sigil: snap.data,
-                ring: m.seen ? Palette.outlineStrong : (snap.data?.accent.color ?? Palette.text),
+                ring: m.seen ? Palette.outlineStrong : (snap.data?.look.accent.color ?? Palette.text),
                 thumb: m.thumb,
                 onTap: () => _view(_moments.indexOf(m)),
               ),
@@ -239,9 +240,9 @@ class _Bubble extends StatelessWidget {
                       padding: const EdgeInsets.all(2),
                       decoration: BoxDecoration(color: Palette.bg, shape: BoxShape.circle),
                       child: Container(
-                        decoration: BoxDecoration(color: sigil?.accent.color ?? Palette.text, shape: BoxShape.circle),
+                        decoration: BoxDecoration(color: sigil?.look.accent.color ?? Palette.text, shape: BoxShape.circle),
                         child: Icon(Icons.add_rounded,
-                            size: 18, color: Palette.onColor(sigil?.accent.color ?? Palette.text)),
+                            size: 18, color: Palette.onColor(sigil?.look.accent.color ?? Palette.text)),
                       ),
                     ),
                   ),
