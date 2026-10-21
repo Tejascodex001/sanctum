@@ -119,4 +119,38 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await settle(tester, 2);
   });
+
+  testWidgets('the inbox filters by stars, version, words and search', (tester) async {
+    FeedbackItem item(int at, int rating, int build, String text, String phone) =>
+        FeedbackItem(at: at, phone: phone, android: '14', build: build, rating: rating, text: text);
+    final sample = [
+      item(1792600000, 5, 66, 'Love the sigils. Calls are clear on Wi-Fi.', 'Samsung Galaxy A54'),
+      item(1792590000, 2, 66, 'Video calls freeze on mobile data.', 'Redmi Note 12'),
+      item(1792580000, 4, 65, '', 'Pixel 7'),
+      item(1792570000, 5, 65, 'Temp chats are great for planning surprises.', 'OnePlus Nord'),
+      item(1792560000, 0, 0, 'Can groups have more than 50 people?', ''),
+    ];
+    await show(tester, FeedbackInboxScreen(sample: sample));
+    await tester.scrollUntilVisible(find.text('5 RECEIVED · AVERAGE 4.0 STARS'), 300,
+        scrollable: find.byType(Scrollable).first);
+    await settle(tester, 2);
+    await tester.ensureVisible(find.text('5 stars'));
+    await settle(tester, 2);
+    await _shot(tester, '23-feedback-filters');
+    await tester.tap(find.text('5 stars'));
+    await settle(tester, 2);
+    expect(find.text('2 OF 5 SHOWN · AVERAGE 5.0 STARS'), findsOneWidget);
+    await tester.tap(find.text('Clear filters'));
+    await settle(tester, 2);
+    await tester.ensureVisible(find.text('Has words'));
+    await tester.tap(find.text('Has words'));
+    await settle(tester, 2);
+    expect(find.textContaining('4 OF 5 SHOWN'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'redmi');
+    await settle(tester, 2);
+    expect(find.textContaining('1 OF 5 SHOWN'), findsOneWidget);
+    expect(find.text('Video calls freeze on mobile data.'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester, 2);
+  });
 }

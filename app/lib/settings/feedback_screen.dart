@@ -323,7 +323,10 @@ class _Sent extends StatelessWidget {
 /// The developer's inbox: the switch that takes feedback in, this phone's
 /// feedback address, and what arrived.
 class FeedbackInboxScreen extends StatefulWidget {
-  const FeedbackInboxScreen({super.key});
+  const FeedbackInboxScreen({super.key, @visibleForTesting this.sample});
+
+  /// Shown instead of the inbox (screenshots in tests).
+  final List<FeedbackItem>? sample;
 
   @override
   State<FeedbackInboxScreen> createState() => _FeedbackInboxScreenState();
@@ -334,6 +337,14 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
   String _address = '';
   List<FeedbackItem> _items = const [];
   FeedbackCheck? _check;
+
+  // Filters: stars (null: any, 0: none given), version (null: any), only
+  // ones with words, a search, and the order.
+  int? _stars;
+  int? _build;
+  bool _withText = false;
+  String _query = '';
+  bool _oldestFirst = false;
   bool _testing = false;
   String? _testResult;
   StreamSubscription<AppEvent>? _arrivals;
@@ -354,7 +365,7 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
   Future<void> _load() async {
     Notifier.instance.feedbackSeen();
     final receiving = await feedbackReceiving();
-    final items = await feedbackInbox();
+    final items = widget.sample ?? await feedbackInbox();
     final address = receiving ? await feedbackAddress() : '';
     final check = await feedbackCheck();
     if (!mounted) return;
@@ -365,6 +376,28 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
       _check = check;
     });
   }
+
+  bool get _filtering => _stars != null || _build != null || _withText || _query.isNotEmpty;
+
+  /// What the filters let through, in the chosen order.
+  List<FeedbackItem> get _shown {
+    final query = _query.trim().toLowerCase();
+    final shown = _items.where((i) {
+      if (_stars != null && i.rating != _stars) return false;
+      if (_build != null && i.build.toInt() != _build) return false;
+      if (_withText && i.text.trim().isEmpty) return false;
+      if (query.isNotEmpty && !'${i.text} ${i.phone} ${i.android}'.toLowerCase().contains(query)) return false;
+      return true;
+    }).toList();
+    return _oldestFirst ? shown.reversed.toList() : shown;
+  }
+
+  void _clearFilters() => setState(() {
+        _stars = null;
+        _build = null;
+        _withText = false;
+        _query = '';
+      });
 
   /// Sends a test to this phone's own address through Tor.
   Future<void> _test() async {
@@ -426,76 +459,233 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Feedback inbox')),
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, Space.xl + MediaQuery.paddingOf(context).bottom),
-        children: [
-          Material(
-            color: Palette.surface,
-            borderRadius: BorderRadius.circular(Radii.md),
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SwitchListTile(
-                  value: _receiving,
-                  title: const Text('Receive feedback'),
-                  subtitle: const Text('This phone takes in what people send from "Send feedback"'),
-                  onChanged: _setReceiving,
-                ),
-                if (_receiving)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('YOUR FEEDBACK ADDRESS', style: AppText.overline),
-                        const SizedBox(height: Space.xs),
-                        SelectableText(_address, style: AppText.mono.copyWith(fontSize: 13)),
-                        const SizedBox(height: Space.sm),
-                        Text(
-                          'Builds of Sanctum send feedback here. It can only receive, and isn\'t your friend code. '
-                          'Keep this phone connected now and then: feedback waits on the sender\'s phone until it '
-                          'gets through.',
-                          style: AppText.caption,
-                        ),
-                        const SizedBox(height: Space.sm),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Clipboard.setData(ClipboardData(text: _address));
-                            _say('Address copied.');
-                          },
-                          icon: const Icon(Icons.copy_rounded, size: 18),
-                          label: const Text('Copy address'),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
+      appBar: AppBar(
+        title: const Text('Feedback inbox'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh',
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              _load();
+            },
           ),
-          if (_check != null) ...[
-            const SizedBox(height: Space.xl),
-            Text('CHECK', style: AppText.overline),
-            const SizedBox(height: Space.sm),
-            _CheckPanel(
-              check: _check!,
-              testing: _testing,
-              testResult: _testResult,
-              onTest: _receiving && !_testing ? _test : null,
-              onRefresh: _load,
-              onCopy: () {
-                Clipboard.setData(ClipboardData(text: _report()));
-                _say('Report copied.');
-              },
-            ),
-          ],
-          const SizedBox(height: Space.xl),
-          Text(_items.isEmpty ? 'NOTHING YET' : '${_items.length} RECEIVED', style: AppText.overline),
-          const SizedBox(height: Space.sm),
-          for (final item in _items) _FeedbackCard(item: item, onDelete: () => _delete(item)),
         ],
       ),
+      body: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, Space.xl + MediaQuery.paddingOf(context).bottom),
+          children: [
+            Material(
+              color: Palette.surface,
+              borderRadius: BorderRadius.circular(Radii.md),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SwitchListTile(
+                    value: _receiving,
+                    title: const Text('Receive feedback'),
+                    subtitle: const Text('This phone takes in what people send from "Send feedback"'),
+                    onChanged: _setReceiving,
+                  ),
+                  if (_receiving)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('YOUR FEEDBACK ADDRESS', style: AppText.overline),
+                          const SizedBox(height: Space.xs),
+                          SelectableText(_address, style: AppText.mono.copyWith(fontSize: 13)),
+                          const SizedBox(height: Space.sm),
+                          Text(
+                            'Builds of Sanctum send feedback here. It can only receive, and isn\'t your friend code. '
+                            'Keep this phone connected now and then: feedback waits on the sender\'s phone until it '
+                            'gets through.',
+                            style: AppText.caption,
+                          ),
+                          const SizedBox(height: Space.sm),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              Clipboard.setData(ClipboardData(text: _address));
+                              _say('Address copied.');
+                            },
+                            icon: const Icon(Icons.copy_rounded, size: 18),
+                            label: const Text('Copy address'),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (_check != null) ...[
+              const SizedBox(height: Space.xl),
+              Text('CHECK', style: AppText.overline),
+              const SizedBox(height: Space.sm),
+              _CheckPanel(
+                check: _check!,
+                testing: _testing,
+                testResult: _testResult,
+                onTest: _receiving && !_testing ? _test : null,
+                onRefresh: _load,
+                onCopy: () {
+                  Clipboard.setData(ClipboardData(text: _report()));
+                  _say('Report copied.');
+                },
+              ),
+            ],
+            const SizedBox(height: Space.xl),
+            if (_items.isEmpty)
+              Text('NOTHING YET', style: AppText.overline)
+            else ...[
+              _Filters(
+                items: _items,
+                stars: _stars,
+                version: _build,
+                withText: _withText,
+                oldestFirst: _oldestFirst,
+                onStars: (v) => setState(() => _stars = v),
+                onBuild: (v) => setState(() => _build = v),
+                onWithText: (v) => setState(() => _withText = v),
+                onOldestFirst: (v) => setState(() => _oldestFirst = v),
+                onQuery: (v) => setState(() => _query = v),
+              ),
+              const SizedBox(height: Space.md),
+              _Summary(shown: _shown, total: _items.length, filtering: _filtering, onClear: _clearFilters),
+              const SizedBox(height: Space.sm),
+              for (final item in _shown) _FeedbackCard(item: item, onDelete: () => _delete(item)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Search, stars, version, "has words" and the order.
+class _Filters extends StatelessWidget {
+  const _Filters({
+    required this.items,
+    required this.stars,
+    required this.version,
+    required this.withText,
+    required this.oldestFirst,
+    required this.onStars,
+    required this.onBuild,
+    required this.onWithText,
+    required this.onOldestFirst,
+    required this.onQuery,
+  });
+
+  final List<FeedbackItem> items;
+  final int? stars;
+  final int? version;
+  final bool withText;
+  final bool oldestFirst;
+  final ValueChanged<int?> onStars;
+  final ValueChanged<int?> onBuild;
+  final ValueChanged<bool> onWithText;
+  final ValueChanged<bool> onOldestFirst;
+  final ValueChanged<String> onQuery;
+
+  @override
+  Widget build(BuildContext context) {
+    final builds = {for (final i in items) i.build.toInt()}.toList()..sort((a, b) => b.compareTo(a));
+    Widget chip(String label, bool selected, VoidCallback onTap) => Padding(
+          padding: const EdgeInsets.only(right: Space.sm),
+          child: ChoiceChip(label: Text(label), selected: selected, onSelected: (_) => onTap()),
+        );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          onChanged: onQuery,
+          textInputAction: TextInputAction.search,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded),
+            hintText: 'Search what people wrote, or their phone',
+          ),
+        ),
+        const SizedBox(height: Space.md),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              chip('All stars', stars == null, () => onStars(null)),
+              for (var n = 5; n >= 1; n--)
+                chip(n == 1 ? '1 star' : '$n stars', stars == n, () => onStars(stars == n ? null : n)),
+              chip('No stars', stars == 0, () => onStars(stars == 0 ? null : 0)),
+            ],
+          ),
+        ),
+        const SizedBox(height: Space.sm),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(right: Space.sm),
+                child: PopupMenuButton<int?>(
+                  tooltip: 'Version',
+                  onSelected: (v) => onBuild(v == -1 ? null : v),
+                  itemBuilder: (_) => [
+                    const PopupMenuItem(value: -1, child: Text('All versions')),
+                    for (final b in builds) PopupMenuItem(value: b, child: Text(b == 0 ? 'Not given' : fullVersion(b))),
+                  ],
+                  child: Chip(
+                    avatar: const Icon(Icons.expand_more_rounded, size: 18),
+                    label: Text(version == null
+                        ? 'All versions'
+                        : (version == 0 ? 'Version not given' : fullVersion(version!))),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: Space.sm),
+                child: FilterChip(label: const Text('Has words'), selected: withText, onSelected: onWithText),
+              ),
+              ChoiceChip(
+                avatar: const Icon(Icons.swap_vert_rounded, size: 18),
+                label: Text(oldestFirst ? 'Oldest first' : 'Newest first'),
+                selected: false,
+                onSelected: (_) => onOldestFirst(!oldestFirst),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// "12 of 40 shown · average 4.2 stars", and a way back to everything.
+class _Summary extends StatelessWidget {
+  const _Summary({required this.shown, required this.total, required this.filtering, required this.onClear});
+
+  final List<FeedbackItem> shown;
+  final int total;
+  final bool filtering;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final rated = shown.where((i) => i.rating > 0).toList();
+    final average = rated.isEmpty ? null : rated.map((i) => i.rating).reduce((a, b) => a + b) / rated.length;
+    final count = filtering ? '${shown.length} OF $total SHOWN' : '$total RECEIVED';
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            average == null ? count : '$count · AVERAGE ${average.toStringAsFixed(1)} STARS',
+            style: AppText.overline,
+          ),
+        ),
+        if (filtering) TextButton(onPressed: onClear, child: const Text('Clear filters')),
+      ],
     );
   }
 }
@@ -608,7 +798,7 @@ class _FeedbackCard extends StatelessWidget {
     final details = [
       if (item.phone.isNotEmpty) item.phone,
       if (item.android.isNotEmpty) 'Android ${item.android}',
-      if (item.build > 0) 'build ${item.build}',
+      if (item.build > 0) fullVersion(item.build.toInt()),
     ].join(' · ');
     return Container(
       margin: const EdgeInsets.only(bottom: Space.md),
