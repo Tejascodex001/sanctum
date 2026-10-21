@@ -45,6 +45,8 @@ pub enum SessionError {
     Protocol,
     #[error("already in a call")]
     InCall,
+    #[error("groups can have up to {0} people")]
+    GroupFull(usize),
 }
 
 pub type Result<T> = std::result::Result<T, SessionError>;

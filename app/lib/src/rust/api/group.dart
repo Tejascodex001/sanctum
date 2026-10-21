@@ -9,6 +9,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 // These functions are ignored because they are not marked as `pub`: `reach`
 
 /// Starts a group with these friends (their chat ids); we're its admin.
+/// Most people in a group, counting its admin.
+int groupMaxMembers() => RustLib.instance.api.crateApiGroupGroupMaxMembers();
+
 Future<PlatformInt64> groupCreate({
   required String title,
   required Int64List friends,

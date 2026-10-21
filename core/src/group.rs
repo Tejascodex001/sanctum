@@ -43,6 +43,19 @@ pub struct GroupView {
     pub members: Vec<Member>,
 }
 
+/// Most people in a group, counting the admin. Every member's phone sends
+/// to every other member's, so this keeps groups fast until members help
+/// pass messages on (see docs/DESIGN.md, "Groups at scale").
+pub const MAX_GROUP: usize = 20;
+
+/// Refuses a group that would have more than [`MAX_GROUP`] people.
+fn fits_group(people: usize) -> Result<()> {
+    if people > MAX_GROUP {
+        return Err(SessionError::GroupFull(MAX_GROUP));
+    }
+    Ok(())
+}
+
 impl Session {
     // ---- Admin -------------------------------------------------------
 
@@ -50,6 +63,7 @@ impl Session {
     /// direct chats). Each joins when their phone is reached. Returns the
     /// chat and who to reach.
     pub fn create_group(&mut self, title: &str, friends: &[i64]) -> Result<(i64, Vec<[u8; 32]>)> {
+        fits_group(friends.len() + 1)?;
         let group = self.mls.create_group()?;
         self.mls.persist(&self.store)?;
         let peers = self.friends_for(friends)?;
@@ -78,6 +92,8 @@ impl Session {
                 meta.peers.push(peer);
             }
         }
+        // Everyone invited, plus us.
+        fits_group(meta.peers.len() + 1)?;
         self.store.update_chat(chat_id, &meta)?;
         Ok(invitees)
     }
@@ -626,4 +642,15 @@ fn dedup(mut v: Vec<[u8; 32]>) -> Vec<[u8; 32]> {
     v.sort();
     v.dedup();
     v
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::*;
+
+    #[test]
+    fn groups_stop_at_the_limit() {
+        assert!(fits_group(MAX_GROUP).is_ok());
+        assert!(matches!(fits_group(MAX_GROUP + 1), Err(SessionError::GroupFull(n)) if n == MAX_GROUP));
+    }
 }

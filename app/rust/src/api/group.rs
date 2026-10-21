@@ -26,6 +26,12 @@ fn reach(peers: Vec<[u8; 32]>) {
 }
 
 /// Starts a group with these friends (their chat ids); we're its admin.
+/// Most people in a group, counting its admin.
+#[flutter_rust_bridge::frb(sync)]
+pub fn group_max_members() -> u32 {
+    sanctum_core::MAX_GROUP as u32
+}
+
 pub fn group_create(title: String, friends: Vec<i64>) -> anyhow::Result<i64> {
     let (chat, invitees) = session::with(|s| Ok(s.create_group(&title, &friends)?))?;
     reach(invitees);

@@ -24,7 +24,7 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Friend requests** | One person enters a code and the other accepts. Requests show the pair's sigil and safety number |
 | ✅ | **Verification** | Scanning a QR in person verifies a friend. Otherwise, compare the 12-digit safety number (as in Signal and Threema) |
 | ✅ | **1:1 chat over Tor** | MLS end-to-end encryption, onion services, IPs hidden. Live links: messages arrive in about a second, with online indicators and ✓/✓✓ ticks |
-| ✅ | **Group chats** | Peer to peer, no server. The admin manages members; members who aren't friends still reach each other |
+| ✅ | **Group chats** | Peer to peer, no server. Up to 20 people for now (50 once members help pass messages on). The admin manages members; members who aren't friends still reach each other |
 | ✅ | **Temp chats** | Kept in memory only, on both phones. Each message burns 24 hours after it's sent, and either person can wipe the chat for both |
 | ✅ | **Nearby (Wi-Fi / hotspot)** | Chat with friends on the same Wi-Fi or one phone's hotspot, with no internet. Opt-in |
 | ✅ | **Nearby over Bluetooth** | For friends who've connected once before. Android 10+. Part of the same Nearby switch |

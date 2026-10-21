@@ -20,30 +20,35 @@ Future<int?> showNewGroupSheet(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => _FriendPicker(friends: friends, sigil: sigil, askName: true),
+      builder: (_) => _FriendPicker(friends: friends, sigil: sigil, askName: true, room: groupMaxMembers() - 1),
     );
 
 /// Pick friends to add to an existing group.
+/// [room]: how many more people fit in the group.
 Future<List<int>?> showAddMembersSheet(
   BuildContext context, {
   required List<FriendView> friends,
   required Future<SigilSpec> Function(List<int>) sigil,
+  required int room,
 }) =>
     showModalBottomSheet<List<int>>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => _FriendPicker(friends: friends, sigil: sigil, askName: false),
+      builder: (_) => _FriendPicker(friends: friends, sigil: sigil, askName: false, room: room),
     );
 
 class _FriendPicker extends StatefulWidget {
-  const _FriendPicker({required this.friends, required this.sigil, required this.askName});
+  const _FriendPicker({required this.friends, required this.sigil, required this.askName, required this.room});
 
   final List<FriendView> friends;
   final Future<SigilSpec> Function(List<int>) sigil;
 
   /// Creating a group (name + friends) rather than adding to one.
   final bool askName;
+
+  /// How many can be picked: groups have a size limit.
+  final int room;
 
   @override
   State<_FriendPicker> createState() => _FriendPickerState();
@@ -104,8 +109,9 @@ class _FriendPickerState extends State<_FriendPicker> {
             Padding(
               padding: EdgeInsets.fromLTRB(Space.xl, Space.xs, Space.xl, Space.xs),
               child: Text(
-                'Only friends can be added. Each joins as soon as their phone is reached; '
-                'messages go straight between your phones.',
+                'Only friends can be added. Each joins as soon as their phone is reached; messages go '
+                'straight between your phones. Groups can have up to ${groupMaxMembers()} people for now, so '
+                'everyone\'s messages arrive quickly.',
                 style: AppText.caption,
               ),
             ),
@@ -122,10 +128,13 @@ class _FriendPickerState extends State<_FriendPicker> {
                   for (final f in widget.friends)
                     CheckboxListTile(
                       value: _picked.contains(f.chatId.toInt()),
-                      onChanged: (on) => setState(() {
-                        HapticFeedback.selectionClick();
-                        on == true ? _picked.add(f.chatId.toInt()) : _picked.remove(f.chatId.toInt());
-                      }),
+                      // Full: only un-picking is possible.
+                      onChanged: _picked.length >= widget.room && !_picked.contains(f.chatId.toInt())
+                          ? null
+                          : (on) => setState(() {
+                                HapticFeedback.selectionClick();
+                                on == true ? _picked.add(f.chatId.toInt()) : _picked.remove(f.chatId.toInt());
+                              }),
                       secondary: SizedBox.square(
                         dimension: 36,
                         child: FutureBuilder<SigilSpec>(
@@ -233,7 +242,13 @@ class _GroupSheetState extends State<_GroupSheet> {
         if (!inGroup.contains(f.key.join(','))) f
     ];
     if (!mounted) return;
-    final picked = await showAddMembersSheet(context, friends: candidates, sigil: widget.sigilFor);
+    final room = groupMaxMembers() - _g!.members.length;
+    if (room <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('This group is full: groups can have up to ${groupMaxMembers()} people for now.')));
+      return;
+    }
+    final picked = await showAddMembersSheet(context, friends: candidates, sigil: widget.sigilFor, room: room);
     if (picked == null || picked.isEmpty) return;
     await groupAdd(chatId: widget.chatId, friends: Int64List.fromList(picked));
     await _load();
@@ -300,9 +315,7 @@ class _GroupSheetState extends State<_GroupSheet> {
             ],
           ),
           Text(
-            g.active
-                ? '${g.members.length} members · end-to-end encrypted'
-                : 'You\'re no longer in this group',
+            g.active ? '${g.members.length} members · end-to-end encrypted' : 'You\'re no longer in this group',
             textAlign: TextAlign.center,
             style: AppText.caption,
           ),

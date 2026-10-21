@@ -4,6 +4,7 @@
 pub mod base32;
 pub mod call;
 mod group;
+pub use group::MAX_GROUP;
 pub mod identity;
 pub mod invite;
 pub mod media;

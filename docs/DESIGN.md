@@ -94,6 +94,17 @@ Peer to peer, with no server (`core/src/group.rs`).
   - Keys for 4 past epochs are kept, so a message sent just before a membership change can still be read after it.
   - A message that can't be read yet is left unacknowledged and resent (live links resend every 30 seconds). It is dropped after 5 tries.
 
+## Groups at scale
+**Today:** groups have up to 20 people (`MAX_GROUP`, counting the admin). Every member's phone sends to every other member's: text costs little, but a photo is uploaded once per member (a 2 MB photo in a 20-person group is about 40 MB of upload), and a message reaches someone only while the sender and they are online at the same time.
+
+**Planned: members help deliver.** A group message is encrypted once and every member gets the identical sealed bytes; a photo's pieces are sealed with its own key and are identical too. Members can already read the group, so passing those bytes on costs no privacy.
+1. **Ids:** each group message is known by a hash of its sealed bytes.
+2. **Keeping:** members keep what they receive for 7 days (sealed, capped per group).
+3. **Catching up:** when two members connect, they swap short lists of the recent ids they have for their shared groups, then ask for what they're missing (new `Frame` variants at the end). A message reaches an offline member from whoever in the group is online when they come back, not only from its sender.
+4. **Photos and videos:** text still goes straight to everyone online (fast). For attachments, the sender uploads to a few online members, and the rest fetch the pieces from whoever has them, checked against the hash in the message.
+5. **Ticks:** each member still confirms to the sender directly, so ✓✓ keeps meaning everyone has it.
+6. **Then:** raise `MAX_GROUP` to 50, with a scale test (a simulated 50-person group, measuring upload per message and time to reach everyone).
+
 ## Media
 Photos, videos and files (`core/src/media.rs`).
 - **Encryption:** each attachment gets a random key. The file is encrypted with it in 64 KiB chunks (XChaCha20-Poly1305; the nonce is the blob id and chunk number) and stored like that in the media folder on both phones.
