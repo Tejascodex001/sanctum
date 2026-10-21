@@ -14,6 +14,7 @@ import 'src/rust/api/identity.dart';
 import 'src/rust/api/session.dart';
 import 'src/rust/api/sigil.dart';
 import 'src/rust/frb_generated.dart';
+import 'theme/appearance.dart';
 import 'theme/sigil_theme.dart';
 
 Future<void> main() async {
@@ -43,6 +44,7 @@ Future<void> main() async {
       } catch (_) {}
     }
     await Profile.prepareDecoy();
+    await Appearance.load();
     final publicKey = await identityPublicKey(secret: secret);
     final mySigil = await sigilForKey(publicKey: publicKey);
     runApp(SanctumApp(
@@ -72,13 +74,15 @@ class SanctumApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Sanctum',
-      debugShowCheckedModeBanner: false,
-      navigatorKey: AppLock.navigator,
-      theme: sanctumTheme(accent: mySigil.accent.color),
-      builder: (context, child) => AppLock(sigil: mySigil, child: child!),
-      home: home,
+    return Restyler(
+      builder: (context) => MaterialApp(
+        title: 'Sanctum',
+        debugShowCheckedModeBanner: false,
+        navigatorKey: AppLock.navigator,
+        theme: sanctumTheme(accent: Appearance.accent.value ?? mySigil.accent.color),
+        builder: (context, child) => AppLock(sigil: mySigil, child: child!),
+        home: home,
+      ),
     );
   }
 }

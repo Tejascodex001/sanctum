@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import 'tokens.dart';
 
 /// Material 3 as the foundation (accessibility, text input, platform
-/// behaviour), restyled with the Sigil tokens: neutral dark surfaces, our
-/// own type, and the user's sigil accent as the only strong colour.
+/// behaviour), restyled with the Sigil tokens: neutral surfaces (dark or
+/// light, see [Palette.light]), our own type, and one accent as the only
+/// strong colour.
 ThemeData sanctumTheme({Color accent = const Color(0xFF8B7CFF)}) {
   final onAccent = Palette.onColor(accent);
-  final scheme = ColorScheme.fromSeed(seedColor: accent, brightness: Brightness.dark).copyWith(
+  final brightness = Palette.light ? Brightness.light : Brightness.dark;
+  final scheme = ColorScheme.fromSeed(seedColor: accent, brightness: brightness).copyWith(
     primary: accent,
     onPrimary: onAccent,
     surface: Palette.bg,
@@ -25,12 +27,12 @@ ThemeData sanctumTheme({Color accent = const Color(0xFF8B7CFF)}) {
 
   return ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
+    brightness: brightness,
     colorScheme: scheme,
     fontFamily: 'Inter',
     scaffoldBackgroundColor: Palette.bg,
     splashFactory: InkSparkle.splashFactory,
-    textTheme: const TextTheme(
+    textTheme: TextTheme(
       displaySmall: AppText.display,
       titleLarge: AppText.title,
       titleMedium: AppText.heading,
@@ -40,12 +42,13 @@ ThemeData sanctumTheme({Color accent = const Color(0xFF8B7CFF)}) {
       labelLarge: buttonText,
       labelSmall: AppText.micro,
     ).apply(bodyColor: Palette.text, displayColor: Palette.text),
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
+      foregroundColor: Palette.text,
       elevation: 0,
       centerTitle: false,
-      titleTextStyle: AppText.title,
+      titleTextStyle: AppText.title.copyWith(color: Palette.text),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
@@ -58,7 +61,7 @@ ThemeData sanctumTheme({Color accent = const Color(0xFF8B7CFF)}) {
       style: OutlinedButton.styleFrom(
         minimumSize: const Size(64, 48),
         shape: shape,
-        side: const BorderSide(color: Palette.outlineStrong),
+        side: BorderSide(color: Palette.outlineStrong),
         foregroundColor: Palette.text,
         textStyle: buttonText,
       ),
@@ -74,7 +77,7 @@ ThemeData sanctumTheme({Color accent = const Color(0xFF8B7CFF)}) {
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.md), borderSide: BorderSide.none),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(Radii.md),
-        borderSide: const BorderSide(color: Palette.outline),
+        borderSide: BorderSide(color: Palette.outline),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(Radii.md),
@@ -87,7 +90,7 @@ ThemeData sanctumTheme({Color accent = const Color(0xFF8B7CFF)}) {
       contentTextStyle: AppText.body.copyWith(color: Palette.text),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
     ),
-    bottomSheetTheme: const BottomSheetThemeData(
+    bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: Palette.surface,
       surfaceTintColor: Colors.transparent,
       showDragHandle: true,
@@ -96,9 +99,9 @@ ThemeData sanctumTheme({Color accent = const Color(0xFF8B7CFF)}) {
       backgroundColor: Palette.surfaceHigh,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.lg)),
-      titleTextStyle: AppText.title,
+      titleTextStyle: AppText.title.copyWith(color: Palette.text),
     ),
-    dividerTheme: const DividerThemeData(color: Palette.outline, thickness: 1, space: 1),
+    dividerTheme: DividerThemeData(color: Palette.outline, thickness: 1, space: 1),
     // Material 3 pads list rows 16 left, 24 right, which looks off-centre
     // inside a row's highlight; even padding keeps rows centred.
     listTileTheme: const ListTileThemeData(contentPadding: EdgeInsets.symmetric(horizontal: Space.lg)),

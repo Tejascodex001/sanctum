@@ -100,7 +100,7 @@ class _Visual extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final preview = media.thumb.isEmpty
-        ? const ColoredBox(color: Palette.surface)
+        ? ColoredBox(color: Palette.surface)
         : ImageFiltered(
             imageFilter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
             child: Image.memory(Uint8List.fromList(media.thumb), fit: BoxFit.cover, gaplessPlayback: true),
@@ -265,7 +265,7 @@ class MediaTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final preview = media.thumb.isEmpty
-        ? const ColoredBox(color: Palette.surfaceHigh)
+        ? ColoredBox(color: Palette.surfaceHigh)
         : ImageFiltered(
             imageFilter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
             child: Image.memory(Uint8List.fromList(media.thumb), fit: BoxFit.cover, gaplessPlayback: true),

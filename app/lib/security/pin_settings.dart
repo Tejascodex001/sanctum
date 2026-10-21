@@ -94,11 +94,10 @@ class _PinSettingsState extends State<PinSettings> {
     final pin = _pin;
     if (pin == null) return const SizedBox(height: 64);
     final decoyProfile = Profile.decoy.value;
-    return Container(
-      decoration: BoxDecoration(
-        color: Palette.bg.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(Radii.md),
-      ),
+    return Material(
+      color: Palette.surface,
+      borderRadius: BorderRadius.circular(Radii.md),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
           ListTile(

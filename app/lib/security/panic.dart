@@ -105,7 +105,7 @@ class _HoldToWipeState extends State<HoldToWipe> with SingleTickerProviderStateM
 Future<void> showPanicSheet(BuildContext context) => showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
-      builder: (context) => const SafeArea(
+      builder: (context) => SafeArea(
         child: Padding(
           padding: EdgeInsets.fromLTRB(Space.xl, 0, Space.xl, Space.xl),
           child: Column(

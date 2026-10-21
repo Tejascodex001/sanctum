@@ -25,7 +25,7 @@ Future<void> showReleaseNotes(BuildContext context, UpdateInfo update) => showMo
                 padding: const EdgeInsets.fromLTRB(Space.xl, 0, Space.xl, Space.md),
                 children: [
                   if (update.notes.isEmpty)
-                    const Text('Improvements and fixes.', style: AppText.caption),
+                    Text('Improvements and fixes.', style: AppText.caption),
                   for (final notes in update.notes) ...[
                     if (update.notes.length > 1)
                       Padding(

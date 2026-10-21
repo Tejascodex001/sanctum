@@ -17,7 +17,7 @@ class ChatTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bg = card.sigil.background.color;
+    final bg = Palette.card(card.sigil.background.color, card.sigil.accent.color);
     return SizedBox(
       height: height,
       child: Stack(
@@ -99,7 +99,7 @@ class _Text extends StatelessWidget {
         Row(
           children: [
             if (card.hidden) ...[
-              const Icon(Icons.visibility_off_rounded, size: 13, color: Palette.textFaint),
+              Icon(Icons.visibility_off_rounded, size: 13, color: Palette.textFaint),
               const SizedBox(width: Space.xs),
             ],
             if (card.pinned) ...[

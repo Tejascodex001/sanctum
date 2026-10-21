@@ -51,7 +51,8 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Polls, date polls and plans** | Ask a question, find a day that works for everyone, or plan something (when and where) and see who's going. In friends' chats and groups |
 | ✅ | **Shared albums** | Albums in any chat or group. Everyone can add photos and videos, up to 30 at a time |
 | ✅ | **Daily moments** | One photo a day for all your friends, gone after 24 hours. Take it on the spot or pick one, and see friends' moments above your chats |
-| ✅ | **Reels** | Short public videos (under 3 minutes) from PeerTube and Mastodon sites, full screen; swipe for the next. Watched anonymously through Tor, with no account. Pick your own sites, and send a reel's link to a chat. (Pixelfed can't be shown: it needs an account) |
+| ✅ | **Settings** | Tap your sigil: your name, light or dark theme (or like the phone), accent colour (your sigil's or your pick), lock, staying connected, nearby, updates and panic wipe |
+| ✅ | **Reels** | Short public videos (under 3 minutes) from PeerTube and Mastodon sites, full screen; swipe for the next. Watched anonymously through Tor, with no account. Pick your own sites, and send a reel's link to several chats at once from a grid of sigils, with a message. (Pixelfed can't be shown: it needs an account) |
 | ✅ | **Search** | Type in the home search box to find any message, poll, plan or file name across your chats. Done on the phone; hidden chats only while revealed |
 | ✅ | **Catch-up** | "While you were away": who wrote, who mentioned you, plans to answer and polls waiting for you |
 

@@ -78,8 +78,8 @@ class _ChatStackState extends State<ChatStack> {
     if (cards.isEmpty) {
       final empty = widget.query.isEmpty
           ? widget.empty
-          : const Center(
-              child: Text('No matches', style: TextStyle(color: Colors.white38)),
+          : Center(
+              child: Text('No matches', style: TextStyle(color: Palette.textFaint)),
             );
       // Still scrollable, so an empty list can be pulled to refresh too.
       return LayoutBuilder(
@@ -149,10 +149,10 @@ class _StackedCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: card.sigil.background.color,
+      color: Palette.card(card.sigil.background.color, card.sigil.accent.color),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(Radii.lg),
-        side: const BorderSide(color: Palette.outline),
+        side: BorderSide(color: Palette.outline),
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(

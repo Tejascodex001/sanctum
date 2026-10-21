@@ -5,8 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../src/rust/api/fedi.dart';
-import '../src/rust/api/store.dart';
 import '../theme/tokens.dart';
+import 'share_sheet.dart';
 
 /// Pictures recently fetched through Tor, so swiping back doesn't fetch
 /// them again.
@@ -248,7 +248,7 @@ class _Nothing extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.slow_motion_video_rounded, size: 44, color: Palette.textMuted),
+            Icon(Icons.slow_motion_video_rounded, size: 44, color: Palette.textMuted),
             const SizedBox(height: Space.md),
             for (final l in lines)
               Padding(
@@ -295,38 +295,13 @@ class _ReelState extends State<_Reel> {
   var _expanded = false;
 
   Future<void> _share() async {
-    final chats = (await chatList()).where((c) => !c.hidden && c.active).toList();
-    if (!mounted) return;
-    final chat = await showModalBottomSheet<StoredChat>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheet) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(Space.xl, 0, Space.xl, Space.sm),
-              child: Text('SEND THE LINK TO', style: AppText.overline),
-            ),
-            for (final c in chats)
-              ListTile(
-                leading: Icon(c.kind == ChatKindView.group ? Icons.groups_rounded : Icons.person_rounded),
-                title: Text(c.title),
-                onTap: () => Navigator.pop(sheet, c),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (chat == null) return;
     final text = widget.post.text.split('\n').first;
-    await messageSend(
-      chatId: chat.id,
-      body: '${text.length > 80 ? '${text.substring(0, 80)}…' : text}\n${widget.post.link}'.trim(),
+    final sent = await showShareSheet(
+      context,
+      text: '${text.length > 80 ? '${text.substring(0, 80)}…' : text}\n${widget.post.link}'.trim(),
     );
-    HapticFeedback.lightImpact();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sent to ${chat.title}')));
+    if (sent > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(sent == 1 ? 'Sent' : 'Sent to $sent chats')));
     }
   }
 
@@ -653,7 +628,7 @@ class _SourcesSheetState extends State<_SourcesSheet> {
             children: [
               const Text('Where reels come from', style: AppText.title),
               const SizedBox(height: Space.xs),
-              const Text(
+              Text(
                 'Reels shows public videos under 3 minutes from these sites. Sanctum watches them privately: no '
                 'account, and the sites can\'t see who you are or where you are. Your list stays on this phone.',
                 style: AppText.caption,

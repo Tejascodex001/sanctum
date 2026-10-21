@@ -98,7 +98,7 @@ class _SearchResultsState extends State<SearchResults> {
         if (hits == null)
           const Padding(padding: EdgeInsets.all(Space.xl), child: Center(child: CircularProgressIndicator()))
         else if (hits.isEmpty)
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(horizontal: Space.lg, vertical: Space.md),
             child: Text('No messages with those words.', style: AppText.caption),
           )
@@ -231,7 +231,7 @@ class _CatchUpCardState extends State<CatchUpCard> with WidgetsBindingObserver {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.auto_awesome_rounded, size: 18, color: Palette.textMuted),
+                        Icon(Icons.auto_awesome_rounded, size: 18, color: Palette.textMuted),
                         const SizedBox(width: Space.sm),
                         const Expanded(child: Text('While you were away', style: AppText.heading)),
                         IconButton(

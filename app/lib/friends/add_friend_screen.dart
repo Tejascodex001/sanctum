@@ -174,7 +174,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
       key: const ValueKey('exchange'),
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
       children: [
-        const Text(
+        Text(
           'Each of you reads the other\'s code. Together: scan each other\'s QR. '
           'Far away: share yours, and type or paste theirs.',
           style: AppText.caption,
@@ -351,7 +351,7 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
           ),
         ),
         const SizedBox(height: Space.xl),
-        const Text('SAFETY NUMBER', textAlign: TextAlign.center, style: AppText.overline),
+        Text('SAFETY NUMBER', textAlign: TextAlign.center, style: AppText.overline),
         const SizedBox(height: 6),
         SelectableText(
           paired.safetyNumber,
@@ -416,19 +416,19 @@ class _SigilEquation extends StatelessWidget {
             Text(label, style: AppText.micro, maxLines: 1, overflow: TextOverflow.ellipsis),
           ],
         );
-    const op = TextStyle(fontFamily: 'SpaceGrotesk', fontSize: 22, color: Palette.textFaint);
+    final op = TextStyle(fontFamily: 'SpaceGrotesk', fontSize: 22, color: Palette.textFaint);
     return Column(
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             appear(0, small(mine, 'You')),
-            const Padding(padding: EdgeInsets.fromLTRB(14, 0, 14, 18), child: Text('+', style: op)),
+            Padding(padding: EdgeInsets.fromLTRB(14, 0, 14, 18), child: Text('+', style: op)),
             appear(0.25, small(theirs, friend)),
           ],
         ),
         const SizedBox(height: Space.sm),
-        appear(0.5, const Icon(Icons.keyboard_double_arrow_down_rounded, color: Palette.textFaint)),
+        appear(0.5, Icon(Icons.keyboard_double_arrow_down_rounded, color: Palette.textFaint)),
         const SizedBox(height: Space.sm),
         appear(
           0.75,
@@ -436,7 +436,7 @@ class _SigilEquation extends StatelessWidget {
             children: [
               SizedBox.square(dimension: 170, child: ClipOval(child: LivingSigil(spec: shared, period: 40))),
               const SizedBox(height: 8),
-              const Text('YOUR CHAT\'S SIGIL', style: AppText.overline),
+              Text('YOUR CHAT\'S SIGIL', style: AppText.overline),
             ],
           ),
         ),

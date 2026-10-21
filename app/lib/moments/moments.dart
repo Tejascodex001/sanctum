@@ -73,7 +73,7 @@ class _MomentsStripState extends State<MomentsStrip> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(Space.xl, 0, Space.xl, Space.sm),
               child: Text(
                 'One photo a day for all your friends. It disappears after 24 hours, and a new one replaces it.',
@@ -210,7 +210,7 @@ class _Bubble extends StatelessWidget {
     final face = thumb != null && thumb!.isNotEmpty
         ? Image.memory(thumb!, fit: BoxFit.cover, gaplessPlayback: true)
         : sigil == null
-            ? const ColoredBox(color: Palette.surfaceHigh)
+            ? ColoredBox(color: Palette.surfaceHigh)
             : SigilView(spec: sigil!);
     return GestureDetector(
       onTap: onTap,
@@ -237,7 +237,7 @@ class _Bubble extends StatelessWidget {
                     bottom: -2,
                     child: Container(
                       padding: const EdgeInsets.all(2),
-                      decoration: const BoxDecoration(color: Palette.bg, shape: BoxShape.circle),
+                      decoration: BoxDecoration(color: Palette.bg, shape: BoxShape.circle),
                       child: Container(
                         decoration: BoxDecoration(color: sigil?.accent.color ?? Palette.text, shape: BoxShape.circle),
                         child: Icon(Icons.add_rounded,
@@ -295,7 +295,7 @@ class _CaptionDialogState extends State<_CaptionDialog> {
             textCapitalization: TextCapitalization.sentences,
             decoration: const InputDecoration(hintText: 'Add a caption (optional)'),
           ),
-          const Text('All your friends will see it for 24 hours.', style: AppText.micro),
+          Text('All your friends will see it for 24 hours.', style: AppText.micro),
         ],
       ),
       actions: [

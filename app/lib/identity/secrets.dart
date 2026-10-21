@@ -39,6 +39,12 @@ Future<bool> loadFlag(String key, {required bool fallback}) async {
 
 Future<void> saveFlag(String key, bool on) => _storage.write(key: 'flag_$key', value: on ? '1' : '0');
 
+/// Other settings, as text (null: not set).
+Future<String?> loadSetting(String key) => _storage.read(key: 'setting_$key');
+
+Future<void> saveSetting(String key, String? value) =>
+    value == null ? _storage.delete(key: 'setting_$key') : _storage.write(key: 'setting_$key', value: value);
+
 /// Panic wipe: destroys every key and setting. Without the store key the
 /// database can never be decrypted, even if flash storage keeps old blocks.
 Future<void> wipeSecrets() => _storage.deleteAll();
@@ -51,9 +57,11 @@ enum PinMatch { real, decoy, wrong }
 Future<bool> hasPin() async => await _storage.read(key: 'pin_real') != null;
 Future<bool> hasDecoyPin() async => await _storage.read(key: 'pin_decoy') != null;
 
-Future<Uint8List> _pinSalt() => _loadOrCreate('pin_salt_v1', () async => Uint8List.fromList(
-      List<int>.generate(16, (_) => _random.nextInt(256)),
-    ));
+Future<Uint8List> _pinSalt() => _loadOrCreate(
+    'pin_salt_v1',
+    () async => Uint8List.fromList(
+          List<int>.generate(16, (_) => _random.nextInt(256)),
+        ));
 
 final _random = Random.secure();
 

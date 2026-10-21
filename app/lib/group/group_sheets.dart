@@ -100,7 +100,7 @@ class _FriendPickerState extends State<_FriendPicker> {
                   decoration: const InputDecoration(labelText: 'Group name', counterText: ''),
                 ),
               ),
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(Space.xl, Space.xs, Space.xl, Space.xs),
               child: Text(
                 'Only friends can be added. Each joins as soon as their phone is reached; '
@@ -109,7 +109,7 @@ class _FriendPickerState extends State<_FriendPicker> {
               ),
             ),
             if (widget.friends.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.all(Space.xl),
                 child: Text('No friends to add yet.', textAlign: TextAlign.center, style: AppText.caption),
               ),
@@ -308,7 +308,7 @@ class _GroupSheetState extends State<_GroupSheet> {
           const SizedBox(height: Space.lg),
           Row(
             children: [
-              const Expanded(child: Text('MEMBERS', style: AppText.overline)),
+              Expanded(child: Text('MEMBERS', style: AppText.overline)),
               if (admin)
                 TextButton.icon(
                   onPressed: _add,

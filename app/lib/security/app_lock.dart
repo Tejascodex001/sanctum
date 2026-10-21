@@ -312,7 +312,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
               alignment: const Alignment(0, 0.8),
               child: FadeTransition(
                 opacity: Tween(begin: 0.35, end: 0.9).animate(_pulse),
-                child: const Text('TAP TO UNLOCK', style: AppText.overline),
+                child: Text('TAP TO UNLOCK', style: AppText.overline),
               ),
             ),
             // In an emergency, wiping mustn't need unlocking first.

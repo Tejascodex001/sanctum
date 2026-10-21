@@ -19,8 +19,8 @@ import 'recall_views.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
 import '../security/app_lock.dart';
-import '../security/panic.dart';
-import '../security/pin_settings.dart';
+import '../settings/connection_settings.dart';
+import '../settings/settings_screen.dart';
 import '../update/release_notes.dart';
 import '../update/updater.dart';
 import '../sigil/sigil_painter.dart';
@@ -336,7 +336,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _actions(ChatCard card) {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: card.sigil.background.color,
+      backgroundColor: Palette.card(card.sigil.background.color, card.sigil.accent.color),
       showDragHandle: true,
       builder: (context) => SafeArea(
         child: Column(
@@ -647,65 +647,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _showMe() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: widget.mySigil.background.color,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (sheet) => ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.88),
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const Center(child: Text('YOUR SIGIL', style: AppText.overline)),
-            Padding(
-              padding: const EdgeInsets.all(24),
-              child: Center(
-                child: SizedBox.square(
-                  dimension: 220,
-                  child: ClipOval(child: LivingSigil(spec: widget.mySigil, period: 60)),
-                ),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(32, 0, 32, Space.md),
-              child: Text(
-                'Yours alone, made just for you. When you and a friend add each other, '
-                'you both see the same sigil for your chat.',
-                textAlign: TextAlign.center,
-                style: AppText.caption,
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
-              child: PinSettings(),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
-              child: _BackgroundSettings(),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
-              child: _NearbySettings(),
-            ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.md),
-              child: _UpdateSettings(),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.lg),
-              child: ListTile(
-                leading: const Icon(Icons.delete_forever_rounded, color: Palette.danger),
-                title: const Text('Panic wipe', style: TextStyle(color: Palette.danger)),
-                subtitle: const Text('Erase everything from this phone'),
-                onTap: () => showPanicSheet(context),
-              ),
-            ),
-            SizedBox(height: MediaQuery.paddingOf(sheet).bottom),
-          ],
-        ),
-      ),
-    );
+    HapticFeedback.selectionClick();
+    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => SettingsScreen(mySigil: widget.mySigil)));
   }
 
   @override
@@ -754,17 +697,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 icon: Icon(_searching ? Icons.search_off_rounded : Icons.search_rounded),
                               ),
                               const SizedBox(width: Space.xs),
-                              GestureDetector(
-                                onTap: _showMe,
-                                child: Container(
-                                  width: 38,
-                                  height: 38,
-                                  padding: const EdgeInsets.all(1.5),
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: widget.mySigil.accent.color.withValues(alpha: 0.6)),
+                              Tooltip(
+                                message: 'Settings',
+                                child: GestureDetector(
+                                  onTap: _showMe,
+                                  child: Container(
+                                    width: 38,
+                                    height: 38,
+                                    padding: const EdgeInsets.all(1.5),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: widget.mySigil.accent.color.withValues(alpha: 0.6)),
+                                    ),
+                                    child: ClipOval(child: SigilView(spec: widget.mySigil)),
                                   ),
-                                  child: ClipOval(child: SigilView(spec: widget.mySigil)),
                                 ),
                               ),
                             ],
@@ -967,8 +913,8 @@ class _NavBar extends StatelessWidget {
             label: 'Temp',
           ),
           NavigationDestination(
-            icon: icon(Icons.people_outline_rounded, requests, badge: _amber),
-            selectedIcon: icon(Icons.people_rounded, requests, badge: _amber),
+            icon: icon(Icons.people_outline_rounded, requests, badge: Palette.warning),
+            selectedIcon: icon(Icons.people_rounded, requests, badge: Palette.warning),
             label: 'Friends',
           ),
           const NavigationDestination(
@@ -981,8 +927,6 @@ class _NavBar extends StatelessWidget {
     );
   }
 }
-
-const _amber = Color(0xFFFFC145);
 
 class _SearchField extends StatelessWidget {
   const _SearchField({required this.controller, required this.onClose});
@@ -1189,7 +1133,7 @@ class _TempPicker extends StatelessWidget {
                 onTap: () => Navigator.pop(context, (true, f.chatId.toInt())),
               ),
             if (friends.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.all(Space.lg),
                 child: Text('Add a friend to start temp chats with them.', style: AppText.caption),
               ),
@@ -1198,7 +1142,7 @@ class _TempPicker extends StatelessWidget {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md)),
               leading: const SizedBox.square(dimension: 40, child: Icon(Icons.person_outline_rounded)),
               title: const Text('Just me', style: AppText.heading),
-              subtitle: const Text('Only on this phone', style: AppText.caption),
+              subtitle: Text('Only on this phone', style: AppText.caption),
               onTap: () => Navigator.pop(context, (true, null)),
             ),
           ],
@@ -1257,11 +1201,11 @@ class _RequestsBanner extends StatelessWidget {
                       style: AppText.body.copyWith(fontWeight: FontWeight.w600),
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const Text('Tap to answer in Friends', style: AppText.caption),
+                    Text('Tap to answer in Friends', style: AppText.caption),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Palette.textFaint),
+              Icon(Icons.chevron_right_rounded, color: Palette.textFaint),
             ],
           ),
         ),
@@ -1288,7 +1232,7 @@ class _SigilDot extends StatelessWidget {
         child: ClipOval(
           child: FutureBuilder<SigilSpec>(
             future: future,
-            builder: (context, s) => s.hasData ? SigilView(spec: s.data!) : const ColoredBox(color: Palette.surface),
+            builder: (context, s) => s.hasData ? SigilView(spec: s.data!) : ColoredBox(color: Palette.surface),
           ),
         ),
       ),
@@ -1314,7 +1258,7 @@ class _RequestTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: Palette.surface,
         borderRadius: BorderRadius.circular(Radii.md),
-        border: Border.all(color: _amber.withValues(alpha: 0.35)),
+        border: Border.all(color: Palette.warning.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1552,128 +1496,6 @@ class _FriendRow extends StatelessWidget {
 
 /// Whether Sanctum stays reachable while closed, and the battery exemption
 /// that keeps it reliable on phones with aggressive battery savers.
-class _BackgroundSettings extends StatefulWidget {
-  const _BackgroundSettings();
-
-  @override
-  State<_BackgroundSettings> createState() => _BackgroundSettingsState();
-}
-
-class _BackgroundSettingsState extends State<_BackgroundSettings> with WidgetsBindingObserver {
-  bool? _on;
-  bool _unrestricted = true;
-  bool _canNotify = true;
-  ({String brand, bool aggressive}) _brand = (brand: '', aggressive: false);
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _load();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  // Back from the system battery dialog.
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _load();
-  }
-
-  Future<void> _load() async {
-    final on = await Background.enabled();
-    final unrestricted = await Background.batteryUnrestricted();
-    final canNotify = await Background.canNotify();
-    final brand = await Background.brand();
-    if (!mounted) return;
-    setState(() {
-      _brand = brand;
-      _on = on;
-      _unrestricted = unrestricted;
-      _canNotify = canNotify;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final on = _on;
-    if (on == null) return const SizedBox(height: 64);
-    return Container(
-      decoration: BoxDecoration(
-        color: Palette.bg.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(Radii.md),
-      ),
-      child: Column(
-        children: [
-          SwitchListTile(
-            value: on,
-            title: const Text('Stay connected when closed'),
-            subtitle: Text(
-              on
-                  ? 'Messages and requests arrive and notify you. A quiet "Connected privately" notice stays while it runs.'
-                  : 'Messages wait on your friends\' phones until you open Sanctum.',
-              style: AppText.caption,
-            ),
-            onChanged: (v) async {
-              HapticFeedback.selectionClick();
-              setState(() => _on = v);
-              await Background.setEnabled(v);
-              if (v) await Background.requestNotifications();
-              await _load();
-            },
-          ),
-          if (!_canNotify)
-            const ListTile(
-              dense: true,
-              leading: Icon(Icons.notifications_off_outlined, color: _amber),
-              title: Text('Notifications are off'),
-              subtitle: Text('Tap to turn them on, so you hear about new messages.'),
-              onTap: Background.openNotificationSettings,
-            ),
-          if (on && !_unrestricted)
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.battery_alert_rounded, color: _amber),
-              title: const Text('Allow unrestricted battery'),
-              subtitle: const Text('Some phones cut background connections to save battery. Tap to allow.'),
-              onTap: Background.requestUnrestricted,
-            ),
-          if (on)
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.settings_suggest_rounded),
-              title: Text(_brand.aggressive ? 'Let Sanctum run on ${_brandName(_brand.brand)}' : 'Background settings'),
-              subtitle: Text(
-                _brand.aggressive
-                    ? '${_brandName(_brand.brand)} phones stop apps in the background. Opens the setting directly: '
-                        'turn on Autostart / allow background activity for Sanctum.'
-                    : 'Opens Sanctum\'s settings, if notifications stop after a while.',
-              ),
-              trailing: const Icon(Icons.open_in_new_rounded, size: 18),
-              onTap: Background.openBackgroundSettings,
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-String _brandName(String brand) => switch (brand) {
-      'xiaomi' => 'Xiaomi',
-      'oppo' => 'Oppo / Realme',
-      'vivo' => 'Vivo',
-      'huawei' => 'Huawei / Honor',
-      'samsung' => 'Samsung',
-      'oneplus' => 'OnePlus',
-      _ => brand.isEmpty ? 'this phone' : brand[0].toUpperCase() + brand.substring(1),
-    };
-
-/// Shown until background delivery is set up to be reliable on this phone:
-/// one tap opens the exact setting.
 class _ReliabilityBanner extends StatefulWidget {
   const _ReliabilityBanner();
 
@@ -1729,16 +1551,16 @@ class _ReliabilityBannerState extends State<_ReliabilityBanner> with WidgetsBind
               decoration: BoxDecoration(
                 color: Palette.surface,
                 borderRadius: BorderRadius.circular(Radii.md),
-                border: Border.all(color: _amber.withValues(alpha: 0.35)),
+                border: Border.all(color: Palette.warning.withValues(alpha: 0.35)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.battery_alert_rounded, color: _amber),
+                  const Icon(Icons.battery_alert_rounded, color: Palette.warning),
                   const SizedBox(width: Space.md),
                   Expanded(
                     child: Text(
                       _unrestricted
-                          ? '${_brandName(_brand)} phones can stop Sanctum in the background. Allow it to keep running.'
+                          ? '${brandName(_brand)} phones can stop Sanctum in the background. Allow it to keep running.'
                           : 'Allow Sanctum to run in the background, so messages reach you when it\'s closed.',
                       style: AppText.caption,
                     ),
@@ -1768,75 +1590,6 @@ class _ReliabilityBannerState extends State<_ReliabilityBanner> with WidgetsBind
 }
 
 /// Nearby: friends on the same Wi-Fi or hotspot, with no internet.
-class _NearbySettings extends StatefulWidget {
-  const _NearbySettings();
-
-  @override
-  State<_NearbySettings> createState() => _NearbySettingsState();
-}
-
-class _NearbySettingsState extends State<_NearbySettings> {
-  bool? _on;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    Background.nearbyEnabled().then((on) {
-      if (mounted) setState(() => _on = on);
-    });
-  }
-
-  Future<void> _set(bool on) async {
-    HapticFeedback.selectionClick();
-    setState(() {
-      _on = on;
-      _error = null;
-    });
-    try {
-      await NetBus.instance.setNearby(on);
-      await saveFlag('nearby', on);
-    } catch (e) {
-      await NetBus.instance.setNearby(false).catchError((_) {});
-      if (!mounted) return;
-      setState(() {
-        _on = false;
-        _error = 'Nearby couldn\'t start on this phone. Try turning it off and on again.';
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final on = _on;
-    if (on == null) return const SizedBox(height: 64);
-    return Container(
-      decoration: BoxDecoration(
-        color: Palette.bg.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(Radii.md),
-      ),
-      child: SwitchListTile(
-        value: on,
-        secondary: const Icon(Icons.wifi_tethering_rounded),
-        title: const Text('Nearby, without internet'),
-        subtitle: ValueListenableBuilder<bool>(
-          valueListenable: NetBus.instance.bluetooth,
-          builder: (context, bluetooth, _) => Text(
-            _error ??
-                'Chat with friends on the same Wi-Fi, a hotspot, or over Bluetooth, even offline. '
-                    'Over Wi-Fi they can see your local network address (never your internet one).'
-                    '${on ? (bluetooth ? '\nBluetooth: on' : '\nBluetooth: off (turn Bluetooth on and allow Nearby devices; needs Android 10 or newer)') : ''}',
-            style: AppText.caption.copyWith(color: _error == null ? null : Palette.danger),
-          ),
-        ),
-        onChanged: _set,
-      ),
-    );
-  }
-}
-
-/// "Build 27 is available": one tap downloads it through Tor and opens
-/// Android's installer.
 class _UpdateBanner extends StatelessWidget {
   const _UpdateBanner();
 
@@ -1911,74 +1664,3 @@ class _UpdateBanner extends StatelessWidget {
 }
 
 /// This build, and checking for a newer one.
-class _UpdateSettings extends StatefulWidget {
-  const _UpdateSettings();
-
-  @override
-  State<_UpdateSettings> createState() => _UpdateSettingsState();
-}
-
-class _UpdateSettingsState extends State<_UpdateSettings> {
-  bool _checking = false;
-  bool _auto = true;
-
-  @override
-  void initState() {
-    super.initState();
-    loadFlag('auto_update_check', fallback: true).then((v) {
-      if (mounted) setState(() => _auto = v);
-    });
-    Background.buildNumber().then((b) {
-      if (mounted) setState(() => Updater.instance.current = b);
-    });
-  }
-
-  Future<void> _check() async {
-    HapticFeedback.selectionClick();
-    setState(() => _checking = true);
-    await Updater.instance.check(force: true);
-    if (!mounted) return;
-    setState(() => _checking = false);
-    final u = Updater.instance;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(u.error.value ??
-            (u.available.value == null
-                ? 'Sanctum is up to date.'
-                : 'A new version is ready: tap Update on the home screen.')),
-      ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final current = Updater.instance.current;
-    return Container(
-      decoration: BoxDecoration(
-        color: Palette.bg.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(Radii.md),
-      ),
-      child: Column(
-        children: [
-          ListTile(
-            leading: const Icon(Icons.system_update_rounded),
-            title: Text(current == 0 ? 'Updates' : 'Sanctum version $current'),
-            subtitle:
-                const Text('Updates are downloaded privately, and only genuine Sanctum updates can be installed.'),
-            trailing: _checking
-                ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                : TextButton(onPressed: _check, child: const Text('Check')),
-          ),
-          SwitchListTile(
-            value: _auto,
-            title: const Text('Check automatically'),
-            onChanged: (v) {
-              setState(() => _auto = v);
-              saveFlag('auto_update_check', v);
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}

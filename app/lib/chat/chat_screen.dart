@@ -318,7 +318,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 if (widget.card.active)
                   _composer(accent)
                 else
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.all(Space.lg),
                     child: Text(
                       'You\'re no longer in this group.',
@@ -654,7 +654,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(Radii.xl), borderSide: BorderSide.none),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(Radii.xl),
-                  borderSide: const BorderSide(color: Palette.outline),
+                  borderSide: BorderSide(color: Palette.outline),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(Radii.xl),
@@ -776,7 +776,7 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(Space.xs, Space.xs, Space.sm, Space.sm),
-      decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Palette.outline))),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Palette.outline))),
       child: Row(
         children: [
           IconButton(
@@ -896,7 +896,7 @@ class _VerifyButtonState extends State<_VerifyButton> {
                   style: AppText.caption,
                 ),
                 const SizedBox(height: Space.lg),
-                const Text('SAFETY NUMBER', style: AppText.overline),
+                Text('SAFETY NUMBER', style: AppText.overline),
                 const SizedBox(height: 6),
                 SelectableText(number,
                     style: AppText.mono.copyWith(fontSize: 26, letterSpacing: 3, color: card.sigil.accent.color)),
@@ -1270,7 +1270,7 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
             child: Opacity(
               opacity: t,
               child: Transform.scale(
-                  scale: 0.6 + 0.4 * t, child: const Icon(Icons.reply_rounded, color: Palette.textMuted)),
+                  scale: 0.6 + 0.4 * t, child: Icon(Icons.reply_rounded, color: Palette.textMuted)),
             ),
           ),
           Transform.translate(offset: Offset(_dx, 0), child: widget.child),
@@ -1432,7 +1432,7 @@ class _ThreadSheetState extends State<_ThreadSheet> {
       height: MediaQuery.sizeOf(context).height * 0.8,
       child: Column(
         children: [
-          const Text('THREAD', style: AppText.overline),
+          Text('THREAD', style: AppText.overline),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(Space.md),
