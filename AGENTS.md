@@ -33,6 +33,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `core/src/recall.rs` | Search across chats and the "While you were away" catch-up |
 | `core/src/reaction.rs` | Emoji reactions: one per person per message, newest wins |
 | `core/src/typing.rs` | Typing signals: link-level, never stored or queued |
+| `core/src/taste.rs` | What Reels learns you like (on the phone only) and ranking reels by it |
 | `core/src/moment.rs` | Daily moments: one photo a day for every friend, gone after 24 hours |
 | `core/src/store.rs` | The encrypted SQLite store. Every row is sealed; index columns are keyed hashes |
 | `core/src/protocol.rs` | Wire types: `Frame` (link level) and `Content` (inside MLS) |
@@ -42,7 +43,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `net/src/nearby.rs` | Local-network discovery (per-friend rotating tags) and the `Reach` transport |
 | `core/src/nearby.rs` | Rotating Bluetooth IDs and the friends-only nearby key exchange |
 | `net/src/https.rs` | A small HTTPS client for updates and Reels, through Tor |
-| `net/src/fedi.rs` | Reels: reading short videos from PeerTube and Mastodon sites anonymously |
+| `net/src/fedi.rs` | Reels: reading short videos from Loops, PeerTube and Mastodon sites anonymously |
 | `net/src/relay.rs` | The on-phone relay that streams Reels videos through Tor |
 | `app/rust/src/api/` | The Dart-facing API (flutter_rust_bridge). Keep it thin; logic belongs in `core` |
 | `app/lib/settings/` | The Settings screen (opened from your sigil) |

@@ -1,5 +1,6 @@
 //! Reels from the Fediverse, read anonymously through Tor: short videos
-//! from PeerTube servers and from Mastodon-compatible servers' posts.
+//! from Loops (made for them), PeerTube servers and Mastodon-compatible
+//! servers' posts.
 //!
 //! (Pixelfed can't be read this way: it shows its feeds only to people
 //! signed in there.)
@@ -28,6 +29,8 @@ pub enum Kind {
     Videos,
     /// Mastodon or another Mastodon-compatible server: posts with videos.
     Social,
+    /// Loops: short upright videos, like Reels.
+    Loops,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -43,6 +46,47 @@ pub struct Post {
     /// Unix seconds.
     pub created_at: i64,
     pub media: Vec<Item>,
+    /// Likes on the site.
+    pub likes: u32,
+    /// Hashtags, lowercase, without '#'.
+    pub tags: Vec<String>,
+    /// The site's topic for it (PeerTube categories), if any.
+    pub topic: String,
+    /// Its language code, if known.
+    pub lang: String,
+}
+
+impl Post {
+    /// What a taste is learned from: who posted it, where, its hashtags,
+    /// topic and language. Never sent anywhere.
+    pub fn features(&self) -> Vec<String> {
+        let mut out = vec![format!("by:{}", self.handle.to_lowercase()), format!("src:{}", self.host)];
+        let mut tags: Vec<String> = self.tags.clone();
+        // Hashtags written in the text count too.
+        for word in self.text.split_whitespace() {
+            if let Some(t) = word.strip_prefix('#') {
+                let t: String = t.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                if t.chars().count() >= 2 {
+                    tags.push(t.to_lowercase());
+                }
+            }
+        }
+        tags.sort();
+        tags.dedup();
+        out.extend(tags.into_iter().take(12).map(|t| format!("tag:{t}")));
+        if !self.topic.is_empty() {
+            out.push(format!("topic:{}", self.topic.to_lowercase()));
+        }
+        if !self.lang.is_empty() {
+            out.push(format!("lang:{}", self.lang.to_lowercase()));
+        }
+        out
+    }
+
+    /// Taller than wide, like Reels.
+    pub fn upright(&self) -> bool {
+        self.media.first().is_some_and(|m| m.height > m.width && m.width > 0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -56,7 +100,8 @@ pub struct Item {
     pub width: u32,
     pub height: u32,
     pub duration_s: u32,
-    /// PeerTube: the video's id, to find its file.
+    /// PeerTube or Loops: the video's id, to find its file (Loops ids start
+    /// with "loops:").
     pub video_id: String,
 }
 
@@ -116,6 +161,7 @@ pub async fn feed(connect: &Connect, kind: Kind, host: &str, next: Option<&str>)
     for _ in 0..SCAN_PAGES {
         let page = match kind {
             Kind::Videos => peertube_page(connect, &host, cursor.as_deref()).await?,
+            Kind::Loops => return loops_page(connect, &host, cursor.as_deref()).await,
             Kind::Social => {
                 let max = cursor.as_ref().map(|n| format!("&max_id={}", urlencode(n))).unwrap_or_default();
                 let url = format!("https://{host}/api/v1/timelines/public?local=true&only_media=true&limit=40{max}");
@@ -159,14 +205,95 @@ async fn peertube_page(connect: &Connect, host: &str, cursor: Option<&str>) -> R
     Ok(with_mode(parse_videos(host, &json(connect, &list(start)).await?, start), "l"))
 }
 
+/// Loops, as a guest: first its picks of popular videos, then the
+/// videos of each trending hashtag ("t:<n>" cursors).
+async fn loops_page(connect: &Connect, host: &str, cursor: Option<&str>) -> Result<Page, FediError> {
+    let Some(n) = cursor.and_then(|c| c.strip_prefix("t:")).and_then(|n| n.parse::<usize>().ok()) else {
+        let v = json(connect, &format!("https://{host}/api/web/feed")).await?;
+        return Ok(Page { posts: parse_loops(host, &v, None), next: Some("t:0".into()) });
+    };
+    let tags = json(connect, &format!("https://{host}/api/v1/explore/tags")).await?;
+    let names: Vec<String> = list_of(&tags).iter().map(|t| str_of(t, "name")).filter(|t| !t.is_empty()).collect();
+    let Some(tag) = names.get(n) else { return Ok(Page::default()) };
+    let v = json(connect, &format!("https://{host}/api/v1/explore/tag-feed/{}", urlencode(tag))).await?;
+    Ok(Page {
+        posts: parse_loops(host, &v, Some(tag)),
+        next: (n + 1 < names.len()).then(|| format!("t:{}", n + 1)),
+    })
+}
+
+/// A response's list: `{"data": [...]}` or the list itself.
+fn list_of(v: &Value) -> Vec<Value> {
+    v.get("data").unwrap_or(v).as_array().cloned().unwrap_or_default()
+}
+
+/// Loops videos. Hashtag feeds leave out the file's address: those are
+/// looked up when played (`video_file`, with a "loops:" id).
+pub fn parse_loops(host: &str, v: &Value, tag: Option<&str>) -> Vec<Post> {
+    list_of(v)
+        .iter()
+        .filter(|d| !d.get("is_sensitive").and_then(Value::as_bool).unwrap_or(false))
+        .filter_map(|d| {
+            let id = non_empty(str_of(d, "id"), d.get("id").and_then(Value::as_u64).map(|n| n.to_string()).unwrap_or_default());
+            if id.is_empty() {
+                return None;
+            }
+            let media = d.get("media").cloned().unwrap_or_default();
+            let duration_s = media.get("duration").and_then(Value::as_f64).unwrap_or(0.0) as u32;
+            if duration_s > MAX_REEL_S {
+                return None;
+            }
+            let src = str_of(&media, "src_url");
+            let account = d.get("account").cloned().unwrap_or_default();
+            let user = str_of(&account, "username");
+            let mut tags: Vec<String> = d
+                .get("tags")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).map(str::to_lowercase).collect())
+                .unwrap_or_default();
+            tags.extend(tag.map(str::to_lowercase));
+            let dim = |k: &str| media.get(k).and_then(Value::as_u64).unwrap_or(0) as u32;
+            Some(Post {
+                host: host.into(),
+                author: non_empty(str_of(&account, "name"), user.clone()),
+                handle: if user.is_empty() { host.to_string() } else { format!("{user}@{host}") },
+                text: non_empty(str_of(d, "caption"), str_of(d, "captionText")),
+                link: non_empty(str_of(d, "url"), format!("https://{host}/v/{}", str_of(d, "hid"))),
+                created_at: parse_time(&str_of(d, "created_at")),
+                media: vec![Item {
+                    video: true,
+                    preview: str_of(&media, "thumbnail"),
+                    width: dim("width"),
+                    height: dim("height"),
+                    duration_s,
+                    video_id: if src.starts_with("https://") { String::new() } else { format!("loops:{id}") },
+                    url: if src.starts_with("https://") { src } else { String::new() },
+                }],
+                likes: d.get("likes").and_then(Value::as_u64).unwrap_or(0) as u32,
+                tags,
+                lang: str_of(d, "lang"),
+                id,
+                ..Default::default()
+            })
+        })
+        .collect()
+}
+
 fn with_mode(mut page: Page, mode: &str) -> Page {
     page.next = page.next.map(|n| format!("{mode}:{n}"));
     page
 }
 
-/// A PeerTube video's file, at a size that streams well over Tor.
+/// A video's file: Loops' (`video_id` "loops:<id>"), or PeerTube's at a
+/// size that streams well over Tor.
 pub async fn video_file(connect: &Connect, host: &str, video_id: &str) -> Result<String, FediError> {
     let host = clean_host(host)?;
+    if let Some(id) = video_id.strip_prefix("loops:") {
+        let v = json(connect, &format!("https://{host}/api/v1/video/{}", urlencode(id))).await?;
+        let v = v.get("data").unwrap_or(&v);
+        let src = v.get("media").map(|m| str_of(m, "src_url")).unwrap_or_default();
+        return if src.starts_with("https://") { Ok(src) } else { Err(FediError::Unreachable("no playable file".into())) };
+    }
     let url = format!("https://{host}/api/v1/videos/{}", urlencode(video_id));
     pick_file(&json(connect, &url).await?).ok_or_else(|| FediError::Unreachable("no playable file".into()))
 }
@@ -229,8 +356,15 @@ pub fn parse_videos(host: &str, v: &Value, start: u32) -> Page {
                     preview,
                     duration_s: d.get("duration").and_then(Value::as_u64).unwrap_or(0) as u32,
                     video_id: uuid,
+                    // Width over height, when the server says (newer ones do).
+                    width: d.get("aspectRatio").and_then(Value::as_f64).map_or(0, |r| (r * 1000.0) as u32),
+                    height: if d.get("aspectRatio").and_then(Value::as_f64).is_some() { 1000 } else { 0 },
                     ..Default::default()
                 }],
+                likes: d.get("likes").and_then(Value::as_u64).unwrap_or(0) as u32,
+                topic: d.get("category").map(|c| str_of(c, "label")).unwrap_or_default(),
+                lang: d.get("language").map(|c| str_of(c, "id")).unwrap_or_default(),
+                ..Default::default()
             })
         })
         .collect();
@@ -291,6 +425,14 @@ pub fn parse_statuses(host: &str, v: &Value) -> Page {
                 link: non_empty(str_of(s, "url"), str_of(s, "uri")),
                 created_at: parse_time(&str_of(s, "created_at")),
                 media,
+                likes: s.get("favourites_count").and_then(Value::as_u64).unwrap_or(0) as u32,
+                tags: s
+                    .get("tags")
+                    .and_then(Value::as_array)
+                    .map(|a| a.iter().map(|t| str_of(t, "name").to_lowercase()).filter(|t| !t.is_empty()).collect())
+                    .unwrap_or_default(),
+                lang: str_of(s, "language"),
+                ..Default::default()
             })
         })
         .collect();
@@ -449,5 +591,34 @@ mod tests {
         assert_eq!(p.media.len(), 1);
         assert_eq!((p.media[0].video, p.media[0].height, p.media[0].duration_s), (true, 1280, 14));
         assert_eq!(page.next.as_deref(), Some("6"));
+    }
+
+    #[test]
+    fn loops_feeds_and_tag_feeds() {
+        let feed = json!({"data": [
+            {"id": "7", "caption": "Sunset run #goa", "url": "https://loops.example/v/abc", "likes": 120,
+             "tags": ["Travel"], "created_at": "2024-03-01T00:00:00+00:00",
+             "account": {"name": "Ann", "username": "ann"},
+             "media": {"src_url": "https://cdn.example/7.mp4", "thumbnail": "https://cdn.example/7.jpg",
+                       "width": 720, "height": 1280, "duration": 14}},
+            {"id": "8", "is_sensitive": true, "media": {"src_url": "https://cdn.example/8.mp4"}},
+            {"id": "9", "media": {"src_url": "https://cdn.example/9.mp4", "duration": 900}}
+        ]});
+        let posts = parse_loops("loops.example", &feed, None);
+        assert_eq!(posts.len(), 1, "sensitive and long videos are left out");
+        let p = &posts[0];
+        assert_eq!((p.author.as_str(), p.handle.as_str(), p.likes), ("Ann", "ann@loops.example", 120));
+        assert_eq!(p.media[0].url, "https://cdn.example/7.mp4");
+        assert!(p.media[0].video_id.is_empty() && p.upright());
+        let f = p.features();
+        for want in ["by:ann@loops.example", "src:loops.example", "tag:travel", "tag:goa"] {
+            assert!(f.contains(&want.to_string()), "{want} in {f:?}");
+        }
+        // Hashtag feeds have no file address: it's looked up when played.
+        let tagged = json!({"data": [{"id": "10", "media": {"thumbnail": "https://cdn.example/10.jpg", "width": 1080, "height": 1920}}]});
+        let posts = parse_loops("loops.example", &tagged, Some("Cats"));
+        assert_eq!(posts[0].media[0].video_id, "loops:10");
+        assert!(posts[0].media[0].url.is_empty());
+        assert!(posts[0].features().contains(&"tag:cats".to_string()));
     }
 }

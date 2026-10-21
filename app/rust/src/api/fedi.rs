@@ -1,5 +1,6 @@
-//! The Reels tab: short public videos from the Fediverse (PeerTube and
-//! Mastodon-compatible servers), read anonymously through Tor. See
+//! The Reels tab: short public videos from the Fediverse (Loops, PeerTube
+//! and Mastodon-compatible servers), read anonymously through Tor, ranked
+//! on this phone by what you like (`sanctum_core::taste`). See
 //! `sanctum_net::fedi`.
 //!
 //! An opt-in fast mode reads Reels directly instead, without Tor: quicker,
@@ -11,14 +12,23 @@ use super::update::CONNECT;
 use sanctum_net::fedi::{self, FediError, Kind};
 use sanctum_net::https::{self, Connect};
 use sanctum_net::relay::Relay;
+use sanctum_core::taste::{Candidate, Signal, Taste};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{LazyLock, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Which servers to read, kept (sealed) on this phone only.
 const SOURCES: &[u8] = b"fedi:sources";
 /// Reels' fast mode (no Tor) is on. Kept sealed; off unless chosen.
 const DIRECT: &[u8] = b"fedi:direct";
+/// What Reels has learned you like (sealed, never sent).
+const TASTE: &[u8] = b"fedi:taste";
+/// Loops was added to a list saved before it existed.
+const LOOPS_ADDED: &[u8] = b"fedi:loops-added";
+const LOOPS: &str = "loops.video";
 /// Until the user picks their own.
 const DEFAULTS: &[(FediKind, &str)] = &[
+    (FediKind::Loops, LOOPS),
     (FediKind::Videos, "tilvids.com"),
     (FediKind::Videos, "makertube.net"),
     (FediKind::Videos, "framatube.org"),
@@ -32,6 +42,8 @@ pub enum FediKind {
     Videos,
     /// Mastodon or another Mastodon-compatible server.
     Social,
+    /// Loops: short upright videos.
+    Loops,
 }
 
 #[derive(Clone)]
@@ -49,6 +61,10 @@ pub struct FediPost {
     pub link: String,
     pub created_at: i64,
     pub media: Vec<FediItem>,
+    /// Likes on the site.
+    pub likes: u32,
+    /// We gave it a heart.
+    pub liked: bool,
 }
 
 pub struct FediItem {
@@ -62,6 +78,7 @@ pub struct FediItem {
 }
 
 /// Why a server's feed couldn't be shown.
+#[derive(Clone, Copy)]
 pub enum FediProblem {
     /// Not connected to Tor yet (never in fast mode).
     Offline,
@@ -84,12 +101,23 @@ fn kind_code(kind: FediKind) -> &'static str {
         FediKind::Videos => "videos",
         // "photos": what these were called before reels.
         FediKind::Social => "photos",
+        FediKind::Loops => "loops",
     }
 }
 
 /// The servers Explore reads.
 pub fn fedi_sources() -> anyhow::Result<Vec<FediSource>> {
-    let stored: Option<Vec<String>> = session::with(|s| Ok(s.store.kv_get(SOURCES)?))?;
+    let mut stored: Option<Vec<String>> = session::with(|s| Ok(s.store.kv_get(SOURCES)?))?;
+    // Lists saved before Loops get it once (it can be removed again).
+    if let Some(list) = stored.as_mut() {
+        if !session::with(|s| Ok(s.store.kv_get::<bool>(LOOPS_ADDED)?))?.unwrap_or(false) {
+            if !list.iter().any(|e| e.starts_with("loops:")) {
+                list.insert(0, format!("loops:{LOOPS}"));
+                session::with(|s| Ok(s.store.kv_put(SOURCES, &*list)?))?;
+            }
+            session::with(|s| Ok(s.store.kv_put(LOOPS_ADDED, &true)?))?;
+        }
+    }
     Ok(match stored {
         Some(list) => list
             .iter()
@@ -98,6 +126,7 @@ pub fn fedi_sources() -> anyhow::Result<Vec<FediSource>> {
                 let kind = match kind {
                     "videos" => FediKind::Videos,
                     "photos" => FediKind::Social,
+                    "loops" => FediKind::Loops,
                     _ => return None,
                 };
                 // Pixelfed shows nothing without signing in there.
@@ -205,38 +234,9 @@ pub fn fedi_feed(kind: FediKind, host: String, next: Option<String>) -> FediPage
             problem: Some(FediProblem::Offline),
         };
     };
-    let kind = match kind {
-        FediKind::Videos => Kind::Videos,
-        FediKind::Social => Kind::Social,
-    };
-    match runtime().block_on(fedi::feed(&connect, kind, &host, next.as_deref())) {
+    match runtime().block_on(fedi::feed(&connect, net_kind(kind), &host, next.as_deref())) {
         Ok(page) => FediPage {
-            posts: page
-                .posts
-                .into_iter()
-                .map(|p| FediPost {
-                    id: p.id,
-                    host: p.host,
-                    author: p.author,
-                    handle: p.handle,
-                    text: p.text,
-                    link: p.link,
-                    created_at: p.created_at,
-                    media: p
-                        .media
-                        .into_iter()
-                        .map(|m| FediItem {
-                            video: m.video,
-                            url: m.url,
-                            preview: m.preview,
-                            width: m.width,
-                            height: m.height,
-                            duration_s: m.duration_s,
-                            video_id: m.video_id,
-                        })
-                        .collect(),
-                })
-                .collect(),
+            posts: page.posts.into_iter().map(|p| post_view(p, false)).collect(),
             next: page.next,
             problem: None,
         },
@@ -248,6 +248,253 @@ pub fn fedi_feed(kind: FediKind, host: String, next: Option<String>) -> FediPage
     }
 }
 
+fn net_kind(kind: FediKind) -> Kind {
+    match kind {
+        FediKind::Videos => Kind::Videos,
+        FediKind::Social => Kind::Social,
+        FediKind::Loops => Kind::Loops,
+    }
+}
+
+fn post_view(p: fedi::Post, liked: bool) -> FediPost {
+    FediPost {
+        id: p.id,
+        host: p.host,
+        author: p.author,
+        handle: p.handle,
+        text: p.text,
+        link: p.link,
+        created_at: p.created_at,
+        likes: p.likes,
+        liked,
+        media: p
+            .media
+            .into_iter()
+            .map(|m| FediItem {
+                video: m.video,
+                url: m.url,
+                preview: m.preview,
+                width: m.width,
+                height: m.height,
+                duration_s: m.duration_s,
+                video_id: m.video_id,
+            })
+            .collect(),
+    }
+}
+
+// ---- The ranked feed ------------------------------------------------------
+
+/// Reels fetched but not shown yet, where each site's feed is up to, and
+/// what's known about the reels already shown (for learning from them).
+#[flutter_rust_bridge::frb(ignore)]
+#[derive(Default)]
+struct Reels {
+    pool: Vec<fedi::Post>,
+    /// Per source: the next page (None: no more).
+    cursors: HashMap<String, Option<String>>,
+    problems: HashMap<String, FediSourceProblem>,
+    shown: HashMap<String, Vec<String>>,
+    shown_order: VecDeque<String>,
+}
+
+static REELS: LazyLock<Mutex<Reels>> = LazyLock::new(Default::default);
+/// Reels shown that are still remembered, for learning from them.
+const MAX_SHOWN: usize = 500;
+
+pub struct FediSourceProblem {
+    pub kind: FediKind,
+    pub host: String,
+    pub problem: FediProblem,
+}
+
+impl Clone for FediSourceProblem {
+    fn clone(&self) -> Self {
+        Self { kind: self.kind, host: self.host.clone(), problem: self.problem }
+    }
+}
+
+pub struct ReelsPage {
+    pub posts: Vec<FediPost>,
+    /// Sites that couldn't be read, and why.
+    pub problems: Vec<FediSourceProblem>,
+}
+
+/// What happened with a reel, for learning what you like.
+pub enum ReelSignal {
+    Like,
+    Unlike,
+    Share,
+    /// Watched `times` its length (1.0: once to the end).
+    Watched,
+    /// Swiped away within a couple of seconds.
+    Skipped,
+}
+
+fn now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+fn key_of(host: &str, id: &str) -> String {
+    format!("{host}/{id}")
+}
+
+fn source_key(s: &FediSource) -> String {
+    format!("{}:{}", kind_code(s.kind), s.host)
+}
+
+fn load_taste() -> Taste {
+    session::with(|s| Ok(s.store.kv_get::<Taste>(TASTE)?)).ok().flatten().unwrap_or_default()
+}
+
+fn save_taste(t: &Taste) {
+    let _ = session::with(|s| Ok(s.store.kv_put(TASTE, t)?));
+}
+
+/// The next `count` reels, best fits for your taste first, with some new
+/// things mixed in. `fresh` starts the sites' feeds again (pull to
+/// refresh). Reels shown in the last two days aren't shown again.
+pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
+    let count = count.clamp(1, 20) as usize;
+    let sources = fedi_sources()?;
+    let mut taste = load_taste();
+    let at = now();
+    if fresh {
+        let mut r = REELS.lock().unwrap();
+        r.pool.clear();
+        r.cursors.clear();
+        r.problems.clear();
+    }
+    let Some(connect) = connect() else {
+        return Ok(ReelsPage {
+            posts: Vec::new(),
+            problems: sources
+                .iter()
+                .map(|s| FediSourceProblem { kind: s.kind, host: s.host.clone(), problem: FediProblem::Offline })
+                .collect(),
+        });
+    };
+    for _ in 0..3 {
+        // What to fetch, decided under the lock; fetched without it.
+        let due: Vec<(FediSource, Option<String>)> = {
+            let r = REELS.lock().unwrap();
+            if r.pool.len() >= count * 3 {
+                break;
+            }
+            sources
+                .iter()
+                .filter_map(|s| match r.cursors.get(&source_key(s)) {
+                    Some(None) => None,
+                    Some(Some(c)) => Some((s.clone(), Some(c.clone()))),
+                    None => Some((s.clone(), None)),
+                })
+                .collect()
+        };
+        if due.is_empty() {
+            break;
+        }
+        let pages = runtime().block_on(async {
+            let mut tasks = Vec::new();
+            for (s, cursor) in &due {
+                let (connect, host, cursor, kind) = (connect.clone(), s.host.clone(), cursor.clone(), net_kind(s.kind));
+                tasks.push(runtime().spawn(async move { fedi::feed(&connect, kind, &host, cursor.as_deref()).await }));
+            }
+            let mut out = Vec::new();
+            for t in tasks {
+                out.push(t.await.unwrap_or_else(|e| Err(FediError::Unreachable(e.to_string()))));
+            }
+            out
+        });
+        let mut r = REELS.lock().unwrap();
+        for ((s, _), page) in due.iter().zip(pages) {
+            let key = source_key(s);
+            match page {
+                Ok(page) => {
+                    r.problems.remove(&key);
+                    r.cursors.insert(key, page.next);
+                    for p in page.posts {
+                        let k = key_of(&p.host, &p.id);
+                        let known = r.shown.contains_key(&k) || r.pool.iter().any(|q| q.host == p.host && q.id == p.id);
+                        if !known && !taste.seen_recently(&k, at) && !p.media.is_empty() {
+                            r.pool.push(p);
+                        }
+                    }
+                }
+                Err(e) => {
+                    r.cursors.insert(key.clone(), None);
+                    r.problems.insert(key, FediSourceProblem { kind: s.kind, host: s.host.clone(), problem: problem(e) });
+                }
+            }
+        }
+    }
+    let mut r = REELS.lock().unwrap();
+    let candidates: Vec<Candidate> = r
+        .pool
+        .iter()
+        .map(|p| Candidate {
+            key: key_of(&p.host, &p.id),
+            author: p.handle.clone(),
+            features: p.features(),
+            likes: p.likes,
+            upright: p.upright(),
+            age_s: at.saturating_sub(p.created_at.max(0) as u64),
+        })
+        .collect();
+    let mut picked = taste.rank(&candidates, count, &mut rand::thread_rng());
+    let order = picked.clone();
+    picked.sort_unstable_by(|a, b| b.cmp(a));
+    let mut taken: HashMap<usize, fedi::Post> = HashMap::new();
+    for i in picked {
+        taken.insert(i, r.pool.remove(i));
+    }
+    let mut posts = Vec::new();
+    for i in order {
+        let p = taken.remove(&i).expect("picked once");
+        let c = &candidates[i];
+        taste.mark_seen(&c.key, at);
+        r.shown.insert(c.key.clone(), c.features.clone());
+        r.shown_order.push_back(c.key.clone());
+        while r.shown_order.len() > MAX_SHOWN {
+            if let Some(old) = r.shown_order.pop_front() {
+                r.shown.remove(&old);
+            }
+        }
+        let liked = taste.liked(&c.key);
+        posts.push(post_view(p, liked));
+    }
+    save_taste(&taste);
+    Ok(ReelsPage { posts, problems: r.problems.values().cloned().collect() })
+}
+
+/// Learns from what you did with a shown reel. For `Watched`, `times` is
+/// how many times its length you watched.
+pub fn reels_signal(host: String, id: String, signal: ReelSignal, times: f32) -> anyhow::Result<()> {
+    let key = key_of(&host, &id);
+    let Some(features) = REELS.lock().unwrap().shown.get(&key).cloned() else { return Ok(()) };
+    let mut taste = load_taste();
+    let signal = match signal {
+        ReelSignal::Like => {
+            taste.set_liked(&key, true);
+            Signal::Like
+        }
+        ReelSignal::Unlike => {
+            taste.set_liked(&key, false);
+            Signal::Unlike
+        }
+        ReelSignal::Share => Signal::Share,
+        ReelSignal::Watched => Signal::Watched(times),
+        ReelSignal::Skipped => Signal::Skipped,
+    };
+    taste.learn(&features, signal);
+    save_taste(&taste);
+    Ok(())
+}
+
+/// Forgets what Reels learned you like (Settings).
+pub fn reels_forget_taste() -> anyhow::Result<()> {
+    session::with(|s| Ok(s.store.kv_put(TASTE, &Taste::default())?))
+}
+
 /// A picture, through Tor or directly in fast mode (None if it couldn't
 /// be fetched).
 pub fn fedi_image(url: String) -> Option<Vec<u8>> {
@@ -257,8 +504,8 @@ pub fn fedi_image(url: String) -> Option<Vec<u8>> {
 
 /// The address the video player streams from. Normally a local one: the
 /// relay fetches the video through Tor. In fast mode, the video's own
-/// `https://` address, which the player opens directly. For PeerTube pass
-/// `video_id` (and an empty `url`).
+/// `https://` address, which the player opens directly. For PeerTube and
+/// Loops videos without an address, pass `video_id` (and an empty `url`).
 pub fn fedi_video(host: String, url: String, video_id: String) -> Option<String> {
     let direct = fedi_direct().unwrap_or(false);
     let url = if url.is_empty() {

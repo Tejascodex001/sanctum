@@ -159,10 +159,16 @@ A fourth tab of short public videos, full screen, one after another (`net/src/fe
   - Feeds and pictures use `https::direct()`: plain TCP to the site, then the same TLS checks as always. It refuses addresses on the phone or the local network (loopback, private, link-local, carrier NAT), so a post can't point the app at the user's router.
   - Videos skip the relay: `fedi_video` returns the real `https://` address and the player streams it itself (Android still forbids plain HTTP anywhere but 127.0.0.1).
   - Feeds don't wait for Tor: there's no "not connected" problem in fast mode.
+- **Loops** (`loops.video` by default) is the main source: short upright videos, like Reels. Read as a guest: `/api/web/feed` (its picks of popular videos), then each trending hashtag's `/api/v1/explore/tag-feed/{name}` ("t:<n>" cursors). Hashtag feeds leave out the file address, so it's looked up when played (`/api/v1/video/{id}`, "loops:" video ids). Lists saved before Loops get it added once (`kv` "fedi:loops-added").
 - **Only short videos** (3 minutes or less, `MAX_REEL_S`):
   - PeerTube: its search with `durationMax`, newest first, including videos the site knows from others. If a site's search won't do that, its video list is read 100 at a time and the short ones kept.
   - Mastodon-compatible sites: the local public timeline with media only, keeping short videos. Sensitive posts and live streams are left out.
-  - A call reads up to 3 pages until it has 6 reels. Feeds from several sites are interleaved.
+  - A call reads up to 3 pages until it has 6 reels.
+- **Picked for you, on the phone** (`core/src/taste.rs`, `reels_next`):
+  - Each reel has features: who posted it, the site, its hashtags (and #words in its text), topic and language.
+  - A taste (`kv` "fedi:taste", sealed, never sent) holds a weight per feature. A heart adds 2, a share 2.5, watching to the end and again up to about 2, half-watching nearly nothing, a skip (swiped away within 2 seconds) takes off 0.6. Who posted counts fully; hashtags share the rest. Old weights fade a little with each signal, and each is capped so one signal can't take over.
+  - Reels fetched but not shown wait in a pool (the next pages of every site are fetched in parallel until there are 3 times as many as asked for). Each is scored: taste fit + a little for likes on the site + 1.2 for upright + freshness, plus some chance. 1 in 5 picks is random, to find new things, and the same person never comes twice in a row from taste picks.
+  - Reels shown in the last two days aren't shown again. Hearts are remembered so a reel shown again keeps its heart. "Start Reels afresh" in Settings forgets the taste.
 - **Pixelfed can't be used:** it shows its feeds only to signed-in people. Pixelfed sites saved before are dropped from the list.
 - **Videos:** the player only speaks plain HTTP, so it's given `http://127.0.0.1:port/<token>`. A relay on the phone forwards each request, ranges included, to the real `https://` address through Tor, and follows redirects itself, so the player never connects anywhere else. It listens on loopback only and answers only for random tokens it handed out. Android's network security config allows plain HTTP to 127.0.0.1 and nothing else. PeerTube videos play at up to 480p. The next reel starts loading while the current one plays, so at most two stream at once.
 - Sending a reel to a chat sends its link as a message. Nothing is fetched from the link for a preview.

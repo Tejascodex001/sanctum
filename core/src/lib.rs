@@ -14,6 +14,7 @@ pub mod poll;
 pub mod protocol;
 pub mod reaction;
 pub mod recall;
+pub mod taste;
 pub mod session;
 pub mod sigil;
 pub mod store;

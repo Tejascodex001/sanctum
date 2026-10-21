@@ -6,8 +6,10 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `connect`, `connector`, `kind_code`, `player_url`, `problem`, `relayed`, `save`, `tor`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `eq`
+// These functions are ignored because they are not marked as `pub`: `connect`, `connector`, `key_of`, `kind_code`, `load_taste`, `net_kind`, `now`, `player_url`, `post_view`, `problem`, `relayed`, `save_taste`, `save`, `source_key`, `tor`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Reels`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`
+// These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`
 
 /// The servers Explore reads.
 Future<List<FediSource>> fediSources() =>
@@ -42,6 +44,30 @@ Future<FediPage> fediFeed({
   next: next,
 );
 
+/// The next `count` reels, best fits for your taste first, with some new
+/// things mixed in. `fresh` starts the sites' feeds again (pull to
+/// refresh). Reels shown in the last two days aren't shown again.
+Future<ReelsPage> reelsNext({required int count, required bool fresh}) =>
+    RustLib.instance.api.crateApiFediReelsNext(count: count, fresh: fresh);
+
+/// Learns from what you did with a shown reel. For `Watched`, `times` is
+/// how many times its length you watched.
+Future<void> reelsSignal({
+  required String host,
+  required String id,
+  required ReelSignal signal,
+  required double times,
+}) => RustLib.instance.api.crateApiFediReelsSignal(
+  host: host,
+  id: id,
+  signal: signal,
+  times: times,
+);
+
+/// Forgets what Reels learned you like (Settings).
+Future<void> reelsForgetTaste() =>
+    RustLib.instance.api.crateApiFediReelsForgetTaste();
+
 /// A picture, through Tor or directly in fast mode (None if it couldn't
 /// be fetched).
 Future<Uint8List?> fediImage({required String url}) =>
@@ -49,8 +75,8 @@ Future<Uint8List?> fediImage({required String url}) =>
 
 /// The address the video player streams from. Normally a local one: the
 /// relay fetches the video through Tor. In fast mode, the video's own
-/// `https://` address, which the player opens directly. For PeerTube pass
-/// `video_id` (and an empty `url`).
+/// `https://` address, which the player opens directly. For PeerTube and
+/// Loops videos without an address, pass `video_id` (and an empty `url`).
 Future<String?> fediVideo({
   required String host,
   required String url,
@@ -110,6 +136,9 @@ enum FediKind {
 
   /// Mastodon or another Mastodon-compatible server.
   social,
+
+  /// Loops: short upright videos.
+  loops,
 }
 
 class FediPage {
@@ -142,6 +171,12 @@ class FediPost {
   final PlatformInt64 createdAt;
   final List<FediItem> media;
 
+  /// Likes on the site.
+  final int likes;
+
+  /// We gave it a heart.
+  final bool liked;
+
   const FediPost({
     required this.id,
     required this.host,
@@ -151,6 +186,8 @@ class FediPost {
     required this.link,
     required this.createdAt,
     required this.media,
+    required this.likes,
+    required this.liked,
   });
 
   @override
@@ -162,7 +199,9 @@ class FediPost {
       text.hashCode ^
       link.hashCode ^
       createdAt.hashCode ^
-      media.hashCode;
+      media.hashCode ^
+      likes.hashCode ^
+      liked.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -176,7 +215,9 @@ class FediPost {
           text == other.text &&
           link == other.link &&
           createdAt == other.createdAt &&
-          media == other.media;
+          media == other.media &&
+          likes == other.likes &&
+          liked == other.liked;
 }
 
 /// Why a server's feed couldn't be shown.
@@ -210,4 +251,61 @@ class FediSource {
           runtimeType == other.runtimeType &&
           kind == other.kind &&
           host == other.host;
+}
+
+class FediSourceProblem {
+  final FediKind kind;
+  final String host;
+  final FediProblem problem;
+
+  const FediSourceProblem({
+    required this.kind,
+    required this.host,
+    required this.problem,
+  });
+
+  @override
+  int get hashCode => kind.hashCode ^ host.hashCode ^ problem.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FediSourceProblem &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind &&
+          host == other.host &&
+          problem == other.problem;
+}
+
+/// What happened with a reel, for learning what you like.
+enum ReelSignal {
+  like,
+  unlike,
+  share,
+
+  /// Watched `times` its length (1.0: once to the end).
+  watched,
+
+  /// Swiped away within a couple of seconds.
+  skipped,
+}
+
+class ReelsPage {
+  final List<FediPost> posts;
+
+  /// Sites that couldn't be read, and why.
+  final List<FediSourceProblem> problems;
+
+  const ReelsPage({required this.posts, required this.problems});
+
+  @override
+  int get hashCode => posts.hashCode ^ problems.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReelsPage &&
+          runtimeType == other.runtimeType &&
+          posts == other.posts &&
+          problems == other.problems;
 }

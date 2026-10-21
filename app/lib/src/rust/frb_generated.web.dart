@@ -94,6 +94,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ChatKindView dco_decode_chat_kind_view(dynamic raw);
 
   @protected
+  double dco_decode_f_32(dynamic raw);
+
+  @protected
   double dco_decode_f_64(dynamic raw);
 
   @protected
@@ -113,6 +116,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FediSource dco_decode_fedi_source(dynamic raw);
+
+  @protected
+  FediSourceProblem dco_decode_fedi_source_problem(dynamic raw);
 
   @protected
   FriendView dco_decode_friend_view(dynamic raw);
@@ -146,6 +152,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FediSource> dco_decode_list_fedi_source(dynamic raw);
+
+  @protected
+  List<FediSourceProblem> dco_decode_list_fedi_source_problem(dynamic raw);
 
   @protected
   List<FriendView> dco_decode_list_friend_view(dynamic raw);
@@ -280,6 +289,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ReactionView dco_decode_reaction_view(dynamic raw);
 
   @protected
+  ReelSignal dco_decode_reel_signal(dynamic raw);
+
+  @protected
+  ReelsPage dco_decode_reels_page(dynamic raw);
+
+  @protected
   ReleaseNotes dco_decode_release_notes(dynamic raw);
 
   @protected
@@ -390,6 +405,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ChatKindView sse_decode_chat_kind_view(SseDeserializer deserializer);
 
   @protected
+  double sse_decode_f_32(SseDeserializer deserializer);
+
+  @protected
   double sse_decode_f_64(SseDeserializer deserializer);
 
   @protected
@@ -409,6 +427,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FediSource sse_decode_fedi_source(SseDeserializer deserializer);
+
+  @protected
+  FediSourceProblem sse_decode_fedi_source_problem(
+    SseDeserializer deserializer,
+  );
 
   @protected
   FriendView sse_decode_friend_view(SseDeserializer deserializer);
@@ -444,6 +467,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FediSource> sse_decode_list_fedi_source(SseDeserializer deserializer);
+
+  @protected
+  List<FediSourceProblem> sse_decode_list_fedi_source_problem(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<FriendView> sse_decode_list_friend_view(SseDeserializer deserializer);
@@ -604,6 +632,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ReactionView sse_decode_reaction_view(SseDeserializer deserializer);
 
   @protected
+  ReelSignal sse_decode_reel_signal(SseDeserializer deserializer);
+
+  @protected
+  ReelsPage sse_decode_reels_page(SseDeserializer deserializer);
+
+  @protected
   ReleaseNotes sse_decode_release_notes(SseDeserializer deserializer);
 
   @protected
@@ -745,6 +779,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_chat_kind_view(ChatKindView self, SseSerializer serializer);
 
   @protected
+  void sse_encode_f_32(double self, SseSerializer serializer);
+
+  @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
 
   @protected
@@ -764,6 +801,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_fedi_source(FediSource self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_fedi_source_problem(
+    FediSourceProblem self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_friend_view(FriendView self, SseSerializer serializer);
@@ -804,6 +847,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_fedi_source(
     List<FediSource> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_fedi_source_problem(
+    List<FediSourceProblem> self,
     SseSerializer serializer,
   );
 
@@ -1016,6 +1065,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_reaction_view(ReactionView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reel_signal(ReelSignal self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reels_page(ReelsPage self, SseSerializer serializer);
 
   @protected
   void sse_encode_release_notes(ReleaseNotes self, SseSerializer serializer);
