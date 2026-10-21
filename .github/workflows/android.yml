@@ -3,6 +3,8 @@ name: Android APK
 on:
   push:
     branches: [main]
+    # The website publishes on its own (pages.yml); it isn't an app update.
+    paths-ignore: ["website/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
