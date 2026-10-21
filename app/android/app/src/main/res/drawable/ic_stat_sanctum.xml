@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Status bar icon: a simple eight-pointed sigil, white on transparent. -->
+<!-- Status bar icon: the door, white on transparent. Generated from one drawing (the Sanctuary door). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -7,5 +7,9 @@
     android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M12,1.5L14.2,8.2L20.9,5.6L16.9,11.4L22.5,12L16.9,12.6L20.9,18.4L14.2,15.8L12,22.5L9.8,15.8L3.1,18.4L7.1,12.6L1.5,12L7.1,11.4L3.1,5.6L9.8,8.2Z" />
+        android:fillType="evenOdd"
+        android:pathData="M3.160,22.030 L3.160,10.810 A8.840,8.840 0 0,1 20.840,10.810 L20.840,22.030 Z M8.090,22.030 L8.090,12.340 A3.910,3.910 0 0,1 15.910,12.340 L15.910,22.030 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M10.436,15.230 A1.564,1.564 0 1,1 13.564,15.230 A1.564,1.564 0 1,1 10.436,15.230 Z M12.816,15.910 L13.360,19.310 L10.640,19.310 L11.184,15.910 Z" />
 </vector>

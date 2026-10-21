@@ -90,6 +90,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.hidden && _showHidden) setState(() => _showHidden = false);
     if (state != AppLifecycleState.resumed) return;
     NetBus.instance.refresh();
+    Updater.instance.check();
     _loadChats();
     _loadTemp();
     _loadRequests();

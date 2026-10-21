@@ -33,7 +33,8 @@ android {
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
         // flag during build.
         versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        // Shown as "beta-1.0.0" until Sanctum leaves beta (see lib/version.dart).
+        versionName = "beta-${flutter.versionName}"
     }
 
     signingConfigs {

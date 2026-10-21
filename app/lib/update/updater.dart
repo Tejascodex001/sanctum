@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../background/background.dart';
 import '../identity/secrets.dart';
+import '../net/net_bus.dart';
+import '../src/rust/api/session.dart';
 import '../src/rust/api/update.dart';
 
 /// Over-the-air updates from the project's GitHub releases, checked and
@@ -18,6 +20,9 @@ class Updater {
 
   static const _checkEvery = Duration(hours: 6);
 
+  /// After a failed check (Tor can be slow or flaky), try again this soon.
+  static const _retryAfter = Duration(minutes: 15);
+
   /// A newer release, once found.
   final available = ValueNotifier<UpdateInfo?>(null);
 
@@ -29,23 +34,51 @@ class Updater {
 
   int current = 0;
   DateTime? _lastCheck;
+  DateTime? _lastFailure;
   bool _checking = false;
+  Timer? _timer;
 
-  /// Looks for a newer release, at most every few hours unless [force]d.
+  /// Keeps checking while the app runs: the app can stay open for days
+  /// (it keeps you reachable in the background), and a single check when
+  /// Tor first connects may fail.
+  void start() {
+    _timer ??= Timer.periodic(const Duration(minutes: 5), (_) => check());
+  }
+
+  /// Looks for a newer release, at most every few hours unless [force]d
+  /// (sooner after a failed check).
   Future<void> check({bool force = false}) async {
     if (_checking || progress.value != null) return;
-    if (!force && _lastCheck != null && DateTime.now().difference(_lastCheck!) < _checkEvery) return;
+    // Not connected yet: checking now could only fail. Connecting checks.
+    if (!force && NetBus.instance.status.value.status != NetStatus.online) return;
+    final now = DateTime.now();
+    if (!force && _lastCheck != null && now.difference(_lastCheck!) < _checkEvery) return;
+    if (!force && _lastFailure != null && now.difference(_lastFailure!) < _retryAfter) return;
     _checking = true;
     try {
       current = await Background.buildNumber();
       if (!await loadFlag('auto_update_check', fallback: true) && !force) return;
-      available.value = await updateCheck(current: current);
+      available.value = await _checkWithRetries();
       _lastCheck = DateTime.now();
+      _lastFailure = null;
       error.value = null;
     } catch (e) {
+      _lastFailure = DateTime.now();
       if (force) error.value = 'Couldn\'t check for updates. Try again in a moment.';
     } finally {
       _checking = false;
+    }
+  }
+
+  /// A Tor connection sometimes fails on its own; the next one usually works.
+  Future<UpdateInfo?> _checkWithRetries() async {
+    for (var attempt = 1;; attempt++) {
+      try {
+        return await updateCheck(current: current);
+      } catch (_) {
+        if (attempt == 3) rethrow;
+        await Future<void>.delayed(Duration(seconds: 10 * attempt));
+      }
     }
   }
 

@@ -55,6 +55,8 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `app/lib/call/` | The call controller (ring, audio, service) and the call screen, shown above the app lock |
 | `app/lib/settings/` | The Settings screen (opened from your sigil) |
 | `app/lib/theme/appearance.dart` | Light, dark or like the phone, and the accent colour. `Palette` is read at build time, so `Restyler` redraws every screen when it changes: don't make widgets using `Palette` colours `const`. Sigils are shown through `SigilLook` (`spec.look`): in the picked accent and light in light mode. Use `spec.look.accent.color` for UI colours taken from a sigil; only comparing sigils with a friend uses `exact: true` |
+| `app/lib/version.dart` | The version people see (`beta-1.0.0` while in beta; the owner decides when it leaves beta). Must match `pubspec.yaml` and the `beta-` prefix in `build.gradle.kts` (a test checks). Releases stay tagged `build-N`: installed apps look for that tag to update |
+| `docs/brand/` | The logo (the Sanctuary door, gold on midnight). `make_icons.py` writes the Android icon vectors from one drawing; app icon resources are in `app/android/app/src/main/res/` |
 | `app/lib/` | The Flutter UI. Design tokens are in `app/lib/theme/tokens.dart`; use them, never one-off values |
 | `app/android/app/src/main/kotlin/` | The scanner, background service, notifications, installer, OEM battery settings, Bluetooth nearby (`BluetoothNearby.kt`) and calls (`CallAudio.kt`, `CallVideo.kt`, `CallService.kt`, `CallNative.kt`) |
 

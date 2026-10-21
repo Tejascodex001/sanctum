@@ -12,6 +12,9 @@ const REPO: &str = "https://github.com/Tejascodex001/sanctum";
 /// The APK each release carries (see .github/workflows/android.yml).
 const ASSET: &str = "app-release.apk";
 const MAX_APK: usize = 200 << 20;
+/// A check that takes longer has hung (a stuck Tor circuit): give up, so
+/// the next check can run.
+const CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Set once Tor is up.
 pub(crate) static CONNECT: LazyLock<Mutex<Option<Connect>>> = LazyLock::new(Default::default);
@@ -56,7 +59,9 @@ fn connect() -> anyhow::Result<Connect> {
 /// no API, so no rate limits on shared Tor exits.
 pub fn update_check(current: i64) -> anyhow::Result<Option<UpdateInfo>> {
     let connect = connect()?;
-    let latest = runtime().block_on(https::redirect_of(&connect, &format!("{REPO}/releases/latest")))?;
+    let latest = runtime().block_on(async {
+        tokio::time::timeout(CHECK_TIMEOUT, https::redirect_of(&connect, &format!("{REPO}/releases/latest"))).await
+    })??;
     let tag = latest.rsplit('/').next().unwrap_or_default();
     let Some(build) = tag.strip_prefix("build-").and_then(|n| n.parse::<i64>().ok()) else {
         anyhow::bail!("unexpected release: {latest}");
@@ -65,8 +70,11 @@ pub fn update_check(current: i64) -> anyhow::Result<Option<UpdateInfo>> {
         return Ok(None);
     }
     // Older releases have no changelog; the update is still offered.
+    let url = format!("{REPO}/releases/download/{tag}/changelog.md");
     let changelog = runtime()
-        .block_on(https::get(&connect, &format!("{REPO}/releases/download/{tag}/changelog.md"), 1 << 20, &|_, _| {}))
+        .block_on(async { tokio::time::timeout(CHECK_TIMEOUT, https::get(&connect, &url, 1 << 20, &|_, _| {})).await })
+        .ok()
+        .and_then(Result::ok)
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .unwrap_or_default();
     Ok(Some(UpdateInfo {

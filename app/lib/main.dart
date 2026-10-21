@@ -8,6 +8,7 @@ import 'call/call_screen.dart';
 import 'identity/secrets.dart';
 import 'chat/media.dart';
 import 'net/net_bus.dart';
+import 'update/updater.dart';
 import 'notify/notifier.dart';
 import 'security/app_lock.dart';
 import 'security/profile.dart';
@@ -36,6 +37,7 @@ Future<void> main() async {
     NetBus.instance.start();
     Notifier.instance.start();
     CallController.instance.start();
+    Updater.instance.start();
     await NetBus.instance.connect(
       stateDir: '${(await getApplicationSupportDirectory()).path}/tor-state',
       cacheDir: '${(await getApplicationCacheDirectory()).path}/tor-cache',

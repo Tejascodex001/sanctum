@@ -5,6 +5,7 @@ import '../background/background.dart';
 import '../identity/secrets.dart';
 import '../net/net_bus.dart';
 import '../update/updater.dart';
+import '../version.dart';
 import '../theme/tokens.dart';
 
 class BackgroundSettings extends StatefulWidget {
@@ -248,9 +249,9 @@ class _UpdateSettingsState extends State<UpdateSettings> {
         children: [
           ListTile(
             leading: const Icon(Icons.system_update_rounded),
-            title: Text(current == 0 ? 'Updates' : 'Sanctum version $current'),
-            subtitle:
-                const Text('Updates are downloaded privately, and only genuine Sanctum updates can be installed.'),
+            title: Text('Sanctum $appVersion'),
+            subtitle: Text('${current == 0 ? '' : 'Build $current. '}'
+                'Updates are downloaded privately, and only genuine Sanctum updates can be installed.'),
             trailing: _checking
                 ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : TextButton(onPressed: _check, child: const Text('Check')),

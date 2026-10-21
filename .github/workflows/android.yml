@@ -74,11 +74,16 @@ jobs:
           git fetch --tags --force --quiet
           python3 .github/scripts/changelog.py ${{ github.run_number }} changelog.md release-notes.md
 
+      - name: Version
+        id: version
+        run: echo "name=$(sed -n "s/^const appVersion = '\(.*\)';/\1/p" app/lib/version.dart)" >> "$GITHUB_OUTPUT"
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Sanctum build ${{ github.run_number }}
+          # The tag stays build-N: installed apps look for it to update.
+          name: Sanctum ${{ steps.version.outputs.name }} (build ${{ github.run_number }})
           # Tag the commit that was built, not whatever main is by now.
           target_commitish: ${{ github.sha }}
           make_latest: true

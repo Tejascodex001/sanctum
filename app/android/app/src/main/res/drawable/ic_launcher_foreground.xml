@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- App icon: the gold door. Generated from one drawing (the Sanctuary door). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFE8BE62"
+        android:fillType="evenOdd"
+        android:pathData="M33.200,77.600 L33.200,51.200 A20.800,20.800 0 0,1 74.800,51.200 L74.800,77.600 Z M44.800,77.600 L44.800,54.800 A9.200,9.200 0 0,1 63.200,54.800 L63.200,77.600 Z" />
+    <path
+        android:fillColor="#FFE8BE62"
+        android:pathData="M50.320,61.600 A3.680,3.680 0 1,1 57.680,61.600 A3.680,3.680 0 1,1 50.320,61.600 Z M55.920,63.200 L57.200,71.200 L50.800,71.200 L52.080,63.200 Z" />
+</vector>

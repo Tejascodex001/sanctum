@@ -1,3 +1,5 @@
+<img src="docs/brand/icon_512.png" width="96" alt="Sanctum">
+
 # Sanctum
 
 Private chat for close friends (a circle of 100–200 people at most), on Android.
@@ -7,6 +9,8 @@ There are **no servers and no accounts**, and nothing is tracked. Phones talk di
 The UI is the **Sigil + Deck** design: every person and chat gets its own generated sigil, and chats are stacked cards.
 
 ## Install
+
+Sanctum is in beta: the app says **beta-1.0.0**, and each release is told apart by its build number.
 
 1. Download `app-release.apk` from the latest [release](../../releases/latest) (`build-N`).
 2. Install it. Android asks once to allow installs from your browser or file manager.
