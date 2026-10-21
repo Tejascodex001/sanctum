@@ -613,10 +613,13 @@ impl Node {
         let mut chunk = [0u8; 16 * 1024];
         let mut ping = tokio::time::interval_at(tokio::time::Instant::now() + KEEPALIVE, KEEPALIVE);
         loop {
+            // Pictures go only when nothing else waits to be sent.
+            let idle = news.is_empty();
             tokio::select! {
-                // Sound and everything else first; pictures only when
-                // nothing else is waiting.
-                biased;
+                // No fixed order between sending and reading: always
+                // writing first could leave both phones writing, each
+                // waiting for the other to read (a busy sender is poked
+                // again before its last write is done).
                 cmd = news.recv() => match cmd {
                     Some(Cmd::News) => {
                         let out = self.session.lock().unwrap().on_link_up(peer)?;
@@ -639,7 +642,7 @@ impl Node {
                     buf.extend_from_slice(&chunk[..n]);
                     self.handle_buffered(conn, buf, peer).await?;
                 }
-                Some((frame, bytes)) = pictures.recv() => {
+                Some((frame, bytes)) = pictures.recv(), if idle => {
                     let written = write_frames(conn, &[frame]).await;
                     backlog.video_done(bytes);
                     written?;
