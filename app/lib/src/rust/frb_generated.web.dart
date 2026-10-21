@@ -162,9 +162,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FediSourceProblem dco_decode_fedi_source_problem(dynamic raw);
 
   @protected
-  FeedbackCheck dco_decode_feedback_check(dynamic raw);
-
-  @protected
   FeedbackForm dco_decode_feedback_form(dynamic raw);
 
   @protected
@@ -558,9 +555,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FediSourceProblem sse_decode_fedi_source_problem(
     SseDeserializer deserializer,
   );
-
-  @protected
-  FeedbackCheck sse_decode_feedback_check(SseDeserializer deserializer);
 
   @protected
   FeedbackForm sse_decode_feedback_form(SseDeserializer deserializer);
@@ -1039,9 +1033,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     FediSourceProblem self,
     SseSerializer serializer,
   );
-
-  @protected
-  void sse_encode_feedback_check(FeedbackCheck self, SseSerializer serializer);
 
   @protected
   void sse_encode_feedback_form(FeedbackForm self, SseSerializer serializer);

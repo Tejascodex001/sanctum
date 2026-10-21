@@ -111,10 +111,6 @@ void main() {
     final address = await tester.runAsync(feedbackAddress);
     expect(address, endsWith('.onion'));
     expect(find.text(address!), findsOneWidget);
-    // The check says what's going on; without Tor here, it isn't connected.
-    await tester.scrollUntilVisible(find.text('Send a test'), 200, scrollable: find.byType(Scrollable).last);
-    expect(find.text('CHECK'), findsOneWidget);
-    expect(find.text('Not yet'), findsOneWidget);
     await _shot(tester, '22-feedback-inbox');
     await tester.pumpWidget(const SizedBox());
     await settle(tester, 2);

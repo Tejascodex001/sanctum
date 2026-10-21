@@ -5,26 +5,32 @@ use super::session::{emit, real_session, runtime, profile_is_decoy, with_real, A
 use sanctum_core::feedback::{Feedback, Received, Refused};
 use sanctum_core::identity::{onion_address, parse_onion_address};
 use sanctum_net::feedback::Gate;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use sanctum_net::tor::RunningOnionService;
 
 /// Where everyone's feedback goes: the developer's feedback address, from
 /// their inbox screen. Empty until it's set; the app then says feedback
 /// isn't open yet.
 const DEVELOPER: &str = "zh6d2lkkgnnjt2sp6poebrle647ejzk6mmgvk4wdfwhae4p4mvln3yqd.onion";
-/// Undelivered feedback is retried this often.
-const RETRY_EVERY: Duration = Duration::from_secs(10 * 60);
+/// Undelivered feedback is retried soon at first (a feedback address that
+/// just came online takes a few minutes to be found), then every 10
+/// minutes: these many minutes after each failed try.
+const RETRY_AFTER: [u64; 4] = [1, 2, 5, 10];
+/// How often the retry loop looks for feedback that's due.
+const RETRY_TICK: Duration = Duration::from_secs(60);
 
 /// The feedback onion service, while receiving is on.
 static SERVICE: LazyLock<Mutex<Option<Arc<RunningOnionService>>>> = LazyLock::new(Default::default);
 static GATE: LazyLock<Arc<Gate>> = LazyLock::new(Default::default);
 static SENDING: AtomicBool = AtomicBool::new(false);
-/// How the last delivery went, and why the feedback service last failed to
-/// start: shown in the developer's inbox, to find out what goes wrong.
-static LAST_TRY: LazyLock<Mutex<String>> = LazyLock::new(Default::default);
-static START_ERROR: LazyLock<Mutex<String>> = LazyLock::new(Default::default);
+/// Failed tries at a piece of feedback, and when to try next.
+type Tries = HashMap<[u8; 16], (usize, Instant)>;
+/// For each piece of feedback that couldn't be delivered yet. Memory only;
+/// a restart tries everything again.
+static TRIES: LazyLock<Mutex<Tries>> = LazyLock::new(Default::default);
 static RETRYING: AtomicBool = AtomicBool::new(false);
 
 /// What someone fills in.
@@ -101,8 +107,9 @@ pub fn feedback_waiting() -> anyhow::Result<u32> {
     with_real(|s| Ok(s.feedback_waiting()?.len() as u32))
 }
 
-/// Tries to deliver everything waiting, in the background. Each piece
-/// goes on circuits of its own and says nothing about who sent it.
+/// Tries to deliver the waiting feedback that's due, in the background.
+/// Each piece goes on circuits of its own and says nothing about who sent
+/// it.
 fn deliver() {
     let Some(tor) = TOR.lock().unwrap().clone() else { return };
     if SENDING.swap(true, Ordering::AcqRel) {
@@ -110,20 +117,22 @@ fn deliver() {
     }
     runtime().spawn(async move {
         let waiting = with_real(|s| Ok(s.feedback_waiting()?)).unwrap_or_default();
-        for queued in waiting {
+        let now = Instant::now();
+        let due = waiting.into_iter().filter(|q| TRIES.lock().unwrap().get(&q.id).is_none_or(|(_, at)| *at <= now));
+        for queued in due.collect::<Vec<_>>() {
             let sent = async {
                 let mut conn = tor.dial_alone(&queued.to).await?;
                 sanctum_net::feedback::send(&mut conn, &queued.feedback).await
             };
-            let result = match tokio::time::timeout(Duration::from_secs(120), sent).await {
-                Ok(Ok(())) => {
-                    let _ = with_real(|s| Ok(s.feedback_delivered(&queued.id)?));
-                    "delivered".to_string()
-                }
-                Ok(Err(e)) => format!("not delivered: {e:#}"),
-                Err(_) => "not delivered: no answer within 2 minutes".to_string(),
-            };
-            *LAST_TRY.lock().unwrap() = format!("{} · {result}", clock());
+            if tokio::time::timeout(Duration::from_secs(120), sent).await.is_ok_and(|r| r.is_ok()) {
+                let _ = with_real(|s| Ok(s.feedback_delivered(&queued.id)?));
+                TRIES.lock().unwrap().remove(&queued.id);
+            } else {
+                let mut tries = TRIES.lock().unwrap();
+                let failed = tries.get(&queued.id).map_or(0, |(n, _)| *n) + 1;
+                let wait = RETRY_AFTER[(failed - 1).min(RETRY_AFTER.len() - 1)];
+                tries.insert(queued.id, (failed, Instant::now() + Duration::from_secs(wait * 60)));
+            }
         }
         SENDING.store(false, Ordering::Release);
     });
@@ -136,7 +145,7 @@ pub(crate) fn tor_up() {
     if !RETRYING.swap(true, Ordering::AcqRel) {
         runtime().spawn(async {
             loop {
-                tokio::time::sleep(RETRY_EVERY).await;
+                tokio::time::sleep(RETRY_TICK).await;
                 deliver();
             }
         });
@@ -144,12 +153,6 @@ pub(crate) fn tor_up() {
     if with_real(|s| Ok(s.feedback_receiving()?)).unwrap_or(false) {
         let _ = serve();
     }
-}
-
-/// The time now, as "14:05" (UTC), for the inbox's report.
-fn clock() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    format!("{:02}:{:02} UTC", secs / 3600 % 24, secs / 60 % 60)
 }
 
 // ---- The developer's side ----
@@ -191,7 +194,7 @@ fn serve() -> anyhow::Result<()> {
     }
     let secret = with_real(|s| Ok(s.feedback_identity()?.secret()))?;
     let _guard = runtime().enter();
-    let started = tor.serve_feedback(&secret, |conn| {
+    let service = tor.serve_feedback(&secret, |conn| {
         runtime().spawn(async move {
             let _ = sanctum_net::feedback::serve(conn, &GATE, |feedback| {
                 let kept = real_session().is_ok_and(|s| s.lock().unwrap().feedback_arrived(&feedback).unwrap_or(false));
@@ -202,81 +205,9 @@ fn serve() -> anyhow::Result<()> {
             })
             .await;
         });
-    });
-    let service = match started {
-        Ok(service) => service,
-        Err(e) => {
-            *START_ERROR.lock().unwrap() = format!("{} · {e:#}", clock());
-            return Err(e);
-        }
-    };
-    START_ERROR.lock().unwrap().clear();
+    })?;
     *slot = Some(service);
     Ok(())
-}
-
-/// What the developer's inbox shows about feedback on this phone, to see
-/// where it goes wrong.
-pub struct FeedbackCheck {
-    /// Connected to Tor.
-    pub online: bool,
-    /// Receiving is switched on.
-    pub receiving: bool,
-    /// The feedback service: "off", "starting", "ready", "trouble",
-    /// "broken" or "stopped".
-    pub service: String,
-    /// What's wrong with it, if anything (technical).
-    pub problem: String,
-    /// The service answers at this phone's feedback address.
-    pub address_ok: bool,
-    /// This build sends feedback to this phone.
-    pub sends_here: bool,
-    /// This phone's feedback still waiting to be delivered.
-    pub waiting: u32,
-    /// How the last delivery went.
-    pub last_try: String,
-}
-
-pub fn feedback_check() -> anyhow::Result<FeedbackCheck> {
-    anyhow::ensure!(!profile_is_decoy(), "not available");
-    let (receiving, mine, waiting) = with_real(|s| {
-        Ok((s.feedback_receiving()?, onion_address(&s.feedback_identity()?.public_key()), s.feedback_waiting()?.len()))
-    })?;
-    let report = SERVICE.lock().unwrap().as_ref().map(|s| sanctum_net::tor::service_report(s));
-    let start_error = START_ERROR.lock().unwrap().clone();
-    Ok(FeedbackCheck {
-        online: TOR.lock().unwrap().is_some(),
-        receiving,
-        service: report.as_ref().map_or("off", |r| r.state).to_string(),
-        problem: report.as_ref().and_then(|r| r.problem.clone()).unwrap_or(start_error),
-        address_ok: report.as_ref().and_then(|r| r.address.as_ref()).is_some_and(|a| *a == mine),
-        sends_here: developer().is_some_and(|d| onion_address(&d) == mine),
-        waiting: waiting as u32,
-        last_try: LAST_TRY.lock().unwrap().clone(),
-    })
-}
-
-/// Sends a test straight to this phone's own feedback address through Tor,
-/// and says how it went: empty if it arrived, else why not (technical).
-pub fn feedback_test() -> String {
-    let Some(tor) = TOR.lock().unwrap().clone() else { return "not connected to Tor yet".into() };
-    let Ok(me) = with_real(|s| Ok(s.feedback_identity()?.public_key())) else { return "no feedback key".into() };
-    let test = Feedback {
-        phone: String::new(),
-        android: String::new(),
-        build: 0,
-        rating: 0,
-        text: format!("Test from this phone, {}", clock()),
-    };
-    let sent = async {
-        let mut conn = tor.dial_alone(&me).await?;
-        sanctum_net::feedback::send(&mut conn, &test).await
-    };
-    match runtime().block_on(async { tokio::time::timeout(Duration::from_secs(120), sent).await }) {
-        Ok(Ok(())) => String::new(),
-        Ok(Err(e)) => format!("{e:#}"),
-        Err(_) => "no answer within 2 minutes".into(),
-    }
 }
 
 /// Stops taking feedback in for now (the panic wipe).

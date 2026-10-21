@@ -336,7 +336,6 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
   bool _receiving = false;
   String _address = '';
   List<FeedbackItem> _items = const [];
-  FeedbackCheck? _check;
 
   // Filters: stars (null: any, 0: none given), version (null: any), only
   // ones with words, a search, and the order.
@@ -345,8 +344,6 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
   bool _withText = false;
   String _query = '';
   bool _oldestFirst = false;
-  bool _testing = false;
-  String? _testResult;
   StreamSubscription<AppEvent>? _arrivals;
 
   @override
@@ -367,13 +364,11 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
     final receiving = await feedbackReceiving();
     final items = widget.sample ?? await feedbackInbox();
     final address = receiving ? await feedbackAddress() : '';
-    final check = await feedbackCheck();
     if (!mounted) return;
     setState(() {
       _receiving = receiving;
       _items = items;
       _address = address;
-      _check = check;
     });
   }
 
@@ -398,41 +393,6 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
         _withText = false;
         _query = '';
       });
-
-  /// Sends a test to this phone's own address through Tor.
-  Future<void> _test() async {
-    HapticFeedback.selectionClick();
-    setState(() {
-      _testing = true;
-      _testResult = null;
-    });
-    final failure = await feedbackTest();
-    if (!mounted) return;
-    setState(() {
-      _testing = false;
-      _testResult =
-          failure.isEmpty ? 'The test arrived: feedback works on this phone.' : 'The test didn\'t arrive: $failure';
-    });
-    await _load();
-  }
-
-  /// Everything the check shows, as text to send to the developer's helper.
-  String _report() {
-    final c = _check;
-    if (c == null) return '';
-    return [
-      'Sanctum feedback check',
-      'Connected: ${c.online}',
-      'Receiving: ${c.receiving}',
-      'Service: ${c.service}',
-      'Address matches: ${c.addressOk}',
-      'This version sends here: ${c.sendsHere}',
-      'Waiting to send: ${c.waiting}',
-      'Last send: ${c.lastTry.isEmpty ? 'none' : c.lastTry}',
-      'Problem: ${c.problem.isEmpty ? 'none' : c.problem}',
-      if (_testResult != null) 'Test: $_testResult',
-    ].join('\n');
-  }
 
   Future<void> _setReceiving(bool on) async {
     HapticFeedback.selectionClick();
@@ -522,22 +482,6 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
                 ],
               ),
             ),
-            if (_check != null) ...[
-              const SizedBox(height: Space.xl),
-              Text('CHECK', style: AppText.overline),
-              const SizedBox(height: Space.sm),
-              _CheckPanel(
-                check: _check!,
-                testing: _testing,
-                testResult: _testResult,
-                onTest: _receiving && !_testing ? _test : null,
-                onRefresh: _load,
-                onCopy: () {
-                  Clipboard.setData(ClipboardData(text: _report()));
-                  _say('Report copied.');
-                },
-              ),
-            ],
             const SizedBox(height: Space.xl),
             if (_items.isEmpty)
               Text('NOTHING YET', style: AppText.overline)
@@ -686,101 +630,6 @@ class _Summary extends StatelessWidget {
         ),
         if (filtering) TextButton(onPressed: onClear, child: const Text('Clear filters')),
       ],
-    );
-  }
-}
-
-/// How feedback stands on this phone, in plain words, with a test.
-class _CheckPanel extends StatelessWidget {
-  const _CheckPanel({
-    required this.check,
-    required this.testing,
-    required this.testResult,
-    required this.onTest,
-    required this.onRefresh,
-    required this.onCopy,
-  });
-
-  final FeedbackCheck check;
-  final bool testing;
-  final String? testResult;
-  final VoidCallback? onTest;
-  final VoidCallback onRefresh;
-  final VoidCallback onCopy;
-
-  @override
-  Widget build(BuildContext context) {
-    final service = switch (check.service) {
-      'ready' => 'Ready',
-      'starting' => 'Getting ready (can take a few minutes)',
-      'trouble' => 'Having trouble, still trying',
-      'broken' => 'Not working',
-      'stopped' => 'Stopped',
-      _ => check.receiving ? 'Not started' : 'Off',
-    };
-    final rows = [
-      ('Connected', check.online ? 'Yes' : 'Not yet', check.online),
-      ('Receiving', service, check.service == 'ready'),
-      ('Address', check.service == 'off' ? '–' : (check.addressOk ? 'Matches' : 'Doesn\'t match'), check.addressOk),
-      ('This version sends here', check.sendsHere ? 'Yes' : 'No', check.sendsHere),
-      ('Waiting to send', '${check.waiting}', check.waiting == 0),
-    ];
-    return Container(
-      padding: const EdgeInsets.all(Space.lg),
-      decoration: BoxDecoration(
-        color: Palette.surface,
-        borderRadius: BorderRadius.circular(Radii.md),
-        border: Border.all(color: Palette.outline),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final (label, value, good) in rows)
-            Padding(
-              padding: const EdgeInsets.only(bottom: Space.xs),
-              child: Row(
-                children: [
-                  Icon(
-                    good ? Icons.check_circle_rounded : Icons.error_outline_rounded,
-                    size: 16,
-                    color: good ? Palette.textMuted : Palette.warning,
-                  ),
-                  const SizedBox(width: Space.sm),
-                  SizedBox(width: 150, child: Text(label, style: AppText.caption)),
-                  Expanded(child: Text(value, style: AppText.caption.copyWith(color: Palette.text))),
-                ],
-              ),
-            ),
-          if (check.lastTry.isNotEmpty) ...[
-            const SizedBox(height: Space.sm),
-            Text('Last send: ${check.lastTry}', style: AppText.caption),
-          ],
-          if (check.problem.isNotEmpty) ...[
-            const SizedBox(height: Space.sm),
-            SelectableText(check.problem, style: AppText.mono.copyWith(fontSize: 11, color: Palette.textMuted)),
-          ],
-          if (testResult != null) ...[
-            const SizedBox(height: Space.md),
-            Text(testResult!, style: AppText.bodyStrong),
-          ],
-          const SizedBox(height: Space.md),
-          Wrap(
-            spacing: Space.sm,
-            runSpacing: Space.sm,
-            children: [
-              FilledButton.icon(
-                onPressed: onTest,
-                icon: testing
-                    ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.send_rounded, size: 18),
-                label: Text(testing ? 'Testing…' : 'Send a test'),
-              ),
-              OutlinedButton(onPressed: onRefresh, child: const Text('Refresh')),
-              OutlinedButton(onPressed: onCopy, child: const Text('Copy report')),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }

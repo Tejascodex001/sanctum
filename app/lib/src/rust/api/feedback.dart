@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `clock`, `deliver`, `developer`, `item`, `serve`, `stop`, `tor_up`
+// These functions are ignored because they are not marked as `pub`: `deliver`, `developer`, `item`, `serve`, `stop`, `tor_up`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`
 
 /// Whether this build can send feedback (it knows where to).
@@ -34,85 +34,12 @@ Future<void> feedbackSetReceiving({required bool enabled}) =>
 Future<String> feedbackAddress() =>
     RustLib.instance.api.crateApiFeedbackFeedbackAddress();
 
-Future<FeedbackCheck> feedbackCheck() =>
-    RustLib.instance.api.crateApiFeedbackFeedbackCheck();
-
-/// Sends a test straight to this phone's own feedback address through Tor,
-/// and says how it went: empty if it arrived, else why not (technical).
-Future<String> feedbackTest() =>
-    RustLib.instance.api.crateApiFeedbackFeedbackTest();
-
 /// Feedback received, newest first. Empty while the decoy shows.
 Future<List<FeedbackItem>> feedbackInbox() =>
     RustLib.instance.api.crateApiFeedbackFeedbackInbox();
 
 Future<void> feedbackDelete({required FeedbackItem item}) =>
     RustLib.instance.api.crateApiFeedbackFeedbackDelete(item: item);
-
-/// What the developer's inbox shows about feedback on this phone, to see
-/// where it goes wrong.
-class FeedbackCheck {
-  /// Connected to Tor.
-  final bool online;
-
-  /// Receiving is switched on.
-  final bool receiving;
-
-  /// The feedback service: "off", "starting", "ready", "trouble",
-  /// "broken" or "stopped".
-  final String service;
-
-  /// What's wrong with it, if anything (technical).
-  final String problem;
-
-  /// The service answers at this phone's feedback address.
-  final bool addressOk;
-
-  /// This build sends feedback to this phone.
-  final bool sendsHere;
-
-  /// This phone's feedback still waiting to be delivered.
-  final int waiting;
-
-  /// How the last delivery went.
-  final String lastTry;
-
-  const FeedbackCheck({
-    required this.online,
-    required this.receiving,
-    required this.service,
-    required this.problem,
-    required this.addressOk,
-    required this.sendsHere,
-    required this.waiting,
-    required this.lastTry,
-  });
-
-  @override
-  int get hashCode =>
-      online.hashCode ^
-      receiving.hashCode ^
-      service.hashCode ^
-      problem.hashCode ^
-      addressOk.hashCode ^
-      sendsHere.hashCode ^
-      waiting.hashCode ^
-      lastTry.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is FeedbackCheck &&
-          runtimeType == other.runtimeType &&
-          online == other.online &&
-          receiving == other.receiving &&
-          service == other.service &&
-          problem == other.problem &&
-          addressOk == other.addressOk &&
-          sendsHere == other.sendsHere &&
-          waiting == other.waiting &&
-          lastTry == other.lastTry;
-}
 
 /// What someone fills in.
 class FeedbackForm {
