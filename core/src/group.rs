@@ -394,9 +394,9 @@ impl Session {
                 sent_at,
                 quote,
             } => {
-                self.store.add_message(
+                self.add_received(
                     chat_id,
-                    &StoredMessage {
+                    StoredMessage {
                         from_me: false,
                         body,
                         sent_at: sent_at.min(now()),
@@ -438,6 +438,7 @@ impl Session {
             } => self.receive_media(chat_id, peer, id, body, sent_at, None, media, Some(album))?,
             Content::Poll { id, sent_at, poll } => self.on_poll(chat_id, peer, id, sent_at, poll)?,
             Content::Vote { poll, choices, at } => self.on_vote(chat_id, peer, poll, choices, at)?,
+            Content::React { id, emoji, at } => self.on_react(chat_id, peer, id, emoji, at)?,
             // Delete for everyone: only the sender's own message.
             Content::DeleteMessage { id } => {
                 if let Some((seq, m)) = self.store.message_by_id(chat_id, &id)? {
@@ -524,7 +525,7 @@ impl Session {
     }
 
     /// The group's members other than us, by MLS.
-    fn others(&self, meta: &ChatMeta) -> Result<Vec<[u8; 32]>> {
+    pub(crate) fn others(&self, meta: &ChatMeta) -> Result<Vec<[u8; 32]>> {
         let me = self.public_key();
         Ok(self.mls.members(&meta.group_id)?.into_iter().filter(|m| *m != me).collect())
     }
@@ -555,7 +556,7 @@ impl Session {
         })
     }
 
-    fn group_chat(&self, group: &[u8]) -> Result<Option<(i64, ChatMeta)>> {
+    pub(crate) fn group_chat(&self, group: &[u8]) -> Result<Option<(i64, ChatMeta)>> {
         Ok(self
             .store
             .chats()?

@@ -363,9 +363,9 @@ impl Session {
             return Ok(());
         }
         self.expect_blob(chat_id, peer, &media)?;
-        self.store.add_message(
+        self.add_received(
             chat_id,
-            &StoredMessage {
+            StoredMessage {
                 from_me: false,
                 body: clip(&body, 4000),
                 sent_at: sent_at.min(now()),

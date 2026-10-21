@@ -7,7 +7,20 @@ import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'poll.dart';
 
-// These functions are ignored because they are not marked as `pub`: `media_kind`, `now`, `reach`, `with`
+// These functions are ignored because they are not marked as `pub`: `media_kind`, `now`, `reach`, `reaction_views`, `with`
+
+/// Reacts to the message at `seq` with `emoji`, replacing our earlier
+/// reaction; an empty `emoji` takes it back. Shows on every phone in the
+/// chat; nobody is notified.
+Future<void> messageReact({
+  required PlatformInt64 chatId,
+  required PlatformInt64 seq,
+  required String emoji,
+}) => RustLib.instance.api.crateApiStoreMessageReact(
+  chatId: chatId,
+  seq: seq,
+  emoji: emoji,
+);
 
 /// Sends a file (encrypted on this phone, then to the chat's other phones).
 Future<void> mediaSend({
@@ -240,6 +253,9 @@ class MessageView {
   /// The shared album a photo or video is in.
   final AlbumView? album;
 
+  /// Reactions, one entry per emoji, most used first.
+  final List<ReactionView> reactions;
+
   const MessageView({
     required this.seq,
     required this.fromMe,
@@ -251,6 +267,7 @@ class MessageView {
     this.media,
     this.poll,
     this.album,
+    required this.reactions,
   });
 
   @override
@@ -264,7 +281,8 @@ class MessageView {
       senderName.hashCode ^
       media.hashCode ^
       poll.hashCode ^
-      album.hashCode;
+      album.hashCode ^
+      reactions.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -280,7 +298,41 @@ class MessageView {
           senderName == other.senderName &&
           media == other.media &&
           poll == other.poll &&
-          album == other.album;
+          album == other.album &&
+          reactions == other.reactions;
+}
+
+/// Everyone who reacted to a message with one emoji.
+class ReactionView {
+  final String emoji;
+  final int count;
+
+  /// We reacted with this one (at most one entry is ours).
+  final bool mine;
+
+  /// Who reacted with it ("You" first).
+  final List<String> names;
+
+  const ReactionView({
+    required this.emoji,
+    required this.count,
+    required this.mine,
+    required this.names,
+  });
+
+  @override
+  int get hashCode =>
+      emoji.hashCode ^ count.hashCode ^ mine.hashCode ^ names.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReactionView &&
+          runtimeType == other.runtimeType &&
+          emoji == other.emoji &&
+          count == other.count &&
+          mine == other.mine &&
+          names == other.names;
 }
 
 class ReplyView {

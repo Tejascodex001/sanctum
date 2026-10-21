@@ -9,7 +9,8 @@
 //!
 //! After that, frames flow both ways. Everything a person writes travels
 //! inside MLS messages ([`Frame::Mls`]) as [`Content`]; Sanctum frames only
-//! carry routing, acknowledgements and the MLS setup.
+//! carry routing, acknowledgements, the MLS setup and the passing "typing"
+//! signal (which holds no text).
 
 use serde::{Deserialize, Serialize};
 
@@ -84,6 +85,14 @@ pub enum Frame {
         index: u32,
         total: u32,
         bytes: Vec<u8>,
+    },
+    /// "I'm typing" in a chat. Sent only over a link that is up right now,
+    /// never stored, queued or resent, and it carries no text. `group`
+    /// names a group chat (its MLS group id, as [`Frame::GroupMls`] does);
+    /// empty means the pair's own chat. It stays out of MLS on purpose: a
+    /// dropped signal must not leave a gap in the sender's MLS counter.
+    Typing {
+        group: Vec<u8>,
     },
 }
 
@@ -221,6 +230,14 @@ pub enum Content {
     },
     /// The sender took their moment down.
     MomentGone { id: MessageId },
+    /// The sender's reaction to the message with this id, replacing their
+    /// earlier one. An empty `emoji` takes it back. `at` (milliseconds)
+    /// orders reactions that arrive out of order, as for [`Content::Vote`].
+    React {
+        id: MessageId,
+        emoji: String,
+        at: u64,
+    },
 }
 
 /// A shared album: the photos and videos in a chat that carry its id.
@@ -355,6 +372,19 @@ mod tests {
         assert!(take_frame(&mut huge).is_err());
         let mut junk = vec![0, 0, 0, 2, 0xFF, 0xFF];
         assert!(take_frame(&mut junk).is_err());
+    }
+
+    /// New variants go at the end, so older phones' frames and contents
+    /// keep their numbers on the wire.
+    #[test]
+    fn new_variants_come_last() {
+        assert_eq!(Frame::Typing { group: Vec::new() }.to_bytes()[0], 14);
+        let chunk = Frame::BlobChunk { id: [0; 16], blob: [0; 16], index: 0, total: 1, bytes: Vec::new() };
+        assert_eq!(chunk.to_bytes()[0], 13);
+        let react = Content::React { id: [1; 16], emoji: "👍".into(), at: 2 };
+        assert_eq!(react.encode()[0], 18);
+        assert_eq!(Content::decode(&react.encode()), Some(react));
+        assert_eq!(Content::MomentGone { id: [0; 16] }.encode()[0], 17);
     }
 
     #[test]

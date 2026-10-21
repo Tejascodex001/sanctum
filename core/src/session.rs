@@ -64,7 +64,7 @@ pub struct Paired {
 /// Something the UI should refresh for.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    /// New message, or a message was delivered.
+    /// New message, or a message was delivered, changed or reacted to.
     Chat(i64),
     /// A temp chat appeared or changed.
     Temp(u64),
@@ -79,6 +79,10 @@ pub enum Event {
     TempMessage(u64),
     /// Today's moments changed.
     Moments,
+    /// `who` (called `name` here) is writing in this chat right now. Only
+    /// from connected friends; nothing is stored. Show it for a few
+    /// seconds unless another one comes.
+    Typing { chat: i64, who: [u8; 32], name: String },
 }
 
 /// Someone who added your code and wants you to add them back. Held in
@@ -129,6 +133,10 @@ pub struct Session {
     requests: Vec<FriendRequest>,
     /// Declined this run; not shown again until a restart.
     declined: HashSet<[u8; 32]>,
+    /// When we last said we're typing, per chat (see `typing`).
+    pub(crate) typing_sent: std::collections::HashMap<i64, std::time::Instant>,
+    /// When we last passed on someone's typing, per (chat, person).
+    pub(crate) typing_heard: std::collections::HashMap<(i64, [u8; 32]), std::time::Instant>,
 }
 
 impl Session {
@@ -156,6 +164,8 @@ impl Session {
             blobs_sent: Default::default(),
             requests: Vec::new(),
             declined: HashSet::new(),
+            typing_sent: Default::default(),
+            typing_heard: Default::default(),
         })
     }
 
@@ -663,6 +673,11 @@ impl Session {
                 total,
                 bytes,
             } => return self.on_blob_chunk(peer, id, blob, index, total, bytes),
+            // Never answered, stored or acknowledged.
+            Frame::Typing { group } => {
+                self.on_typing(peer, &group)?;
+                return Ok(Vec::new());
+            }
             other => other,
         };
         let Some((chat_id, mut meta)) = self.direct_chat(peer)? else {
@@ -800,9 +815,9 @@ impl Session {
                     }
                     _ => unreachable!(),
                 };
-                self.store.add_message(
+                self.add_received(
                     chat_id,
-                    &StoredMessage {
+                    StoredMessage {
                         from_me: false,
                         body,
                         sent_at: sent_at.min(now()),
@@ -886,6 +901,7 @@ impl Session {
                 media,
             } => self.on_moment(peer, id, sent_at, caption, media)?,
             Content::MomentGone { id } => self.on_moment_gone(peer, id)?,
+            Content::React { id, emoji, at } => self.on_react(chat_id, peer, id, emoji, at)?,
             Content::TempWipe { temp } => {
                 if let Some(id) = self.temp.wipe_remote(*peer, temp) {
                     self.forget_temp_outbox(Some(*peer), temp);
@@ -1660,6 +1676,178 @@ mod tests {
         bob.s.delete_message(bg, 0, true).unwrap();
         connect(&mut bob, &mut alice);
         assert!(alice.texts(group).is_empty() && bob.texts(bg).is_empty());
+    }
+
+    /// Each person's reaction to the message at `seq`, sorted.
+    fn reactions(phone: &Phone, chat: i64, seq: i64) -> Vec<([u8; 32], String)> {
+        let m = phone.s.store.message(chat, seq).unwrap().unwrap();
+        let mut out: Vec<_> = m.reactions.into_iter().filter(|r| !r.emoji.is_empty()).map(|r| (r.who, r.emoji)).collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn reacting_replacing_and_taking_back_in_a_friends_chat() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        alice.s.send_text(ab, "pizza tonight?").unwrap();
+        connect(&mut alice, &mut bob);
+        bob.s.take_events();
+        alice.s.take_events();
+
+        // Bob reacts to Alice's message.
+        assert_eq!(bob.s.react(ba, 0, " 👍 ").unwrap(), vec![alice.pk()]);
+        assert_eq!(reactions(&bob, ba, 0), [(bob.pk(), "👍".into())]);
+        connect(&mut bob, &mut alice);
+        assert_eq!(reactions(&alice, ab, 0), [(bob.pk(), "👍".into())]);
+        let events = alice.s.take_events();
+        assert!(events.contains(&Event::Chat(ab)));
+        assert!(!events.iter().any(|e| matches!(e, Event::Message(_))), "a reaction never notifies");
+
+        // He changes his mind; Alice reacts to her own message too.
+        bob.s.react(ba, 0, "❤️").unwrap();
+        alice.s.react(ab, 0, "😋").unwrap();
+        connect(&mut alice, &mut bob);
+        let mut both = vec![(alice.pk(), "😋".to_string()), (bob.pk(), "❤️".to_string())];
+        both.sort();
+        assert_eq!(reactions(&alice, ab, 0), both);
+        assert_eq!(reactions(&bob, ba, 0), both);
+        assert_eq!(alice.s.store.message(ab, 0).unwrap().unwrap().reactions.len(), 2, "one each");
+
+        // Taken back, on both phones.
+        bob.s.react(ba, 0, "").unwrap();
+        connect(&mut bob, &mut alice);
+        assert_eq!(reactions(&alice, ab, 0), [(alice.pk(), "😋".into())]);
+        assert_eq!(reactions(&bob, ba, 0), [(alice.pk(), "😋".into())]);
+        // Not a message: nothing new in the chat.
+        assert_eq!(alice.texts(ab).len(), 1);
+        assert_eq!(bob.texts(ba).len(), 1);
+
+        // Too long to be a reaction.
+        assert!(bob.s.react(ba, 0, &"🔥".repeat(20)).is_err());
+        assert!(bob.s.react(ba, 9, "👍").is_err(), "no such message");
+    }
+
+    #[test]
+    fn reactions_to_unknown_messages_or_not_emoji_are_ignored() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, _) = befriend(&mut alice, &mut bob);
+        alice.s.send_text(ab, "hi").unwrap();
+        connect(&mut alice, &mut bob);
+        alice.s.take_events();
+        // To a message Alice doesn't have: kept aside, never shown.
+        alice.s.on_react(ab, &bob.pk(), [7; 16], "👍".into(), 1).unwrap();
+        assert!(reactions(&alice, ab, 0).is_empty());
+        assert!(alice.s.take_events().iter().all(|e| !matches!(e, Event::Chat(_))));
+        // Not a reaction at all.
+        let id = alice.s.store.message(ab, 0).unwrap().unwrap().id.unwrap();
+        alice.s.on_react(ab, &bob.pk(), id, "a\nlong\nletter".into(), 2).unwrap();
+        assert!(reactions(&alice, ab, 0).is_empty());
+    }
+
+    #[test]
+    fn everyone_in_a_group_sees_reactions_even_ones_that_come_first() {
+        let (mut alice, mut bob, mut carol) = (Phone::new(), Phone::new(), Phone::new());
+        let (ab, _) = befriend(&mut alice, &mut bob);
+        let ac = alice.s.add_friend(&carol.s.my_code("Carol"), true).unwrap().chat_id;
+        carol.s.add_friend(&alice.s.my_code("Alice"), true).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        let (group, _) = alice.s.create_group("Trip", &[ab, ac]).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        connect(&mut alice, &mut bob);
+        let (bg, cg) = (group_of(&bob, "Trip").unwrap(), group_of(&carol, "Trip").unwrap());
+
+        // Bob writes; Alice gets it first and reacts.
+        bob.s.send_to_chat(bg, "train at 6", None).unwrap();
+        connect(&mut bob, &mut alice);
+        let seq = alice.s.store.messages_indexed(group, None).unwrap().last().unwrap().0;
+        assert_eq!(alice.s.react(group, seq, "🚆").unwrap().len(), 2);
+        // Carol hears Alice's reaction before Bob's message reaches her.
+        connect(&mut alice, &mut carol);
+        assert!(carol.texts(cg).is_empty());
+        connect(&mut bob, &mut carol);
+        let cseq = carol.s.store.messages_indexed(cg, None).unwrap().last().unwrap().0;
+        assert_eq!(reactions(&carol, cg, cseq), [(alice.pk(), "🚆".into())]);
+        // Carol reacts too; everyone sees both.
+        carol.s.react(cg, cseq, "👍").unwrap();
+        connect(&mut carol, &mut alice);
+        connect(&mut carol, &mut bob);
+        connect(&mut alice, &mut bob);
+        let mut want = vec![(alice.pk(), "🚆".to_string()), (carol.pk(), "👍".to_string())];
+        want.sort();
+        let bseq = bob.s.store.messages_indexed(bg, None).unwrap().last().unwrap().0;
+        assert_eq!(reactions(&alice, group, seq), want);
+        assert_eq!(reactions(&bob, bg, bseq), want);
+        assert_eq!(reactions(&carol, cg, cseq), want);
+    }
+
+    #[test]
+    fn typing_reaches_a_connected_friend_and_is_never_kept() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        connect(&mut alice, &mut bob);
+        bob.s.take_events();
+
+        let (frame, to) = alice.s.typing(ab).unwrap().expect("a signal");
+        assert_eq!(to, vec![bob.pk()]);
+        assert_eq!(frame, Frame::Typing { group: Vec::new() });
+        // Nothing waits to be sent, and nothing was written.
+        assert!(alice.s.pending_peers().unwrap().is_empty(), "never queued");
+        assert!(alice.s.store.outbox_for(&bob.pk()).unwrap().is_empty());
+        // Too soon for another.
+        assert!(alice.s.typing(ab).unwrap().is_none());
+
+        // Over a live link Bob hears it: an event, no message, no answer.
+        assert!(bob.s.on_frame(&alice.pk(), frame.clone()).unwrap().is_empty());
+        let events = bob.s.take_events();
+        assert_eq!(events, [Event::Typing { chat: ba, who: alice.pk(), name: "Alice".into() }]);
+        assert!(bob.texts(ba).is_empty());
+        assert!(bob.s.pending_peers().unwrap().is_empty());
+        // A burst of the same signal is passed on once.
+        bob.s.on_frame(&alice.pk(), frame.clone()).unwrap();
+        assert!(bob.s.take_events().is_empty());
+
+        // Notes have no one to tell.
+        let notes = alice.s.store.create_chat(&ChatMeta {
+            kind: ChatKind::Notes,
+            title: "Notes".into(),
+            sigil_key: vec![1],
+            pinned: false,
+            created_at: 0,
+            group_id: Vec::new(),
+            peers: Vec::new(),
+            hidden: false,
+            admin: None,
+        });
+        assert!(alice.s.typing(notes.unwrap()).unwrap().is_none());
+    }
+
+    #[test]
+    fn typing_only_counts_from_someone_in_that_chat() {
+        let (mut alice, mut bob, mut carol) = (Phone::new(), Phone::new(), Phone::new());
+        let (ab, _) = befriend(&mut alice, &mut bob);
+        alice.s.add_friend(&carol.s.my_code("Carol"), true).unwrap();
+        carol.s.add_friend(&alice.s.my_code("Alice"), true).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        let (group, _) = alice.s.create_group("Trip", &[ab]).unwrap();
+        connect(&mut alice, &mut bob);
+        let bg = group_of(&bob, "Trip").unwrap();
+        alice.s.take_events();
+
+        // Bob types in the group: Alice sees it in the group, by his name.
+        let (frame, to) = bob.s.typing(bg).unwrap().unwrap();
+        assert_eq!(to, vec![alice.pk()]);
+        alice.s.on_frame(&bob.pk(), frame.clone()).unwrap();
+        assert_eq!(alice.s.take_events(), [Event::Typing { chat: group, who: bob.pk(), name: "Bob".into() }]);
+        // Carol isn't in the group: her claim is ignored.
+        alice.s.on_frame(&carol.pk(), frame).unwrap();
+        assert!(alice.s.take_events().is_empty());
+        // Nor is a group nobody has.
+        alice.s.on_frame(&bob.pk(), Frame::Typing { group: vec![9; 16] }).unwrap();
+        assert!(alice.s.take_events().is_empty());
     }
 
     #[test]
