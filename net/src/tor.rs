@@ -142,6 +142,33 @@ impl Tor {
     }
 }
 
+/// How an onion service stands: `state` is "starting", "ready", "trouble",
+/// "broken" or "stopped"; `problem` is Arti's own account of what's wrong;
+/// `address` is the onion address it serves.
+pub struct ServiceReport {
+    pub state: &'static str,
+    pub problem: Option<String>,
+    pub address: Option<String>,
+}
+
+pub fn service_report(service: &RunningOnionService) -> ServiceReport {
+    use safelog::DisplayRedacted;
+    use tor_hsservice::status::State;
+    let status = service.status();
+    let state = match status.state() {
+        State::Bootstrapping => "starting",
+        State::Running | State::DegradedReachable => "ready",
+        State::DegradedUnreachable | State::Recovering => "trouble",
+        State::Broken => "broken",
+        _ => "stopped",
+    };
+    ServiceReport {
+        state,
+        problem: status.current_problem().map(|p| format!("{p:?}")),
+        address: service.onion_address().map(|id| id.display_unredacted().to_string()),
+    }
+}
+
 /// Launches an onion service named `nickname` whose key is `secret`, and
 /// hands each connection made to it to `accept`.
 fn launch(

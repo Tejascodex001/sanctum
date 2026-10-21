@@ -93,9 +93,15 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   String _android = '';
   int _build = 0;
 
+  /// Feedback sent earlier that hasn't got through yet.
+  int _waiting = 0;
+
   @override
   void initState() {
     super.initState();
+    feedbackWaiting().then((n) {
+      if (mounted) setState(() => _waiting = n);
+    });
     Background.deviceInfo().then((d) {
       if (mounted) {
         setState(() {
@@ -173,6 +179,25 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
             'friend code or anything that says who you are.',
             style: AppText.body.copyWith(color: Palette.textMuted),
           ),
+          if (_waiting > 0) ...[
+            const SizedBox(height: Space.md),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.schedule_send_rounded, size: 20, color: Palette.textMuted),
+                const SizedBox(width: Space.sm),
+                Expanded(
+                  child: Text(
+                    _waiting == 1
+                        ? 'Your earlier feedback is still on its way. Sanctum keeps trying while it\'s connected.'
+                        : '$_waiting pieces of your earlier feedback are still on their way. Sanctum keeps trying '
+                            'while it\'s connected.',
+                    style: AppText.caption,
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (!open) ...[
             const SizedBox(height: Space.md),
             Row(
@@ -308,6 +333,9 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
   bool _receiving = false;
   String _address = '';
   List<FeedbackItem> _items = const [];
+  FeedbackCheck? _check;
+  bool _testing = false;
+  String? _testResult;
   StreamSubscription<AppEvent>? _arrivals;
 
   @override
@@ -328,12 +356,49 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
     final receiving = await feedbackReceiving();
     final items = await feedbackInbox();
     final address = receiving ? await feedbackAddress() : '';
+    final check = await feedbackCheck();
     if (!mounted) return;
     setState(() {
       _receiving = receiving;
       _items = items;
       _address = address;
+      _check = check;
     });
+  }
+
+  /// Sends a test to this phone's own address through Tor.
+  Future<void> _test() async {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _testing = true;
+      _testResult = null;
+    });
+    final failure = await feedbackTest();
+    if (!mounted) return;
+    setState(() {
+      _testing = false;
+      _testResult =
+          failure.isEmpty ? 'The test arrived: feedback works on this phone.' : 'The test didn\'t arrive: $failure';
+    });
+    await _load();
+  }
+
+  /// Everything the check shows, as text to send to the developer's helper.
+  String _report() {
+    final c = _check;
+    if (c == null) return '';
+    return [
+      'Sanctum feedback check',
+      'Connected: ${c.online}',
+      'Receiving: ${c.receiving}',
+      'Service: ${c.service}',
+      'Address matches: ${c.addressOk}',
+      'This version sends here: ${c.sendsHere}',
+      'Waiting to send: ${c.waiting}',
+      'Last send: ${c.lastTry.isEmpty ? 'none' : c.lastTry}',
+      'Problem: ${c.problem.isEmpty ? 'none' : c.problem}',
+      if (_testResult != null) 'Test: $_testResult',
+    ].join('\n');
   }
 
   Future<void> _setReceiving(bool on) async {
@@ -409,10 +474,121 @@ class _FeedbackInboxScreenState extends State<FeedbackInboxScreen> {
               ],
             ),
           ),
+          if (_check != null) ...[
+            const SizedBox(height: Space.xl),
+            Text('CHECK', style: AppText.overline),
+            const SizedBox(height: Space.sm),
+            _CheckPanel(
+              check: _check!,
+              testing: _testing,
+              testResult: _testResult,
+              onTest: _receiving && !_testing ? _test : null,
+              onRefresh: _load,
+              onCopy: () {
+                Clipboard.setData(ClipboardData(text: _report()));
+                _say('Report copied.');
+              },
+            ),
+          ],
           const SizedBox(height: Space.xl),
           Text(_items.isEmpty ? 'NOTHING YET' : '${_items.length} RECEIVED', style: AppText.overline),
           const SizedBox(height: Space.sm),
           for (final item in _items) _FeedbackCard(item: item, onDelete: () => _delete(item)),
+        ],
+      ),
+    );
+  }
+}
+
+/// How feedback stands on this phone, in plain words, with a test.
+class _CheckPanel extends StatelessWidget {
+  const _CheckPanel({
+    required this.check,
+    required this.testing,
+    required this.testResult,
+    required this.onTest,
+    required this.onRefresh,
+    required this.onCopy,
+  });
+
+  final FeedbackCheck check;
+  final bool testing;
+  final String? testResult;
+  final VoidCallback? onTest;
+  final VoidCallback onRefresh;
+  final VoidCallback onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    final service = switch (check.service) {
+      'ready' => 'Ready',
+      'starting' => 'Getting ready (can take a few minutes)',
+      'trouble' => 'Having trouble, still trying',
+      'broken' => 'Not working',
+      'stopped' => 'Stopped',
+      _ => check.receiving ? 'Not started' : 'Off',
+    };
+    final rows = [
+      ('Connected', check.online ? 'Yes' : 'Not yet', check.online),
+      ('Receiving', service, check.service == 'ready'),
+      ('Address', check.service == 'off' ? '–' : (check.addressOk ? 'Matches' : 'Doesn\'t match'), check.addressOk),
+      ('This version sends here', check.sendsHere ? 'Yes' : 'No', check.sendsHere),
+      ('Waiting to send', '${check.waiting}', check.waiting == 0),
+    ];
+    return Container(
+      padding: const EdgeInsets.all(Space.lg),
+      decoration: BoxDecoration(
+        color: Palette.surface,
+        borderRadius: BorderRadius.circular(Radii.md),
+        border: Border.all(color: Palette.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final (label, value, good) in rows)
+            Padding(
+              padding: const EdgeInsets.only(bottom: Space.xs),
+              child: Row(
+                children: [
+                  Icon(
+                    good ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+                    size: 16,
+                    color: good ? Palette.textMuted : Palette.warning,
+                  ),
+                  const SizedBox(width: Space.sm),
+                  SizedBox(width: 150, child: Text(label, style: AppText.caption)),
+                  Expanded(child: Text(value, style: AppText.caption.copyWith(color: Palette.text))),
+                ],
+              ),
+            ),
+          if (check.lastTry.isNotEmpty) ...[
+            const SizedBox(height: Space.sm),
+            Text('Last send: ${check.lastTry}', style: AppText.caption),
+          ],
+          if (check.problem.isNotEmpty) ...[
+            const SizedBox(height: Space.sm),
+            SelectableText(check.problem, style: AppText.mono.copyWith(fontSize: 11, color: Palette.textMuted)),
+          ],
+          if (testResult != null) ...[
+            const SizedBox(height: Space.md),
+            Text(testResult!, style: AppText.bodyStrong),
+          ],
+          const SizedBox(height: Space.md),
+          Wrap(
+            spacing: Space.sm,
+            runSpacing: Space.sm,
+            children: [
+              FilledButton.icon(
+                onPressed: onTest,
+                icon: testing
+                    ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.send_rounded, size: 18),
+                label: Text(testing ? 'Testing…' : 'Send a test'),
+              ),
+              OutlinedButton(onPressed: onRefresh, child: const Text('Refresh')),
+              OutlinedButton(onPressed: onCopy, child: const Text('Copy report')),
+            ],
+          ),
         ],
       ),
     );
