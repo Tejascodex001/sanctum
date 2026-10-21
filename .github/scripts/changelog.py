@@ -9,7 +9,8 @@ OUT_THIS: just this build's section (the release notes on GitHub).
 A failed build has no tag; its commits roll into the next build.
 
 The notes are for the app's users: commits whose subject starts with
-"Internal:", "Docs:" or "CI:" (developer-only changes) are left out.
+"Internal:", "Docs:" or "CI:" (developer-only changes) are left out, and
+so are commits listed in .github/changelog-skip.
 """
 import re
 import subprocess
@@ -20,10 +21,24 @@ def git(*args):
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
 
 
+def skipped():
+    try:
+        with open(".github/changelog-skip") as f:
+            return {line.strip() for line in f if line.strip() and not line.startswith("#")}
+    except FileNotFoundError:
+        return set()
+
+
+SKIPPED = skipped()
+
+
 def commits(rev_range):
-    out = git("log", "--reverse", "--format=%x1e%s%x1f%b", rev_range)
+    out = git("log", "--reverse", "--format=%x1e%H%x1f%s%x1f%b", rev_range)
     for entry in out.split("\x1e")[1:]:
-        subject, _, body = entry.partition("\x1f")
+        sha, _, rest = entry.partition("\x1f")
+        subject, _, body = rest.partition("\x1f")
+        if sha.strip() in SKIPPED:
+            continue
         yield subject.strip(), body
 
 
