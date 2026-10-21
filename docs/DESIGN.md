@@ -47,8 +47,8 @@ Rust core (sanctum-core)
 ### Delivery without a server
 - Each phone runs its own Tor onion service; its onion address is derived from its identity key.
 - A foreground service keeps it reachable (no Google push, so Google never sees activity).
-- If a recipient is offline, online group members hold the encrypted message and pass it on later (store-and-forward). They can't read it.
-- Trade-offs: messages may take a few seconds longer; the app uses some battery; delivery is slow if nobody in the group is online.
+- If a recipient is offline, the **sender's** phone keeps the sealed message in its outbox and delivers it when both phones are online at the same time (retried on every connection and every 30 s). Nobody else holds it. Relaying through other online group members (store-and-forward, unreadable to them) is planned, not built.
+- Trade-offs: messages may take a few seconds longer; the app uses some battery; two friends who are never online at the same time can't exchange messages until they are.
 
 ## Encryption
 - **In transit:** MLS with ciphersuite X25519 / ChaCha20-Poly1305 / SHA-256 / Ed25519. Forward secrecy and post-compromise security from MLS ratchets. Messages padded to 64-byte blocks to hide length. A member's MLS identity must equal their signing key, so nobody can impersonate a friend inside a group. Tampered or replayed messages are rejected.
