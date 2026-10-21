@@ -60,7 +60,7 @@ pub fn direct() -> Connect {
                 let public: Vec<SocketAddr> =
                     tokio::net::lookup_host((host.as_str(), port)).await?.filter(|a| is_public(&a.ip())).collect();
                 anyhow::ensure!(!public.is_empty(), "{host} isn't on the public internet");
-                Ok::<_, anyhow::Error>(tokio::net::TcpStream::connect(&public[..]).await?)
+                race(&public).await
             };
             let stream = tokio::time::timeout(DIRECT_TIMEOUT, open).await??;
             Ok(Box::new(stream) as BoxConn)
@@ -69,6 +69,43 @@ pub fn direct() -> Connect {
 }
 
 const DIRECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+/// Head start each address gets before the next is tried too.
+const NEXT_AFTER: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Connects to whichever address answers first, trying them in turn but
+/// not waiting for one to fail first ("happy eyeballs"). Many mobile
+/// networks hand out IPv6 addresses that go nowhere: trying them one by one
+/// could hang for the whole timeout before IPv4 is tried.
+async fn race(addrs: &[SocketAddr]) -> anyhow::Result<tokio::net::TcpStream> {
+    // Alternate IPv6 and IPv4, so one family can't hold up the other.
+    let (v6, v4): (Vec<SocketAddr>, Vec<SocketAddr>) = addrs.iter().partition(|a| a.is_ipv6());
+    let mut order: Vec<SocketAddr> = Vec::new();
+    for i in 0..v6.len().max(v4.len()) {
+        order.extend(v6.get(i).copied());
+        order.extend(v4.get(i).copied());
+    }
+    let mut tries = tokio::task::JoinSet::new();
+    let mut last = anyhow::anyhow!("no address answered");
+    let mut queue = order.into_iter();
+    loop {
+        if let Some(addr) = queue.next() {
+            tries.spawn(async move { tokio::net::TcpStream::connect(addr).await });
+        } else if tries.is_empty() {
+            return Err(last);
+        }
+        let next_due = tokio::time::sleep(NEXT_AFTER);
+        tokio::select! {
+            done = tries.join_next(), if !tries.is_empty() => match done {
+                Some(Ok(Ok(stream))) => return Ok(stream),
+                Some(Ok(Err(e))) => last = e.into(),
+                Some(Err(e)) => last = e.into(),
+                None => {}
+            },
+            // Nothing yet: start the next address alongside.
+            _ = next_due, if queue.len() > 0 => {}
+        }
+    }
+}
 
 /// Somewhere on the internet, not this phone or the network it's on.
 fn is_public(ip: &IpAddr) -> bool {
@@ -286,6 +323,23 @@ fn dechunk(mut data: &[u8]) -> anyhow::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn racing_skips_addresses_that_go_nowhere() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let live = listener.local_addr().unwrap();
+        // A documentation address (never answers) and a closed port come first.
+        let closed = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap()
+        };
+        let nowhere: SocketAddr = "192.0.2.1:9".parse().unwrap();
+        let started = std::time::Instant::now();
+        let stream = race(&[nowhere, closed, live]).await.unwrap();
+        assert_eq!(stream.peer_addr().unwrap(), live);
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "{:?}", started.elapsed());
+        assert!(race(&[closed]).await.is_err());
+    }
 
     #[test]
     fn urls() {

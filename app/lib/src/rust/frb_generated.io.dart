@@ -191,6 +191,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ReactionView> dco_decode_list_reaction_view(dynamic raw);
 
   @protected
+  List<ReelInterest> dco_decode_list_reel_interest(dynamic raw);
+
+  @protected
   List<ReleaseNotes> dco_decode_list_release_notes(dynamic raw);
 
   @protected
@@ -285,6 +288,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ReactionView dco_decode_reaction_view(dynamic raw);
+
+  @protected
+  ReelInterest dco_decode_reel_interest(dynamic raw);
+
+  @protected
+  ReelInterests dco_decode_reel_interests(dynamic raw);
 
   @protected
   ReelSignal dco_decode_reel_signal(dynamic raw);
@@ -518,6 +527,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<ReelInterest> sse_decode_list_reel_interest(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<ReleaseNotes> sse_decode_list_release_notes(
     SseDeserializer deserializer,
   );
@@ -628,6 +642,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ReactionView sse_decode_reaction_view(SseDeserializer deserializer);
+
+  @protected
+  ReelInterest sse_decode_reel_interest(SseDeserializer deserializer);
+
+  @protected
+  ReelInterests sse_decode_reel_interests(SseDeserializer deserializer);
 
   @protected
   ReelSignal sse_decode_reel_signal(SseDeserializer deserializer);
@@ -921,6 +941,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_reel_interest(
+    List<ReelInterest> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_release_notes(
     List<ReleaseNotes> self,
     SseSerializer serializer,
@@ -1063,6 +1089,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_reaction_view(ReactionView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reel_interest(ReelInterest self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_reel_interests(ReelInterests self, SseSerializer serializer);
 
   @protected
   void sse_encode_reel_signal(ReelSignal self, SseSerializer serializer);

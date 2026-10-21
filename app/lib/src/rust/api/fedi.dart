@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `connect`, `connector`, `key_of`, `kind_code`, `load_taste`, `net_kind`, `now`, `player_url`, `post_view`, `problem`, `relayed`, `save_taste`, `save`, `source_key`, `tor`
+// These functions are ignored because they are not marked as `pub`: `chosen_interests`, `connect`, `connector`, `hints`, `key_of`, `kind_code`, `load_taste`, `net_kind`, `now`, `player_url`, `post_view`, `problem`, `refill`, `relayed`, `save_taste`, `save`, `source_key`, `tor`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Reels`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`
@@ -44,9 +44,20 @@ Future<FediPage> fediFeed({
   next: next,
 );
 
-/// The next `count` reels, best fits for your taste first, with some new
-/// things mixed in. `fresh` starts the sites' feeds again (pull to
-/// refresh). Reels shown in the last two days aren't shown again.
+/// The interests to pick from, and which are picked.
+Future<ReelInterests> reelsInterests() =>
+    RustLib.instance.api.crateApiFediReelsInterests();
+
+/// Picks what Reels is about (empty: skipped, no preference). The feed
+/// starts again with them.
+Future<void> reelsSetInterests({required List<String> ids}) =>
+    RustLib.instance.api.crateApiFediReelsSetInterests(ids: ids);
+
+/// The next `count` reels, best fits for your taste and interests first,
+/// with some new things mixed in. `fresh` starts the sites' feeds again
+/// (pull to refresh). Returns as soon as a few are ready; the rest keep
+/// loading in the background. Reels shown in the last two days aren't
+/// shown again.
 Future<ReelsPage> reelsNext({required int count, required bool fresh}) =>
     RustLib.instance.api.crateApiFediReelsNext(count: count, fresh: fresh);
 
@@ -64,7 +75,8 @@ Future<void> reelsSignal({
   times: times,
 );
 
-/// Forgets what Reels learned you like (Settings).
+/// Forgets what Reels learned you like, and the interests picked
+/// (Settings).
 Future<void> reelsForgetTaste() =>
     RustLib.instance.api.crateApiFediReelsForgetTaste();
 
@@ -275,6 +287,54 @@ class FediSourceProblem {
           kind == other.kind &&
           host == other.host &&
           problem == other.problem;
+}
+
+/// Something to watch reels about, for picking them before Reels starts.
+class ReelInterest {
+  final String id;
+  final String label;
+  final String emoji;
+  final bool chosen;
+
+  const ReelInterest({
+    required this.id,
+    required this.label,
+    required this.emoji,
+    required this.chosen,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^ label.hashCode ^ emoji.hashCode ^ chosen.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReelInterest &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          label == other.label &&
+          emoji == other.emoji &&
+          chosen == other.chosen;
+}
+
+class ReelInterests {
+  /// Interests were asked about (picked or skipped).
+  final bool asked;
+  final List<ReelInterest> items;
+
+  const ReelInterests({required this.asked, required this.items});
+
+  @override
+  int get hashCode => asked.hashCode ^ items.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ReelInterests &&
+          runtimeType == other.runtimeType &&
+          asked == other.asked &&
+          items == other.items;
 }
 
 /// What happened with a reel, for learning what you like.

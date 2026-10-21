@@ -12,10 +12,10 @@ use super::update::CONNECT;
 use sanctum_net::fedi::{self, FediError, Kind};
 use sanctum_net::https::{self, Connect};
 use sanctum_net::relay::Relay;
-use sanctum_core::taste::{Candidate, Signal, Taste};
-use std::collections::{HashMap, VecDeque};
+use sanctum_core::taste::{interest_matches, Candidate, Interest, Signal, Taste, INTERESTS};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{LazyLock, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Which servers to read, kept (sealed) on this phone only.
 const SOURCES: &[u8] = b"fedi:sources";
@@ -23,6 +23,8 @@ const SOURCES: &[u8] = b"fedi:sources";
 const DIRECT: &[u8] = b"fedi:direct";
 /// What Reels has learned you like (sealed, never sent).
 const TASTE: &[u8] = b"fedi:taste";
+/// The interests picked before Reels started (absent: not asked yet).
+const INTERESTS_KEY: &[u8] = b"fedi:interests";
 /// Loops was added to a list saved before it existed.
 const LOOPS_ADDED: &[u8] = b"fedi:loops-added";
 const LOOPS: &str = "loops.video";
@@ -234,7 +236,7 @@ pub fn fedi_feed(kind: FediKind, host: String, next: Option<String>) -> FediPage
             problem: Some(FediProblem::Offline),
         };
     };
-    match runtime().block_on(fedi::feed(&connect, net_kind(kind), &host, next.as_deref())) {
+    match runtime().block_on(fedi::feed(&connect, net_kind(kind), &host, next.as_deref(), &fedi::Hints::default())) {
         Ok(page) => FediPage {
             posts: page.posts.into_iter().map(|p| post_view(p, false)).collect(),
             next: page.next,
@@ -287,20 +289,32 @@ fn post_view(p: fedi::Post, liked: bool) -> FediPost {
 
 /// Reels fetched but not shown yet, where each site's feed is up to, and
 /// what's known about the reels already shown (for learning from them).
+/// Sites are read in the background, so a slow one never holds up the rest.
 #[flutter_rust_bridge::frb(ignore)]
 #[derive(Default)]
 struct Reels {
     pool: Vec<fedi::Post>,
     /// Per source: the next page (None: no more).
     cursors: HashMap<String, Option<String>>,
+    /// Sources being read right now.
+    fetching: HashSet<String>,
     problems: HashMap<String, FediSourceProblem>,
     shown: HashMap<String, Vec<String>>,
     shown_order: VecDeque<String>,
+    /// Video files already looked up, by "host/video id".
+    files: HashMap<String, String>,
+    /// Bumped by a fresh start, so older reads are dropped.
+    round: u64,
 }
 
 static REELS: LazyLock<Mutex<Reels>> = LazyLock::new(Default::default);
 /// Reels shown that are still remembered, for learning from them.
 const MAX_SHOWN: usize = 500;
+/// Enough to start showing.
+const FIRST: usize = 3;
+/// How long to wait for the first reels before showing what there is.
+const WAIT_DIRECT: Duration = Duration::from_secs(8);
+const WAIT_TOR: Duration = Duration::from_secs(25);
 
 pub struct FediSourceProblem {
     pub kind: FediKind,
@@ -331,6 +345,20 @@ pub enum ReelSignal {
     Skipped,
 }
 
+/// Something to watch reels about, for picking them before Reels starts.
+pub struct ReelInterest {
+    pub id: String,
+    pub label: String,
+    pub emoji: String,
+    pub chosen: bool,
+}
+
+pub struct ReelInterests {
+    /// Interests were asked about (picked or skipped).
+    pub asked: bool,
+    pub items: Vec<ReelInterest>,
+}
+
 fn now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
@@ -351,63 +379,77 @@ fn save_taste(t: &Taste) {
     let _ = session::with(|s| Ok(s.store.kv_put(TASTE, t)?));
 }
 
-/// The next `count` reels, best fits for your taste first, with some new
-/// things mixed in. `fresh` starts the sites' feeds again (pull to
-/// refresh). Reels shown in the last two days aren't shown again.
-pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
-    let count = count.clamp(1, 20) as usize;
-    let sources = fedi_sources()?;
-    let mut taste = load_taste();
-    let at = now();
-    if fresh {
-        let mut r = REELS.lock().unwrap();
-        r.pool.clear();
-        r.cursors.clear();
-        r.problems.clear();
+fn chosen_interests() -> Vec<&'static Interest> {
+    let ids: Vec<String> = session::with(|s| Ok(s.store.kv_get(INTERESTS_KEY)?)).ok().flatten().unwrap_or_default();
+    INTERESTS.iter().filter(|i| ids.iter().any(|id| id == i.id)).collect()
+}
+
+/// The interests to pick from, and which are picked.
+pub fn reels_interests() -> anyhow::Result<ReelInterests> {
+    let ids: Option<Vec<String>> = session::with(|s| Ok(s.store.kv_get(INTERESTS_KEY)?))?;
+    Ok(ReelInterests {
+        asked: ids.is_some(),
+        items: INTERESTS
+            .iter()
+            .map(|i| ReelInterest {
+                id: i.id.into(),
+                label: i.label.into(),
+                emoji: i.emoji.into(),
+                chosen: ids.as_ref().is_some_and(|ids| ids.iter().any(|id| id == i.id)),
+            })
+            .collect(),
+    })
+}
+
+/// Picks what Reels is about (empty: skipped, no preference). The feed
+/// starts again with them.
+pub fn reels_set_interests(ids: Vec<String>) -> anyhow::Result<()> {
+    let ids: Vec<String> = ids.into_iter().filter(|id| INTERESTS.iter().any(|i| i.id == id)).collect();
+    session::with(|s| Ok(s.store.kv_put(INTERESTS_KEY, &ids)?))?;
+    let mut r = REELS.lock().unwrap();
+    r.round += 1;
+    r.pool.clear();
+    r.cursors.clear();
+    Ok(())
+}
+
+fn hints(chosen: &[&Interest]) -> fedi::Hints {
+    fedi::Hints {
+        categories: chosen.iter().filter_map(|i| i.peertube).collect(),
+        // Each interest's main words, as hashtags.
+        tags: chosen.iter().flat_map(|i| i.words.iter().take(3)).map(|w| w.to_string()).collect(),
     }
-    let Some(connect) = connect() else {
-        return Ok(ReelsPage {
-            posts: Vec::new(),
-            problems: sources
-                .iter()
-                .map(|s| FediSourceProblem { kind: s.kind, host: s.host.clone(), problem: FediProblem::Offline })
-                .collect(),
-        });
-    };
-    for _ in 0..3 {
-        // What to fetch, decided under the lock; fetched without it.
-        let due: Vec<(FediSource, Option<String>)> = {
-            let r = REELS.lock().unwrap();
-            if r.pool.len() >= count * 3 {
-                break;
-            }
-            sources
-                .iter()
-                .filter_map(|s| match r.cursors.get(&source_key(s)) {
-                    Some(None) => None,
-                    Some(Some(c)) => Some((s.clone(), Some(c.clone()))),
-                    None => Some((s.clone(), None)),
-                })
-                .collect()
+}
+
+/// Starts reading the next page of every source that has more and isn't
+/// being read, unless the pool already has plenty. Results land in the
+/// pool as each site answers.
+fn refill(sources: &[FediSource], connect: &Connect, target: usize, hints: &fedi::Hints) {
+    let mut r = REELS.lock().unwrap();
+    if r.pool.len() >= target {
+        return;
+    }
+    let round = r.round;
+    for s in sources {
+        let key = source_key(s);
+        let cursor = match r.cursors.get(&key) {
+            Some(None) => continue,
+            Some(Some(c)) => Some(c.clone()),
+            None => None,
         };
-        if due.is_empty() {
-            break;
+        if !r.fetching.insert(key.clone()) {
+            continue;
         }
-        let pages = runtime().block_on(async {
-            let mut tasks = Vec::new();
-            for (s, cursor) in &due {
-                let (connect, host, cursor, kind) = (connect.clone(), s.host.clone(), cursor.clone(), net_kind(s.kind));
-                tasks.push(runtime().spawn(async move { fedi::feed(&connect, kind, &host, cursor.as_deref()).await }));
+        let (connect, s, hints) = (connect.clone(), s.clone(), hints.clone());
+        runtime().spawn(async move {
+            let page = fedi::feed(&connect, net_kind(s.kind), &s.host, cursor.as_deref(), &hints).await;
+            let taste = load_taste();
+            let at = now();
+            let mut r = REELS.lock().unwrap();
+            r.fetching.remove(&key);
+            if r.round != round {
+                return;
             }
-            let mut out = Vec::new();
-            for t in tasks {
-                out.push(t.await.unwrap_or_else(|e| Err(FediError::Unreachable(e.to_string()))));
-            }
-            out
-        });
-        let mut r = REELS.lock().unwrap();
-        for ((s, _), page) in due.iter().zip(pages) {
-            let key = source_key(s);
             match page {
                 Ok(page) => {
                     r.problems.remove(&key);
@@ -425,8 +467,55 @@ pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
                     r.problems.insert(key, FediSourceProblem { kind: s.kind, host: s.host.clone(), problem: problem(e) });
                 }
             }
-        }
+        });
     }
+}
+
+/// The next `count` reels, best fits for your taste and interests first,
+/// with some new things mixed in. `fresh` starts the sites' feeds again
+/// (pull to refresh). Returns as soon as a few are ready; the rest keep
+/// loading in the background. Reels shown in the last two days aren't
+/// shown again.
+pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
+    let count = count.clamp(1, 20) as usize;
+    let sources = fedi_sources()?;
+    let chosen = chosen_interests();
+    let hints = hints(&chosen);
+    if fresh {
+        let mut r = REELS.lock().unwrap();
+        r.round += 1;
+        r.pool.clear();
+        r.cursors.clear();
+        r.problems.clear();
+    }
+    let direct = fedi_direct().unwrap_or(false);
+    let Some(connect) = connector(direct, tor()) else {
+        return Ok(ReelsPage {
+            posts: Vec::new(),
+            problems: sources
+                .iter()
+                .map(|s| FediSourceProblem { kind: s.kind, host: s.host.clone(), problem: FediProblem::Offline })
+                .collect(),
+        });
+    };
+    let target = count * 3;
+    let deadline = Instant::now() + if direct { WAIT_DIRECT } else { WAIT_TOR };
+    loop {
+        refill(&sources, &connect, target, &hints);
+        let (have, busy) = {
+            let r = REELS.lock().unwrap();
+            (r.pool.len(), !r.fetching.is_empty())
+        };
+        // Enough to start, or nothing more coming, or waited long enough.
+        if have >= count.min(FIRST) || !busy || Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(120));
+    }
+    // Keep the pool topped up while these are watched.
+    refill(&sources, &connect, target, &hints);
+    let mut taste = load_taste();
+    let at = now();
     let mut r = REELS.lock().unwrap();
     let candidates: Vec<Candidate> = r
         .pool
@@ -438,9 +527,10 @@ pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
             likes: p.likes,
             upright: p.upright(),
             age_s: at.saturating_sub(p.created_at.max(0) as u64),
+            interests: interest_matches(&chosen, &p.words()),
         })
         .collect();
-    let mut picked = taste.rank(&candidates, count, &mut rand::thread_rng());
+    let mut picked = taste.rank(&candidates, count, !chosen.is_empty(), &mut rand::thread_rng());
     let order = picked.clone();
     picked.sort_unstable_by(|a, b| b.cmp(a));
     let mut taken: HashMap<usize, fedi::Post> = HashMap::new();
@@ -449,7 +539,7 @@ pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
     }
     let mut posts = Vec::new();
     for i in order {
-        let p = taken.remove(&i).expect("picked once");
+        let mut p = taken.remove(&i).expect("picked once");
         let c = &candidates[i];
         taste.mark_seen(&c.key, at);
         r.shown.insert(c.key.clone(), c.features.clone());
@@ -459,11 +549,33 @@ pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
                 r.shown.remove(&old);
             }
         }
+        // Videos whose file is known already play straight away.
+        if let Some(m) = p.media.first_mut() {
+            if m.url.is_empty() {
+                if let Some(url) = r.files.get(&key_of(&p.host, &m.video_id)) {
+                    m.url = url.clone();
+                    m.video_id.clear();
+                }
+            }
+        }
         let liked = taste.liked(&c.key);
         posts.push(post_view(p, liked));
     }
+    let problems = r.problems.values().cloned().collect();
+    drop(r);
     save_taste(&taste);
-    Ok(ReelsPage { posts, problems: r.problems.values().cloned().collect() })
+    // Look up the files of the first ones now, so they start sooner.
+    for p in posts.iter().take(3) {
+        if let Some(m) = p.media.first().filter(|m| m.url.is_empty() && !m.video_id.is_empty()) {
+            let (connect, host, id) = (connect.clone(), p.host.clone(), m.video_id.clone());
+            runtime().spawn(async move {
+                if let Ok(url) = fedi::video_file(&connect, &host, &id).await {
+                    REELS.lock().unwrap().files.insert(key_of(&host, &id), url);
+                }
+            });
+        }
+    }
+    Ok(ReelsPage { posts, problems })
 }
 
 /// Learns from what you did with a shown reel. For `Watched`, `times` is
@@ -490,9 +602,14 @@ pub fn reels_signal(host: String, id: String, signal: ReelSignal, times: f32) ->
     Ok(())
 }
 
-/// Forgets what Reels learned you like (Settings).
+/// Forgets what Reels learned you like, and the interests picked
+/// (Settings).
 pub fn reels_forget_taste() -> anyhow::Result<()> {
-    session::with(|s| Ok(s.store.kv_put(TASTE, &Taste::default())?))
+    session::with(|s| {
+        s.store.kv_put(TASTE, &Taste::default())?;
+        s.store.kv_delete(INTERESTS_KEY)?;
+        Ok(())
+    })
 }
 
 /// A picture, through Tor or directly in fast mode (None if it couldn't
@@ -508,9 +625,14 @@ pub fn fedi_image(url: String) -> Option<Vec<u8>> {
 /// Loops videos without an address, pass `video_id` (and an empty `url`).
 pub fn fedi_video(host: String, url: String, video_id: String) -> Option<String> {
     let direct = fedi_direct().unwrap_or(false);
-    let url = if url.is_empty() {
+    let known = REELS.lock().unwrap().files.get(&key_of(&host, &video_id)).cloned();
+    let url = if let Some(known) = known.filter(|_| url.is_empty()) {
+        known
+    } else if url.is_empty() {
         let connect = connector(direct, tor())?;
-        runtime().block_on(fedi::video_file(&connect, &host, &video_id)).ok()?
+        let found = runtime().block_on(fedi::video_file(&connect, &host, &video_id)).ok()?;
+        REELS.lock().unwrap().files.insert(key_of(&host, &video_id), found.clone());
+        found
     } else {
         url
     };

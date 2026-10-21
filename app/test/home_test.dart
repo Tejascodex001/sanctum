@@ -190,6 +190,20 @@ void main() {
     expect(find.text('Add a friend'), findsOneWidget);
     await shot(tester, '5-friends');
 
+    // Reels starts by asking what you like watching.
+    await tester.tap(find.text('Reels'));
+    await settle(tester);
+    expect(find.text('What do you love watching?'), findsOneWidget);
+    await tester.tap(find.textContaining('Animals'));
+    await tester.tap(find.textContaining('Comedy'));
+    await settle(tester, 2);
+    await shot(tester, '13-interests');
+    await tester.tap(find.text('Show my reels'));
+    await settle(tester, 12);
+    expect(find.text('What do you love watching?'), findsNothing);
+    await tester.tap(find.text('Friends'));
+    await settle(tester);
+
     // Sending a reel: tap chats in the grid, then Send.
     unawaited(showShareSheet(tester.element(find.byType(HomeScreen)), text: 'https://tube.example/w/abc'));
     await settle(tester);

@@ -83,6 +83,19 @@ impl Post {
         out
     }
 
+    /// Its words, for matching interests: hashtags, topic and the words of
+    /// its text, lowercase.
+    pub fn words(&self) -> std::collections::BTreeSet<String> {
+        let mut out: std::collections::BTreeSet<String> = self.tags.iter().cloned().collect();
+        let text = format!("{} {}", self.topic, self.text).to_lowercase();
+        for w in text.split(|c: char| !c.is_alphanumeric()) {
+            if w.chars().count() >= 2 {
+                out.insert(w.to_string());
+            }
+        }
+        out
+    }
+
     /// Taller than wide, like Reels.
     pub fn upright(&self) -> bool {
         self.media.first().is_some_and(|m| m.height > m.width && m.width > 0)
@@ -103,6 +116,14 @@ pub struct Item {
     /// PeerTube or Loops: the video's id, to find its file (Loops ids start
     /// with "loops:").
     pub video_id: String,
+}
+
+/// What to look for first, from the interests picked: PeerTube
+/// categories, and hashtags (for Loops' trending ones and Mastodon's).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Hints {
+    pub categories: Vec<u32>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -154,19 +175,21 @@ async fn json(connect: &Connect, url: &str) -> Result<Value, FediError> {
 }
 
 /// One page of reels from a server. `next` comes from the previous page.
-pub async fn feed(connect: &Connect, kind: Kind, host: &str, next: Option<&str>) -> Result<Page, FediError> {
+pub async fn feed(
+    connect: &Connect,
+    kind: Kind,
+    host: &str,
+    next: Option<&str>,
+    hints: &Hints,
+) -> Result<Page, FediError> {
     let host = clean_host(host)?;
     let mut out = Page::default();
     let mut cursor = next.map(str::to_string);
     for _ in 0..SCAN_PAGES {
         let page = match kind {
-            Kind::Videos => peertube_page(connect, &host, cursor.as_deref()).await?,
-            Kind::Loops => return loops_page(connect, &host, cursor.as_deref()).await,
-            Kind::Social => {
-                let max = cursor.as_ref().map(|n| format!("&max_id={}", urlencode(n))).unwrap_or_default();
-                let url = format!("https://{host}/api/v1/timelines/public?local=true&only_media=true&limit=40{max}");
-                parse_statuses(&host, &json(connect, &url).await?)
-            }
+            Kind::Videos => peertube_page(connect, &host, cursor.as_deref(), &hints.categories).await?,
+            Kind::Loops => return loops_page(connect, &host, cursor.as_deref(), &hints.tags).await,
+            Kind::Social => social_page(connect, &host, cursor.as_deref(), &hints.tags).await?,
         };
         out.posts.extend(page.posts);
         out.next = page.next;
@@ -178,21 +201,47 @@ pub async fn feed(connect: &Connect, kind: Kind, host: &str, next: Option<&str>)
     Ok(out)
 }
 
+/// Mastodon: with interests, their hashtags' timelines in turn
+/// ("h:<n>[:<max id>]" cursors); else the server's own public timeline.
+async fn social_page(connect: &Connect, host: &str, cursor: Option<&str>, tags: &[String]) -> Result<Page, FediError> {
+    if tags.is_empty() {
+        let max = cursor.map(|n| format!("&max_id={}", urlencode(n))).unwrap_or_default();
+        let url = format!("https://{host}/api/v1/timelines/public?local=true&only_media=true&limit=40{max}");
+        return Ok(parse_statuses(host, &json(connect, &url).await?));
+    }
+    let rest = cursor.and_then(|c| c.strip_prefix("h:")).unwrap_or("0");
+    let (n, max) = rest.split_once(':').map_or((rest, None), |(n, m)| (n, Some(m)));
+    let n: usize = n.parse().unwrap_or(0);
+    let Some(tag) = tags.get(n) else { return Ok(Page::default()) };
+    let max_q = max.map(|m| format!("&max_id={}", urlencode(m))).unwrap_or_default();
+    let url = format!("https://{host}/api/v1/timelines/tag/{}?only_media=true&limit=40{max_q}", urlencode(tag));
+    let page = parse_statuses(host, &json(connect, &url).await?);
+    // A hashtag's first few pages, then the next hashtag.
+    let deeper = max.map_or(0, |_| 1);
+    let next = match &page.next {
+        Some(id) if deeper < 1 => Some(format!("h:{n}:{id}")),
+        _ => (n + 1 < tags.len()).then(|| format!("h:{}", n + 1)),
+    };
+    Ok(Page { posts: page.posts, next })
+}
+
 /// PeerTube: its search finds short videos directly ("s:" cursors); servers
-/// whose search won't, are read page by page for them ("l:" cursors).
-async fn peertube_page(connect: &Connect, host: &str, cursor: Option<&str>) -> Result<Page, FediError> {
+/// whose search won't, are read page by page for them ("l:" cursors). With
+/// interests, only their categories.
+async fn peertube_page(connect: &Connect, host: &str, cursor: Option<&str>, categories: &[u32]) -> Result<Page, FediError> {
+    let only: String = categories.iter().map(|c| format!("&categoryOneOf={c}")).collect();
     let (search, start) = match cursor.and_then(|c| c.split_once(':')) {
         Some(("s", n)) => (true, n.parse().unwrap_or(0)),
         Some((_, n)) => (false, n.parse().unwrap_or(0)),
         None => (true, 0),
     };
     let list = |start: u32| {
-        format!("https://{host}/api/v1/videos?sort=-publishedAt&count=100&start={start}&nsfw=false&isLive=false")
+        format!("https://{host}/api/v1/videos?sort=-publishedAt&count=100&start={start}&nsfw=false&isLive=false{only}")
     };
     if search {
         let url = format!(
             "https://{host}/api/v1/search/videos?durationMax={MAX_REEL_S}&sort=-publishedAt&count=30&start={start}\
-             &nsfw=false&isLive=false&searchTarget=local"
+             &nsfw=false&isLive=false&searchTarget=local{only}"
         );
         match json(connect, &url).await.map(|v| parse_videos(host, &v, start)) {
             Ok(page) if start > 0 || !page.posts.is_empty() || page.next.is_some() => return Ok(with_mode(page, "s")),
@@ -207,13 +256,15 @@ async fn peertube_page(connect: &Connect, host: &str, cursor: Option<&str>) -> R
 
 /// Loops, as a guest: first its picks of popular videos, then the
 /// videos of each trending hashtag ("t:<n>" cursors).
-async fn loops_page(connect: &Connect, host: &str, cursor: Option<&str>) -> Result<Page, FediError> {
+async fn loops_page(connect: &Connect, host: &str, cursor: Option<&str>, interests: &[String]) -> Result<Page, FediError> {
     let Some(n) = cursor.and_then(|c| c.strip_prefix("t:")).and_then(|n| n.parse::<usize>().ok()) else {
         let v = json(connect, &format!("https://{host}/api/web/feed")).await?;
         return Ok(Page { posts: parse_loops(host, &v, None), next: Some("t:0".into()) });
     };
     let tags = json(connect, &format!("https://{host}/api/v1/explore/tags")).await?;
-    let names: Vec<String> = list_of(&tags).iter().map(|t| str_of(t, "name")).filter(|t| !t.is_empty()).collect();
+    let mut names: Vec<String> = list_of(&tags).iter().map(|t| str_of(t, "name")).filter(|t| !t.is_empty()).collect();
+    // Hashtags matching the interests first.
+    names.sort_by_key(|t| !interests.contains(&t.to_lowercase()));
     let Some(tag) = names.get(n) else { return Ok(Page::default()) };
     let v = json(connect, &format!("https://{host}/api/v1/explore/tag-feed/{}", urlencode(tag))).await?;
     Ok(Page {

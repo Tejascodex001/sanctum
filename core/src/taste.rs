@@ -19,8 +19,50 @@ const SEEN_FOR: u64 = 2 * 24 * 3600;
 const MAX_LIKED: usize = 1000;
 /// A weight's reach: one signal can't dominate the feed.
 const LIMIT: f32 = 8.0;
-/// Share of the feed picked for something new rather than for taste.
+/// Share of the feed picked for something new rather than for taste (less
+/// once interests are picked).
 const EXPLORE: f64 = 0.2;
+const EXPLORE_WITH_INTERESTS: f64 = 0.08;
+/// What matching a picked interest adds (twice at most).
+const INTEREST: f32 = 3.0;
+
+/// Something to watch reels about, picked before Reels starts. Matched
+/// against a reel's hashtags, topic and words; `peertube` is the matching
+/// PeerTube category, which its sites can search by.
+#[derive(Debug)]
+pub struct Interest {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub emoji: &'static str,
+    pub words: &'static [&'static str],
+    pub peertube: Option<u32>,
+}
+
+pub const INTERESTS: &[Interest] = &[
+    Interest { id: "comedy", label: "Comedy", emoji: "😂", words: &["comedy", "funny", "humor", "humour", "meme", "memes", "lol", "joke", "jokes", "prank", "standup"], peertube: Some(9) },
+    Interest { id: "music", label: "Music", emoji: "🎵", words: &["music", "song", "songs", "singing", "singer", "cover", "guitar", "piano", "rap", "hiphop", "dj", "beats", "concert"], peertube: Some(1) },
+    Interest { id: "dance", label: "Dance", emoji: "💃", words: &["dance", "dancing", "dancer", "choreography", "kpop"], peertube: None },
+    Interest { id: "food", label: "Food", emoji: "🍜", words: &["food", "cooking", "recipe", "recipes", "foodie", "baking", "chef", "cook", "streetfood", "dessert"], peertube: Some(18) },
+    Interest { id: "travel", label: "Travel", emoji: "✈️", words: &["travel", "trip", "vacation", "beach", "mountains", "adventure", "roadtrip", "hiking", "city"], peertube: Some(6) },
+    Interest { id: "animals", label: "Animals", emoji: "🐾", words: &["animals", "animal", "pets", "pet", "cat", "cats", "dog", "dogs", "kitten", "puppy", "wildlife", "birds", "catsofmastodon", "dogsofmastodon"], peertube: Some(16) },
+    Interest { id: "sports", label: "Sports", emoji: "⚽", words: &["sports", "sport", "football", "soccer", "cricket", "basketball", "skate", "skateboarding", "surf", "surfing", "climbing"], peertube: Some(5) },
+    Interest { id: "fitness", label: "Fitness", emoji: "💪", words: &["fitness", "gym", "workout", "yoga", "running", "exercise", "calisthenics"], peertube: None },
+    Interest { id: "gaming", label: "Gaming", emoji: "🎮", words: &["gaming", "games", "game", "gamer", "minecraft", "videogames", "speedrun"], peertube: Some(7) },
+    Interest { id: "art", label: "Art", emoji: "🎨", words: &["art", "drawing", "painting", "illustration", "artist", "sketch", "animation", "pottery"], peertube: Some(4) },
+    Interest { id: "tech", label: "Tech", emoji: "💻", words: &["tech", "technology", "coding", "programming", "linux", "gadgets", "ai", "science", "robotics"], peertube: Some(15) },
+    Interest { id: "nature", label: "Nature", emoji: "🌿", words: &["nature", "outdoors", "forest", "garden", "gardening", "flowers", "sunset", "ocean", "plants"], peertube: None },
+    Interest { id: "cars", label: "Cars & bikes", emoji: "🚗", words: &["cars", "car", "motorcycle", "motorbike", "bikes", "racing", "vehicles", "supercar"], peertube: Some(3) },
+    Interest { id: "style", label: "Style & beauty", emoji: "👗", words: &["fashion", "style", "outfit", "ootd", "beauty", "makeup", "skincare", "hair"], peertube: None },
+    Interest { id: "diy", label: "DIY", emoji: "🛠️", words: &["diy", "howto", "crafts", "maker", "woodworking", "3dprinting", "repair", "build"], peertube: Some(12) },
+    Interest { id: "movies", label: "Movies & TV", emoji: "🎬", words: &["movies", "movie", "film", "films", "cinema", "anime", "tv", "series"], peertube: Some(2) },
+    Interest { id: "learning", label: "Learning", emoji: "📚", words: &["education", "learn", "learning", "history", "facts", "tutorial", "til", "space", "physics"], peertube: Some(13) },
+];
+
+/// How many of `chosen` a reel matches, from its words (hashtags, topic,
+/// words of its text, all lowercase).
+pub fn interest_matches(chosen: &[&Interest], words: &BTreeSet<String>) -> u8 {
+    chosen.iter().filter(|i| i.words.iter().any(|w| words.contains(*w))).count().min(u8::MAX as usize) as u8
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Signal {
@@ -52,6 +94,8 @@ pub struct Candidate {
     pub upright: bool,
     /// Seconds since it was posted.
     pub age_s: u64,
+    /// Picked interests it matches.
+    pub interests: u8,
 }
 
 impl Taste {
@@ -121,14 +165,17 @@ impl Taste {
         let upright = if c.upright { 1.2 } else { 0.0 };
         // Fresh things rank a little higher; a month old has lost 1.
         let age = (c.age_s as f32 / (30.0 * 86_400.0)).min(3.0);
-        fit + popular + upright - age
+        fit + popular + upright - age + INTEREST * c.interests.min(2) as f32
     }
 
     /// Picks `n` reels: mostly the best fits (with a little chance, so the
     /// order isn't the same every time), some picked at random to find new
     /// tastes, and never the same person twice in a row. Returns indexes
     /// into `candidates`.
-    pub fn rank(&self, candidates: &[Candidate], n: usize, rng: &mut impl Rng) -> Vec<usize> {
+    /// With `interests` picked, fewer picks are random: the feed sticks to
+    /// them.
+    pub fn rank(&self, candidates: &[Candidate], n: usize, interests: bool, rng: &mut impl Rng) -> Vec<usize> {
+        let explore_rate = if interests { EXPLORE_WITH_INTERESTS } else { EXPLORE };
         let mut left: Vec<(usize, f32)> = candidates
             .iter()
             .enumerate()
@@ -137,7 +184,7 @@ impl Taste {
         left.sort_by(|a, b| b.1.total_cmp(&a.1));
         let mut out: Vec<usize> = Vec::new();
         while out.len() < n && !left.is_empty() {
-            let explore = left.len() > 1 && rng.gen_bool(EXPLORE);
+            let explore = left.len() > 1 && rng.gen_bool(explore_rate);
             let last_author = out.last().map(|&i| candidates[i].author.as_str());
             let pick = if explore {
                 rng.gen_range(0..left.len())
@@ -159,7 +206,7 @@ mod tests {
     fn reel(key: &str, author: &str, tags: &[&str]) -> Candidate {
         let mut features = vec![format!("by:{author}")];
         features.extend(tags.iter().map(|t| format!("tag:{t}")));
-        Candidate { key: key.into(), author: author.into(), features, likes: 10, upright: true, age_s: 3600 }
+        Candidate { key: key.into(), author: author.into(), features, likes: 10, upright: true, age_s: 3600, interests: 0 }
     }
 
     #[test]
@@ -193,7 +240,7 @@ mod tests {
             t.learn(&pool[0].features, Signal::Like);
         }
         let mut rng = StdRng::seed_from_u64(7);
-        let picked = t.rank(&pool, 20, &mut rng);
+        let picked = t.rank(&pool, 20, false, &mut rng);
         assert_eq!(picked.len(), 20);
         let cats = picked.iter().filter(|&&i| pool[i].key.starts_with('c')).count();
         assert!(cats >= 12, "mostly what's liked: {cats}");
@@ -221,5 +268,24 @@ mod tests {
         // Round-trips through storage.
         let back: Taste = postcard::from_bytes(&postcard::to_stdvec(&t).unwrap()).unwrap();
         assert!(back.seen_recently("a", 2000));
+    }
+
+    #[test]
+    fn picked_interests_lead_the_feed() {
+        let t = Taste::default();
+        let animals: Vec<&Interest> = INTERESTS.iter().filter(|i| i.id == "animals").collect();
+        let words = |ws: &[&str]| ws.iter().map(|w| w.to_string()).collect::<BTreeSet<String>>();
+        assert_eq!(interest_matches(&animals, &words(&["my", "cats", "sleeping"])), 1);
+        assert_eq!(interest_matches(&animals, &words(&["cars"])), 0);
+        let mut pool = Vec::new();
+        for i in 0..30 {
+            let mut cat = reel(&format!("c{i}"), &format!("a{i}"), &["cats"]);
+            cat.interests = 1;
+            pool.push(cat);
+            pool.push(reel(&format!("x{i}"), &format!("b{i}"), &["cars"]));
+        }
+        let picked = t.rank(&pool, 20, true, &mut StdRng::seed_from_u64(3));
+        let cats = picked.iter().filter(|&&i| pool[i].interests > 0).count();
+        assert!(cats >= 17, "the picked interest leads: {cats}");
     }
 }

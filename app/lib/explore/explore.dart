@@ -44,8 +44,18 @@ class ExplorePage extends StatefulWidget {
   State<ExplorePage> createState() => _ExplorePageState();
 }
 
-class _ExplorePageState extends State<ExplorePage> {
+class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
   List<FediSource> _sources = const [];
+
+  /// Interests to pick before the first reels (null: not loaded yet).
+  ReelInterests? _interests;
+  var _picking = false;
+
+  /// The app is on screen: reels never play in the background.
+  var _awake = true;
+
+  /// Faster reels is on: load two ahead instead of one.
+  var _direct = false;
   final _posts = <FediPost>[];
   List<FediSourceProblem> _problems = const [];
   var _loading = false;
@@ -66,19 +76,36 @@ class _ExplorePageState extends State<ExplorePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (widget.active) _restart();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pages.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final awake = state == AppLifecycleState.resumed;
+    if (awake != _awake) setState(() => _awake = awake);
+  }
+
   Future<void> _restart() async {
     _started = true;
+    final interests = await reelsInterests();
     final sources = await fediSources();
+    final direct = await fediDirect();
     if (!mounted) return;
+    setState(() {
+      _interests = interests;
+      _direct = direct;
+      // First time: what do you like watching?
+      _picking = !interests.asked;
+    });
+    if (_picking) return;
     setState(() {
       _sources = sources;
       _posts.clear();
@@ -110,6 +137,29 @@ class _ExplorePageState extends State<ExplorePage> {
   void _onPage(int i) {
     setState(() => _index = i);
     if (i >= _posts.length - 3) _more();
+  }
+
+  Future<void> _pickInterests(List<String> ids) async {
+    await reelsSetInterests(ids: ids);
+    if (!mounted) return;
+    setState(() => _picking = false);
+    await _restart();
+  }
+
+  Future<void> _editInterests() async {
+    final interests = await reelsInterests();
+    if (!mounted) return;
+    final ids = await showModalBottomSheet<List<String>>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheet) => _InterestPicker(
+        items: interests.items,
+        dark: false,
+        onDone: (ids) => Navigator.pop(sheet, ids),
+      ),
+    );
+    if (ids != null) await _pickInterests(ids);
   }
 
   Future<void> _editSources() async {
@@ -151,6 +201,13 @@ class _ExplorePageState extends State<ExplorePage> {
                     children: [
                       Text('Reels', style: AppText.title.copyWith(color: Colors.white)),
                       const Spacer(),
+                      if (!_picking)
+                        IconButton(
+                          tooltip: 'What you like',
+                          color: Colors.white,
+                          icon: const Icon(Icons.interests_rounded),
+                          onPressed: _editInterests,
+                        ),
                       IconButton(
                         tooltip: 'Where reels come from',
                         color: Colors.white,
@@ -169,6 +226,15 @@ class _ExplorePageState extends State<ExplorePage> {
   }
 
   Widget _body() {
+    final interests = _interests;
+    if (_picking && interests != null) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(top: 56),
+          child: _InterestPicker(items: interests.items, dark: true, onDone: _pickInterests),
+        ),
+      );
+    }
     if (_posts.isEmpty) {
       if (_loading || !_started) return const Center(child: CircularProgressIndicator());
       return _Nothing(
@@ -190,9 +256,11 @@ class _ExplorePageState extends State<ExplorePage> {
             : _Reel(
                 key: ValueKey('${_posts[i].host}/${_posts[i].id}'),
                 post: _posts[i],
-                playing: widget.active && i == _index,
-                // The next one starts loading early: Tor is slow to start.
-                preload: widget.active && i == _index + 1,
+                // Not while another screen covers Reels.
+                playing: widget.active && _awake && TickerMode.valuesOf(context).enabled && i == _index,
+                // The next ones start loading early (two with Faster reels).
+                // Away from the app, the current one just pauses.
+                preload: widget.active && (i == _index + 1 || (_direct && i == _index + 2) || (!_awake && i == _index)),
               ),
       ),
     );
@@ -250,6 +318,127 @@ class _Nothing extends StatelessWidget {
       ),
     );
   }
+}
+
+/// What do you like watching? Picked before the first reels (and changed
+/// from the top bar): Reels looks for these first and sticks to them.
+class _InterestPicker extends StatefulWidget {
+  const _InterestPicker({required this.items, required this.dark, required this.onDone});
+
+  final List<ReelInterest> items;
+
+  /// Over the black Reels page, rather than in a sheet.
+  final bool dark;
+  final void Function(List<String> ids) onDone;
+
+  @override
+  State<_InterestPicker> createState() => _InterestPickerState();
+}
+
+class _InterestPickerState extends State<_InterestPicker> {
+  late final _chosen = {
+    for (final i in widget.items)
+      if (i.chosen) i.id
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = widget.dark;
+    final accent = Theme.of(context).colorScheme.primary;
+    final fg = dark ? Colors.white : Palette.text;
+    final muted = dark ? Colors.white70 : Palette.textMuted;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(Space.xl, Space.sm, Space.xl, Space.lg),
+        child: Column(
+          mainAxisSize: dark ? MainAxisSize.max : MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('What do you love watching?', style: AppText.title.copyWith(color: fg)),
+            const SizedBox(height: Space.xs),
+            Text(
+              'Pick a few. Reels looks for these and learns more as you watch. It stays on this phone.',
+              style: AppText.caption.copyWith(color: muted),
+            ),
+            const SizedBox(height: Space.lg),
+            Flexible(
+              child: SingleChildScrollView(
+                child: Wrap(
+                  spacing: Space.sm,
+                  runSpacing: Space.sm,
+                  children: [
+                    for (final i in widget.items)
+                      _InterestPill(
+                        label: '${i.emoji}  ${i.label}',
+                        selected: _chosen.contains(i.id),
+                        accent: accent,
+                        fg: fg,
+                        outline: dark ? Colors.white24 : Palette.outlineStrong,
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          setState(() => _chosen.contains(i.id) ? _chosen.remove(i.id) : _chosen.add(i.id));
+                        },
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: Space.lg),
+            FilledButton(
+              onPressed: _chosen.isEmpty ? null : () => widget.onDone(_chosen.toList()),
+              child: Text(_chosen.isEmpty ? 'Pick at least one' : 'Show my reels'),
+            ),
+            TextButton(
+              onPressed: () => widget.onDone(const []),
+              style: TextButton.styleFrom(foregroundColor: muted),
+              child: Text(dark ? 'Skip, show me anything' : 'No preference'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InterestPill extends StatelessWidget {
+  const _InterestPill({
+    required this.label,
+    required this.selected,
+    required this.accent,
+    required this.fg,
+    required this.outline,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final Color accent;
+  final Color fg;
+  final Color outline;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        selected: selected,
+        child: GestureDetector(
+          onTap: onTap,
+          child: AnimatedContainer(
+            duration: Motion.fast,
+            padding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: 10),
+            decoration: BoxDecoration(
+              color: selected ? accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(Radii.xl),
+              border: Border.all(color: selected ? accent : outline, width: 1.5),
+            ),
+            child: Text(
+              label,
+              style: AppText.bodyStrong.copyWith(color: selected ? Palette.onColor(accent) : fg, fontSize: 15),
+            ),
+          ),
+        ),
+      );
 }
 
 /// The end of what the sites have for now.
