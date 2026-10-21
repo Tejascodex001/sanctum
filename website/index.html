@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sanctum: private chat for close friends</title>
+<meta name="description" content="Sanctum is a free Android app for messages, calls and photos with the people closest to you. No servers, no accounts, nothing tracked.">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0A0D18" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#EEE7DA" media="(prefers-color-scheme: light)">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <a class="brand" href="#top" aria-label="Sanctum, back to the top">
+    <svg class="door" viewBox="20 20 60 62" aria-hidden="true"><use href="#door"/></svg>
+    <span>Sanctum</span>
+  </a>
+  <nav aria-label="On this page">
+    <a href="#inside">What's inside</a>
+    <a href="#private">How it's private</a>
+    <a href="#questions">Questions</a>
+    <a href="https://github.com/Tejascodex001/sanctum">Source code</a>
+    <a class="nav-download" href="#download">Download</a>
+  </nav>
+</header>
+
+<main id="top">
+
+<section class="hero">
+  <div class="stars" aria-hidden="true"></div>
+  <div class="hero-text">
+    <h1>Leave the noise <em>outside.</em></h1>
+  </div>
+  <div class="scene" aria-hidden="true">
+    <div class="arch">
+      <div class="room">
+        <div class="chat-head">
+          <div class="avatar" data-sigil="44,rosette" data-sigil-bg></div>
+          <b>Joe</b>
+          <span>Private · online</span>
+        </div>
+        <div class="bubbles">
+          <p class="in">are we still on for saturday?</p>
+          <p class="out">yes!! I made a poll for the time</p>
+          <p class="in">voted. bringing the board games</p>
+          <p class="out">perfect. door's open</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="hero-side">
+    <p>Sanctum is a private room for you and the people you trust. Your phones talk straight to each other, hidden by Tor. No servers, no accounts, no one listening at the door.</p>
+    <a class="button" id="download" href="https://github.com/Tejascodex001/sanctum/releases/latest/download/app-release.apk">Download for Android</a>
+    <p class="small">Free · beta · Android 7 and later · <a href="#install">How to install</a></p>
+  </div>
+  <div class="ground" aria-hidden="true"><div class="light"></div></div>
+  <p class="motto">No servers · No accounts · Nothing tracked</p>
+</section>
+
+<section id="inside" class="section">
+  <div class="section-head">
+    <h2>A few rooms, <em>all yours.</em></h2>
+    <p>Everything happens on your phones. Nothing is kept anywhere else, so there's nothing to leak.</p>
+  </div>
+  <div class="windows">
+    <article class="window">
+      <div class="pane lit"><div data-sigil="9,constellation" data-sigil-ink></div></div>
+      <h3>Talk</h3>
+      <p>Chats and groups of up to 50, with replies, threads, reactions, photos, files and voice notes.</p>
+    </article>
+    <article class="window">
+      <div class="pane"><div data-sigil="23,orbits"></div></div>
+      <h3>Call</h3>
+      <p>Voice and video calls with a friend, privately, even from the lock screen.</p>
+    </article>
+    <article class="window">
+      <div class="pane"><div data-sigil="61,lattice"></div></div>
+      <h3>Gather</h3>
+      <p>Polls, "which day works?", plans that show who's coming, shared albums and a daily moment.</p>
+    </article>
+    <article class="window">
+      <div class="pane"><div data-sigil="88,glyph"></div></div>
+      <h3>Disappear</h3>
+      <p>Temp chats that burn after a day, hidden chats, a decoy PIN and a two-second panic wipe.</p>
+    </article>
+  </div>
+  <ul class="more">
+    <li><b>No signal?</b> Chat with friends on the same Wi-Fi, a phone's hotspot or Bluetooth.</li>
+    <li><b>Daily moments.</b> One photo a day for your friends, gone after 24 hours.</li>
+    <li><b>Reels</b> <span class="tag">Beta</span> Short videos from community-run sites, watched anonymously.</li>
+    <li><b>Find anything.</b> Search every chat, and catch up on what you missed.</li>
+  </ul>
+</section>
+
+<section id="private" class="section private">
+  <div class="section-head">
+    <h2>How it's <em>private.</em></h2>
+    <p>Most chat apps run through a company's computers. Sanctum has none.</p>
+  </div>
+  <div class="points">
+    <div>
+      <h3>No company in the middle</h3>
+      <p>When you write to a friend, your phone hands the message straight to theirs. There's nowhere else for it to be stored, read or sold.</p>
+    </div>
+    <div>
+      <h3>Nobody sees who you talk to</h3>
+      <p>Everything travels through Tor, so nobody watching can tell who is talking to whom, and not even your friends learn where you are.</p>
+    </div>
+    <div>
+      <h3>No number, no account</h3>
+      <p>You add a friend by scanning their code in person, or with a short code they send you. That's it.</p>
+    </div>
+    <div>
+      <h3>Locked on your phone</h3>
+      <p>Chats are stored encrypted, behind your fingerprint, face or PIN. No cloud copies, no backups.</p>
+    </div>
+  </div>
+  <div class="sigils">
+    <div class="equation" aria-hidden="true">
+      <figure><div data-sigil="31,rosette"></div><figcaption>You</figcaption></figure>
+      <span class="op">+</span>
+      <figure><div data-sigil="58,constellation"></div><figcaption>Joe</figcaption></figure>
+      <span class="op">=</span>
+      <figure><div data-sigil="77,shards"></div><figcaption>Your chat</figcaption></figure>
+    </div>
+    <div>
+      <h3>Check a chat at a glance</h3>
+      <p>Everyone gets a sigil, artwork made from their secret key. Your chat with Joe has its own sigil, made from both of you, and it looks the same on both phones. Hold them side by side: if the sigils match, nobody is listening in.</p>
+    </div>
+  </div>
+  <div class="honest">
+    <h3>Honest about the trade-offs</h3>
+    <ul>
+      <li><b>Android only.</b> iPhones don't let apps stay connected in the background without a company's server.</li>
+      <li><b>Private takes a moment.</b> Tor makes video calls choppier and Reels slower. Two switches, Faster calls and Faster reels, speed them up and say plainly what they share.</li>
+      <li><b>No backups.</b> If you lose your phone, its chats are gone too.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="install" class="section">
+  <div class="section-head">
+    <h2>Come <em>in.</em></h2>
+    <p>Sanctum isn't on the Play Store, because it stays away from Google. Install it from here; after that it updates itself.</p>
+  </div>
+  <ol class="steps">
+    <li><b>Download</b> Tap <a href="https://github.com/Tejascodex001/sanctum/releases/latest/download/app-release.apk">Download for Android</a> on your phone.</li>
+    <li><b>Install</b> Open the file. Android asks once to allow installs from your browser: allow it, then tap Install.</li>
+    <li><b>Add a friend</b> Scan each other's code, and your room is ready.</li>
+  </ol>
+</section>
+
+<section id="questions" class="section">
+  <div class="section-head">
+    <h2>Questions</h2>
+  </div>
+  <div class="faq">
+    <details>
+      <summary>Is it really free?</summary>
+      <p>Yes. No ads, no subscription, and no data to sell. The code is public, so anyone can check what it does.</p>
+    </details>
+    <details>
+      <summary>Is it safe to install from outside the Play Store?</summary>
+      <p>Each version is built from the public code and signed with Sanctum's own key. Android only installs updates signed with that same key, so a tampered copy can't replace yours.</p>
+    </details>
+    <details>
+      <summary>Does it work on iPhone?</summary>
+      <p>Not yet. iPhones stop apps from staying connected in the background, and the usual way around that needs a company's server, which Sanctum doesn't have.</p>
+    </details>
+    <details>
+      <summary>What if my friend is offline?</summary>
+      <p>Your phone keeps the message and delivers it when you're both online. In groups, other members pass it on, so it reaches people even after the sender has gone offline.</p>
+    </details>
+    <details>
+      <summary>Can anyone read my messages?</summary>
+      <p>No. They're locked on your phone before they leave it, and only your friends' phones can open them. Sanctum's developer can't read them either.</p>
+    </details>
+    <details>
+      <summary>How many people can I chat with?</summary>
+      <p>Sanctum is made for close friends: a circle of up to about 200 people, and groups of up to 50.</p>
+    </details>
+    <details>
+      <summary>What happens if I lose my phone?</summary>
+      <p>Its chats are gone, because there are no backups. Your friends keep their side. Install Sanctum on your new phone and add them again.</p>
+    </details>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <span class="brand small-brand"><svg class="door" viewBox="20 20 60 62" aria-hidden="true"><use href="#door"/></svg> Sanctum</span>
+  <span>This page sets no cookies and counts no visitors.</span>
+  <a href="https://github.com/Tejascodex001/sanctum">Source code</a>
+</footer>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="door" viewBox="20 20 60 62">
+    <path fill="currentColor" fill-rule="evenodd" d="M26.080,77.140 L26.080,46.780 A23.920,23.920 0 0,1 73.920,46.780 L73.920,77.140 Z M39.420,77.140 L39.420,50.920 A10.580,10.580 0 0,1 60.580,50.920 L60.580,77.140 Z"/>
+    <path fill="currentColor" d="M45.768,58.740 A4.232,4.232 0 1,1 54.232,58.740 A4.232,4.232 0 1,1 45.768,58.740 Z M52.208,60.580 L53.680,69.780 L46.320,69.780 L47.792,60.580 Z"/>
+  </symbol>
+</svg>
+<script src="sigil.js"></script>
+</body>
+</html>
