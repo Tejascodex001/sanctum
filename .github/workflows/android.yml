@@ -89,6 +89,9 @@ jobs:
         id: version
         run: echo "name=$(sed -n "s/^const appVersion = '\(.*\)';/\1/p" app/lib/version.dart)" >> "$GITHUB_OUTPUT"
 
+      - name: Website download
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk sanctum.apk
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -99,7 +102,11 @@ jobs:
           target_commitish: ${{ github.sha }}
           make_latest: true
           body_path: release-notes.md
-          # The app reads changelog.md to show what's new before updating.
+          # sanctum.apk is what people download from the website.
+          # app-release.apk (the same file) is what installed apps look for
+          # to update, so it stays. The app reads changelog.md to show
+          # what's new before updating.
           files: |
             app/build/app/outputs/flutter-apk/app-release.apk
+            sanctum.apk
             changelog.md
