@@ -26,7 +26,7 @@ Sanctum is an Android app for a small circle of people who trust each other (abo
 - **Share albums** in any chat, and a **daily moment**: one photo a day for your friends, gone after 24 hours.
 - **Temp chats** that live only in memory, with messages that burn after 24 hours.
 - **Chat without internet** with friends on the same Wi-Fi, a phone's hotspot or Bluetooth (Nearby, off until you turn it on).
-- **Watch Reels**: short videos from open, community-run video sites, watched anonymously with no account. What you like is learned on your phone only.
+- **Watch Reels** (beta): short videos from open, community-run video sites, watched anonymously with no account. What you like is learned on your phone only.
 - **Stay safe** with hidden chats, screenshot blocking, a decoy PIN that opens an empty-looking Sanctum, and a panic wipe that erases everything in two seconds, even from the lock screen.
 
 ## Every chat has a sigil
@@ -89,7 +89,7 @@ Each release is told apart by its build number.
 | ✅ | **Reactions** | Hold a message for ❤️ 😂 😮 😢 🙏 👍 or any emoji, or double-tap for ❤️. Tap a reaction to add or take back yours; hold it to see who. Friends' chats and groups |
 | ✅ | **Typing** | "Asha is typing…" in friends' chats and groups. Sent only while you're both connected, never stored, and never what you type |
 | ✅ | **Settings** | Tap your sigil: your name, light or dark theme (or like the phone), accent colour (your sigil's or your pick), lock, staying connected, nearby, updates and panic wipe |
-| ✅ | **Reels** | Short upright videos from Loops (plus PeerTube and Mastodon sites), full screen; swipe for the next. Pick what you love watching first (Comedy, Music, Dance, Animals…) and Reels shows only those. Heart them (or double-tap); Reels learns what you like from hearts, shares, what you watch to the end and what you skip, all on your phone, and picks the next ones for you. Watched anonymously through Tor, with no account; or turn on Faster reels in Settings to load them directly (faster, but the sites see your internet address). Pick your own sites, and send a reel's link to several chats at once from a grid of sigils, with a message. (Pixelfed can't be shown: it needs an account) |
+| ✅ | **Reels** (beta) | Still being tuned, and marked Beta in the app. Short upright videos from Loops (plus PeerTube and Mastodon sites), full screen; swipe for the next. Pick what you love watching first (Comedy, Music, Dance, Animals…) and Reels shows only those. Heart them (or double-tap); Reels learns what you like from hearts, shares, what you watch to the end and what you skip, all on your phone, and picks the next ones for you. Watched anonymously through Tor, with no account; or turn on Faster reels in Settings to load them directly (faster, but the sites see your internet address). Pick your own sites, and send a reel's link to several chats at once from a grid of sigils, with a message. (Pixelfed can't be shown: it needs an account) |
 | ✅ | **Search** | Type in the home search box to find any message, poll, plan or file name across your chats. Done on the phone; hidden chats only while revealed |
 | ✅ | **Catch-up** | "While you were away": who wrote, who mentioned you, plans to answer and polls waiting for you |
 

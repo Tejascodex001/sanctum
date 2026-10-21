@@ -261,6 +261,8 @@ class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
                     child: Row(
                       children: [
                         Text('Reels', style: AppText.title.copyWith(color: fg)),
+                        const SizedBox(width: Space.sm),
+                        _BetaTag(color: fg),
                         const Spacer(),
                         if (!_picking)
                           IconButton(
@@ -1123,6 +1125,25 @@ class _SourcesSheetState extends State<_SourcesSheet> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Reels are still being tuned; says so next to the title.
+class _BetaTag extends StatelessWidget {
+  const _BetaTag({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: Space.sm, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(Radii.sm),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Text('BETA', style: AppText.micro.copyWith(color: color, fontWeight: FontWeight.w600, letterSpacing: 0.8)),
     );
   }
 }
