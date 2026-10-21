@@ -16,6 +16,8 @@ sanctum-net = { path = "../../net" }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
 blake3 = "1"
 serde_json = "1.0.154"
+# Call audio: Kotlin hands sound to Rust directly (see call_jni.rs).
+jni = { version = "0.21.1", default-features = false }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

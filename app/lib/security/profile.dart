@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../identity/secrets.dart';
+import '../src/rust/api/call.dart';
 import '../src/rust/api/identity.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
@@ -34,6 +35,12 @@ abstract final class Profile {
   static Future<void> enter({required bool decoy}) async {
     if (decoy) await prepareDecoy();
     final use = decoy && decoyPublicKey != null;
+    // The decoy shows no calls: end the real profile's call first.
+    if (use) {
+      try {
+        await callEnd();
+      } catch (_) {}
+    }
     await profileUse(decoy: use);
     Profile.decoy.value = use;
   }

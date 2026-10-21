@@ -3,10 +3,11 @@
 //! plain TCP in tests.
 
 use async_trait::async_trait;
+use sanctum_core::call::MediaHub;
 use sanctum_core::protocol::{encode_frame, take_frame, Frame};
 use sanctum_core::session::{Event, Session};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -21,6 +22,17 @@ pub type BoxConn = Box<dyn Conn>;
 #[async_trait]
 pub trait Transport: Send + Sync + 'static {
     async fn dial(&self, peer: [u8; 32]) -> anyhow::Result<BoxConn>;
+
+    /// Dials, and says whether the link is nearby (the local Wi-Fi or
+    /// Bluetooth) rather than over Tor.
+    async fn dial_ranked(&self, peer: [u8; 32]) -> anyhow::Result<(BoxConn, bool)> {
+        Ok((self.dial(peer).await?, false))
+    }
+
+    /// Whether `peer` can be reached nearby right now.
+    fn nearby(&self, _peer: &[u8; 32]) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,6 +66,13 @@ const BACKOFF_MAX_PENDING_BACKGROUND: Duration = Duration::from_secs(120);
 const RESEND_EVERY: u64 = 10;
 /// Tor circuits are expensive; don't build too many at once.
 const MAX_DIALS: usize = 6;
+/// A call's packets waiting to be written on one link, at most: about half
+/// a second of sound. More means the link can't keep up, and old sound is
+/// worse than none, so new packets are dropped until it catches up.
+const MEDIA_BACKLOG: usize = 12;
+/// A friend linked over Tor who is also nearby is offered the nearby link
+/// at most this often.
+const UPGRADE_EVERY: Duration = Duration::from_secs(60);
 
 enum Cmd {
     /// There's news to send.
@@ -62,6 +81,8 @@ enum Cmd {
     Close,
     /// Send this as is, now (a typing signal: never kept or resent).
     Send(Frame),
+    /// A call's packet: like `Send`, counted against [`MEDIA_BACKLOG`].
+    Media(Frame),
 }
 
 /// A live connection.
@@ -71,6 +92,11 @@ struct Link {
     /// Dialed by the friend with the smaller key. When both phones dial at
     /// once, both keep this one, so they never close each other's.
     preferred: bool,
+    /// Over the local Wi-Fi or Bluetooth rather than Tor: faster, so it
+    /// wins over a Tor link to the same friend.
+    local: bool,
+    /// Call packets queued on this link and not yet written.
+    backlog: Arc<AtomicUsize>,
 }
 
 
@@ -86,16 +112,25 @@ pub struct Node {
     background: AtomicBool,
     ticks: Mutex<u64>,
     next_link: Mutex<u64>,
+    /// The call's media, taken straight from links (no session lock).
+    media: MediaHub,
+    /// When each friend was last offered a nearby link instead of Tor.
+    upgrades: Mutex<HashMap<[u8; 32], Instant>>,
 }
 
 enum Role {
-    Reached,
-    Dialed([u8; 32]),
+    /// `true`: on the nearby listener.
+    Reached(bool),
+    /// `true`: dialed nearby.
+    Dialed([u8; 32], bool),
 }
 
 impl Node {
     pub fn new(session: Arc<Mutex<Session>>, transport: Arc<dyn Transport>) -> Arc<Self> {
+        let media = session.lock().unwrap().media();
         Arc::new(Self {
+            media,
+            upgrades: Mutex::default(),
             session,
             transport,
             events: broadcast::channel(256).0,
@@ -124,8 +159,63 @@ impl Node {
     pub fn accept(self: &Arc<Self>, conn: BoxConn) {
         let node = Arc::clone(self);
         tokio::spawn(async move {
-            let _ = node.run(conn, Role::Reached).await;
+            let _ = node.run(conn, Role::Reached(false)).await;
         });
+    }
+
+    /// Serves a connection a nearby friend made to us (local Wi-Fi or
+    /// Bluetooth).
+    pub fn accept_nearby(self: &Arc<Self>, conn: BoxConn) {
+        let node = Arc::clone(self);
+        tokio::spawn(async move {
+            let _ = node.run(conn, Role::Reached(true)).await;
+        });
+    }
+
+    /// Whether the link to `peer` is up and nearby (not over Tor).
+    pub fn is_nearby(&self, peer: &[u8; 32]) -> bool {
+        self.links.lock().unwrap().get(peer).is_some_and(|l| l.local)
+    }
+
+    /// The friend is linked over Tor but also nearby: try the faster
+    /// nearby link, which replaces the Tor one once up. At most once a
+    /// minute per friend, unless `now` (a call is starting).
+    pub fn prefer_nearby(self: &Arc<Self>, peer: [u8; 32], now: bool) {
+        let linked_far = self.links.lock().unwrap().get(&peer).is_some_and(|l| !l.local);
+        if !linked_far || !self.transport.nearby(&peer) {
+            return;
+        }
+        let at = Instant::now();
+        {
+            let mut upgrades = self.upgrades.lock().unwrap();
+            if !now && upgrades.get(&peer).is_some_and(|last| at.duration_since(*last) < UPGRADE_EVERY) {
+                return;
+            }
+            upgrades.insert(peer, at);
+        }
+        self.dial(peer);
+    }
+
+    /// Seals a call's sound and sends it to the friend in the call, over
+    /// the link that's up now. Dropped when there's no call, no link, or
+    /// the link is falling behind. Returns whether it went.
+    pub fn send_call_audio(&self, data: &[u8]) -> bool {
+        let Some((peer, frame)) = self.media.seal_audio(data) else {
+            return false;
+        };
+        let links = self.links.lock().unwrap();
+        let Some(link) = links.get(&peer) else {
+            return false;
+        };
+        if link.backlog.load(Ordering::Relaxed) >= MEDIA_BACKLOG {
+            return false;
+        }
+        link.backlog.fetch_add(1, Ordering::Relaxed);
+        if link.tx.send(Cmd::Media(frame)).is_err() {
+            link.backlog.fetch_sub(1, Ordering::Relaxed);
+            return false;
+        }
+        true
     }
 
     /// Gets anything waiting for `peer` delivered: over the live connection
@@ -273,10 +363,10 @@ impl Node {
         self.back_off(&peer);
         let node = Arc::clone(self);
         tokio::spawn(async move {
-            let conn = timeout(HANDSHAKE_TIMEOUT, node.transport.dial(peer)).await;
+            let conn = timeout(HANDSHAKE_TIMEOUT, node.transport.dial_ranked(peer)).await;
             node.dialing.lock().unwrap().remove(&peer);
-            if let Ok(Ok(conn)) = conn {
-                let _ = node.run(conn, Role::Dialed(peer)).await;
+            if let Ok(Ok((conn, local))) = conn {
+                let _ = node.run(conn, Role::Dialed(peer, local)).await;
             }
         });
     }
@@ -299,7 +389,7 @@ impl Node {
         let mut buf = Vec::new();
         let peer = timeout(HANDSHAKE_TIMEOUT, async {
             match role {
-                Role::Reached => {
+                Role::Reached(_) => {
                     let (nonce, challenge) = self.session.lock().unwrap().challenge();
                     write_frames(&mut conn, &[challenge]).await?;
                     let hello = read_frame(&mut conn, &mut buf).await?;
@@ -307,7 +397,7 @@ impl Node {
                         self.session.lock().unwrap().accept_hello(&nonce, &hello)?,
                     )
                 }
-                Role::Dialed(peer) => {
+                Role::Dialed(peer, _) => {
                     let challenge = read_frame(&mut conn, &mut buf).await?;
                     let hello = self.session.lock().unwrap().hello(&peer, &challenge)?;
                     write_frames(&mut conn, &[hello]).await?;
@@ -331,26 +421,29 @@ impl Node {
             *next
         };
         let me = self.session.lock().unwrap().public_key();
-        let preferred = match role {
-            Role::Dialed(_) => me < peer,
-            Role::Reached => peer < me,
+        let (preferred, local) = match role {
+            Role::Dialed(_, local) => (me < peer, local),
+            Role::Reached(local) => (peer < me, local),
         };
         let (tx, mut news) = mpsc::unbounded_channel();
+        let backlog = Arc::new(AtomicUsize::new(0));
         {
             let mut links = self.links.lock().unwrap();
             if let Some(old) = links.get(&peer) {
-                if old.preferred && !preferred {
-                    // Keep the link both phones agree on.
+                // A nearby link beats one over Tor; between two of a kind,
+                // keep the link both phones agree on.
+                let keep_old = if old.local != local { old.local } else { old.preferred && !preferred };
+                if keep_old {
                     return Ok(());
                 }
                 let _ = old.tx.send(Cmd::Close);
             }
-            links.insert(peer, Link { id: link, tx, preferred });
+            links.insert(peer, Link { id: link, tx, preferred, local, backlog: backlog.clone() });
         }
         self.backoff.lock().unwrap().remove(&peer);
         let _ = self.events.send(NetEvent::PeerConnected(peer));
 
-        let result = self.serve(&mut conn, &mut buf, &peer, &mut news).await;
+        let result = self.serve(&mut conn, &mut buf, &peer, &mut news, &backlog).await;
 
         let mut links = self.links.lock().unwrap();
         if links.get(&peer).is_some_and(|l| l.id == link) {
@@ -367,6 +460,7 @@ impl Node {
         buf: &mut Vec<u8>,
         peer: &[u8; 32],
         news: &mut mpsc::UnboundedReceiver<Cmd>,
+        backlog: &AtomicUsize,
     ) -> anyhow::Result<()> {
         let first = {
             let mut session = self.session.lock().unwrap();
@@ -396,6 +490,11 @@ impl Node {
                         self.emit_session_events();
                     }
                     Some(Cmd::Send(frame)) => write_frames(conn, &[frame]).await?,
+                    Some(Cmd::Media(frame)) => {
+                        let written = write_frames(conn, &[frame]).await;
+                        backlog.fetch_sub(1, Ordering::Relaxed);
+                        written?;
+                    }
                     Some(Cmd::Close) | None => return Ok(()),
                 },
                 _ = ping.tick() => write_frames(conn, &[Frame::Ping]).await?,
@@ -412,6 +511,12 @@ impl Node {
         peer: &[u8; 32],
     ) -> anyhow::Result<()> {
         while let Some(frame) = take_frame(buf)? {
+            // A call's sound goes straight to the media, without waiting for
+            // the session (which may be busy encrypting or saving).
+            if let Frame::CallMedia { call, seq, sealed } = &frame {
+                self.media.receive(peer, call, *seq, sealed);
+                continue;
+            }
             let out = self.session.lock().unwrap().on_frame(peer, frame)?;
             write_frames(conn, &out).await?;
             self.emit_session_events();
@@ -918,5 +1023,144 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(bob.node.connected().is_empty());
         assert!(bob.events.try_recv().is_err());
+    }
+
+    fn call_caps() -> sanctum_core::call::AudioCaps {
+        sanctum_core::call::AudioCaps { play: vec!["opus".into()], record: vec!["opus".into()] }
+    }
+
+    /// Alice calls Bob over the wire and he answers.
+    async fn call(alice: &Phone, bob: &Phone, ab: i64) {
+        // First contact sets up encryption.
+        let p = alice.session.lock().unwrap().send_text(ab, "hi").unwrap().unwrap();
+        alice.node.poke(p);
+        let session = alice.session.clone();
+        until(move || session.lock().unwrap().store.messages(ab, None).unwrap()[0].delivered).await;
+        let (peer, _) = alice.session.lock().unwrap().call_start(ab, &call_caps()).unwrap();
+        alice.node.poke(peer);
+        let session = bob.session.clone();
+        until(move || session.lock().unwrap().call_now().is_some()).await;
+        let to = bob.session.lock().unwrap().call_answer(&call_caps()).unwrap().unwrap();
+        bob.node.poke(to);
+        let session = alice.session.clone();
+        until(move || {
+            session.lock().unwrap().call_now().is_some_and(|c| c.phase == sanctum_core::call::Phase::Active)
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn call_sound_crosses_a_live_link_and_is_dropped_without_one() {
+        let book = Arc::default();
+        let (alice, bob) = (phone(&book).await, phone(&book).await);
+        let (ab, _) = befriend(&alice, &bob).await;
+        call(&alice, &bob, ab).await;
+
+        for i in 0..6u8 {
+            assert!(alice.node.send_call_audio(&[i; 80]));
+            assert!(bob.node.send_call_audio(&[100 + i; 80]));
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+        let (a, b) = (alice.session.lock().unwrap().media(), bob.session.lock().unwrap().media());
+        let heard = |hub: &sanctum_core::call::MediaHub| {
+            let hub = hub.clone();
+            move || matches!(hub.pull_audio(), sanctum_core::call::Pulled::Packet(_))
+        };
+        until(heard(&b)).await;
+        until(heard(&a)).await;
+
+        // Bob drops off: nothing is queued or kept for him.
+        book.lock().unwrap().remove(&bob.pk);
+        bob.node.shutdown_links();
+        let node = alice.node.clone();
+        until(move || node.connected().is_empty()).await;
+        let queued = alice.session.lock().unwrap().store.outbox_for(&bob.pk).unwrap().len();
+        assert!(!alice.node.send_call_audio(&[9; 80]));
+        assert_eq!(alice.session.lock().unwrap().store.outbox_for(&bob.pk).unwrap().len(), queued);
+    }
+
+    /// Loopback standing in for both Tor and the local network: each phone
+    /// listens twice, and "nearby" dials reach the nearby listener.
+    struct TwoWays {
+        far: Arc<Mutex<HashMap<[u8; 32], SocketAddr>>>,
+        near: Arc<Mutex<HashMap<[u8; 32], SocketAddr>>>,
+        nearby_on: Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl Transport for TwoWays {
+        async fn dial(&self, peer: [u8; 32]) -> anyhow::Result<BoxConn> {
+            Ok(self.dial_ranked(peer).await?.0)
+        }
+
+        async fn dial_ranked(&self, peer: [u8; 32]) -> anyhow::Result<(BoxConn, bool)> {
+            let near = self.near.lock().unwrap().get(&peer).copied();
+            if let (true, Some(addr)) = (self.nearby_on.load(Ordering::Relaxed), near) {
+                return Ok((Box::new(TcpStream::connect(addr).await?), true));
+            }
+            let addr = *self.far.lock().unwrap().get(&peer).ok_or_else(|| anyhow::anyhow!("offline"))?;
+            Ok((Box::new(TcpStream::connect(addr).await?), false))
+        }
+
+        fn nearby(&self, peer: &[u8; 32]) -> bool {
+            self.nearby_on.load(Ordering::Relaxed) && self.near.lock().unwrap().contains_key(peer)
+        }
+    }
+
+    async fn two_way_phone(ways: &TwoWays) -> Phone {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Session::open(Identity::generate().secret(), dir.path().join("s.db"), &rand::random()).unwrap();
+        let pk = s.public_key();
+        let session = Arc::new(Mutex::new(s));
+        let transport =
+            TwoWays { far: ways.far.clone(), near: ways.near.clone(), nearby_on: ways.nearby_on.clone() };
+        let node = Node::new(session.clone(), Arc::new(transport));
+        for nearby in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let book = if nearby { &ways.near } else { &ways.far };
+            book.lock().unwrap().insert(pk, listener.local_addr().unwrap());
+            let n = node.clone();
+            tokio::spawn(async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    if nearby {
+                        n.accept_nearby(Box::new(stream));
+                    } else {
+                        n.accept(Box::new(stream));
+                    }
+                }
+            });
+        }
+        let events = node.subscribe();
+        Phone { node, session, pk, events, _dir: dir }
+    }
+
+    #[tokio::test]
+    async fn a_nearby_link_takes_over_from_tor() {
+        let ways = TwoWays { far: Arc::default(), near: Arc::default(), nearby_on: Arc::default() };
+        let (alice, bob) = (two_way_phone(&ways).await, two_way_phone(&ways).await);
+        let (ab, ba) = befriend(&alice, &bob).await;
+        let p = alice.session.lock().unwrap().send_text(ab, "over tor").unwrap().unwrap();
+        alice.node.poke(p);
+        let session = alice.session.clone();
+        until(move || session.lock().unwrap().store.messages(ab, None).unwrap()[0].delivered).await;
+        assert!(!alice.node.is_nearby(&bob.pk) && !bob.node.is_nearby(&alice.pk));
+
+        // They turn out to be on the same Wi-Fi: either side moves over,
+        // and both keep the nearby link.
+        ways.nearby_on.store(true, Ordering::Relaxed);
+        bob.node.prefer_nearby(alice.pk, true);
+        let (a, b) = (alice.node.clone(), bob.node.clone());
+        until(move || a.is_nearby(&bob.pk) && b.is_nearby(&alice.pk)).await;
+        // A Tor link arriving now doesn't replace it.
+        ways.nearby_on.store(false, Ordering::Relaxed);
+        alice.node.dial(bob.pk);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(alice.node.is_nearby(&bob.pk) && bob.node.is_nearby(&alice.pk));
+        // And messages still flow.
+        let p = alice.session.lock().unwrap().send_text(ab, "nearby now").unwrap().unwrap();
+        alice.node.poke(p);
+        let session = bob.session.clone();
+        until(move || session.lock().unwrap().store.messages(ba, None).unwrap().iter().any(|m| m.body == "nearby now"))
+            .await;
     }
 }

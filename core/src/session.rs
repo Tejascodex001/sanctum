@@ -6,6 +6,7 @@
 //! whole conversations between phones are tested here by passing frames
 //! between two sessions.
 
+use crate::call::{now_ms, CallView, Calls, MediaHub};
 use crate::identity::{pair_fingerprint, safety_number, verify, Identity};
 use crate::invite::{FriendCode, InviteError};
 use crate::mls::{MlsClient, MlsError, Received};
@@ -42,6 +43,8 @@ pub enum SessionError {
     Io(String),
     #[error("the other side broke the protocol")]
     Protocol,
+    #[error("already in a call")]
+    InCall,
 }
 
 pub type Result<T> = std::result::Result<T, SessionError>;
@@ -83,6 +86,11 @@ pub enum Event {
     /// from connected friends; nothing is stored. Show it for a few
     /// seconds unless another one comes.
     Typing { chat: i64, who: [u8; 32], name: String },
+    /// A call rang, was answered or ended (see `call`).
+    Call(CallView),
+    /// A call to us went unanswered: its record is in this chat. Worth a
+    /// notification.
+    MissedCall(i64),
 }
 
 /// Someone who added your code and wants you to add them back. Held in
@@ -137,6 +145,10 @@ pub struct Session {
     pub(crate) typing_sent: std::collections::HashMap<i64, std::time::Instant>,
     /// When we last passed on someone's typing, per (chat, person).
     pub(crate) typing_heard: std::collections::HashMap<(i64, [u8; 32]), std::time::Instant>,
+    /// The call going on now (see `call`); memory only.
+    pub(crate) calls: Calls,
+    /// Its sealed sound, shared with the network and the phone's audio.
+    pub(crate) media: MediaHub,
 }
 
 impl Session {
@@ -166,6 +178,8 @@ impl Session {
             declined: HashSet::new(),
             typing_sent: Default::default(),
             typing_heard: Default::default(),
+            calls: Calls::default(),
+            media: MediaHub::default(),
         })
     }
 
@@ -497,12 +511,14 @@ impl Session {
         peers
     }
 
-    /// Burns expired temp messages. Call on a timer.
+    /// Burns expired temp messages, and ends calls nobody answered. Call on
+    /// a timer.
     pub fn purge(&mut self) {
         for id in self.temp.purge_expired(now()) {
             self.events.push(Event::TempGone(id));
         }
         let _ = self.purge_moments();
+        let _ = self.call_tick(now_ms(), std::time::Instant::now());
     }
 
     fn queue_temp(&mut self, peer: [u8; 32], content: Content) {
@@ -678,6 +694,12 @@ impl Session {
                 self.on_typing(peer, &group)?;
                 return Ok(Vec::new());
             }
+            // A call's sound: only from the friend in the call, never kept.
+            // (The network hands these to the media directly; see `call`.)
+            Frame::CallMedia { call, seq, sealed } => {
+                self.media.receive(peer, &call, seq, &sealed);
+                return Ok(Vec::new());
+            }
             other => other,
         };
         let Some((chat_id, mut meta)) = self.direct_chat(peer)? else {
@@ -775,6 +797,7 @@ impl Session {
     /// The friend (or group member) has it. A group message counts as
     /// delivered once every member has it.
     fn on_ack(&mut self, id: MessageId) -> Result<()> {
+        self.call_delivered(&id);
         if let Some(item) = self.store.outbox_remove(&id)? {
             if let Some((chat, seq)) = item.message {
                 if !self.store.outbox_has_message(chat, seq)? {
@@ -902,6 +925,9 @@ impl Session {
             } => self.on_moment(peer, id, sent_at, caption, media)?,
             Content::MomentGone { id } => self.on_moment_gone(peer, id)?,
             Content::React { id, emoji, at } => self.on_react(chat_id, peer, id, emoji, at)?,
+            Content::CallInvite(offer) => self.on_call_invite(chat_id, peer, offer)?,
+            Content::CallAnswer(answer) => self.on_call_answer(peer, answer)?,
+            Content::CallEnd { call, reason } => self.on_call_end(peer, call, reason)?,
             Content::TempWipe { temp } => {
                 if let Some(id) = self.temp.wipe_remote(*peer, temp) {
                     self.forget_temp_outbox(Some(*peer), temp);
@@ -1129,19 +1155,19 @@ pub(crate) fn clip(s: &str, max: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    struct Phone {
-        s: Session,
+    pub(crate) struct Phone {
+        pub(crate) s: Session,
         secret: [u8; 32],
         key: [u8; 32],
         dir: TempDir,
     }
 
     impl Phone {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
             let secret = Identity::generate().secret();
             let key = rand::random();
@@ -1154,7 +1180,7 @@ mod tests {
             }
         }
 
-        fn pk(&self) -> [u8; 32] {
+        pub(crate) fn pk(&self) -> [u8; 32] {
             self.s.public_key()
         }
 
@@ -1175,7 +1201,7 @@ mod tests {
     }
 
     /// Both add each other's codes. Returns (alice's chat with bob, bob's chat with alice).
-    fn befriend(a: &mut Phone, b: &mut Phone) -> (i64, i64) {
+    pub(crate) fn befriend(a: &mut Phone, b: &mut Phone) -> (i64, i64) {
         let ab = a.s.add_friend(&b.s.my_code("Bob"), true).unwrap().chat_id;
         let ba = b.s.add_friend(&a.s.my_code("Alice"), true).unwrap().chat_id;
         (ab, ba)
@@ -1183,7 +1209,7 @@ mod tests {
 
     /// `dialer` connects to `reached`: handshake, then frames flow both ways
     /// until both sides are quiet. Returns how many frames were exchanged.
-    fn connect(dialer: &mut Phone, reached: &mut Phone) -> usize {
+    pub(crate) fn connect(dialer: &mut Phone, reached: &mut Phone) -> usize {
         let (nonce, challenge) = reached.s.challenge();
         let hello = dialer.s.hello(&reached.pk(), &challenge).unwrap();
         let who = reached.s.accept_hello(&nonce, &hello).unwrap();

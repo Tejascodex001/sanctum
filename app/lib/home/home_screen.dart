@@ -204,12 +204,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         HapticFeedback.mediumImpact();
         _loadRequests();
       // Dots, badges and notifications update themselves (NetBus, Notifier).
-      // So do moments (MomentsStrip).
+      // So do moments (MomentsStrip), and calls (CallController).
       case AppEventKind.presence ||
             AppEventKind.message ||
             AppEventKind.tempMessage ||
             AppEventKind.moments ||
             AppEventKind.typing:
+        break;
+      case AppEventKind.call || AppEventKind.missedCall:
         break;
     }
   }

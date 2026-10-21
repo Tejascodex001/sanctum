@@ -4,9 +4,10 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'call.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `emit_named`, `emit_session`, `emit`, `ensure_node`, `forward_events`, `minute`, `panic_text`, `poke`, `real_session`, `runtime`, `session`, `set_status`, `to_key`, `with`
+// These functions are ignored because they are not marked as `pub`: `emit_call`, `emit_named`, `emit_session`, `emit`, `ensure_node`, `forward_events`, `media`, `minute`, `node`, `panic_text`, `poke`, `real_session`, `runtime`, `session`, `set_status`, `to_key`, `with_real`, `with_session`, `with`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
 
 /// Opens the encrypted store at `dir` and restores MLS state. Call once at
@@ -167,16 +168,24 @@ class AppEvent {
   /// kinds).
   final String name;
 
+  /// `Call`: the call as it stands now.
+  final CallInfo? call;
+
   const AppEvent({
     required this.kind,
     required this.id,
     required this.net,
     required this.name,
+    this.call,
   });
 
   @override
   int get hashCode =>
-      kind.hashCode ^ id.hashCode ^ net.hashCode ^ name.hashCode;
+      kind.hashCode ^
+      id.hashCode ^
+      net.hashCode ^
+      name.hashCode ^
+      call.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -186,7 +195,8 @@ class AppEvent {
           kind == other.kind &&
           id == other.id &&
           net == other.net &&
-          name == other.name;
+          name == other.name &&
+          call == other.call;
 }
 
 enum AppEventKind {
@@ -222,6 +232,13 @@ enum AppEventKind {
   /// pass without another, or their message arrives. Never stored, never
   /// notified, and not sent while the decoy profile shows.
   typing,
+
+  /// A call rang, was answered or ended (`id`: the chat; `call`: where
+  /// it stands). Only for the real profile, never while the decoy shows.
+  call,
+
+  /// A call to us went unanswered (`id`: the chat). Worth a notification.
+  missedCall,
 }
 
 class FriendView {

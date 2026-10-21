@@ -31,8 +31,17 @@ abstract final class Background {
     required String body,
     String? open,
     int count = 0,
+    String? redacted,
   }) =>
-      _call(_bg, 'notify', {'id': id, 'channel': channel, 'title': title, 'body': body, 'open': open, 'count': count});
+      _call(_bg, 'notify', {
+        'id': id,
+        'channel': channel,
+        'title': title,
+        'body': body,
+        'open': open,
+        'count': count,
+        'redacted': redacted,
+      });
 
   static Future<void> cancel(int id) => _call(_bg, 'cancel', {'id': id});
   static Future<void> cancelAll() => _call(_bg, 'cancelAll');
@@ -104,12 +113,49 @@ abstract final class Background {
   /// A Sanctum phone was seen over Bluetooth (its advertised ID, and a
   /// handle naming the device).
   static void onBluetoothSeen(void Function(Uint8List id, int handle) handler) {
-    _bg.setMethodCallHandler((call) async {
-      if (call.method != 'btSeen') return;
-      final args = call.arguments as Map<Object?, Object?>;
-      handler(args['id']! as Uint8List, args['handle']! as int);
+    _listen('btSeen', (args) {
+      final m = args! as Map<Object?, Object?>;
+      handler(m['id']! as Uint8List, m['handle']! as int);
     });
   }
+
+  /// Calls from the Android side on the background channel, by method.
+  static final _handlers = <String, void Function(Object? args)>{};
+
+  static void _listen(String method, void Function(Object? args) handler) {
+    _handlers[method] = handler;
+    _bg.setMethodCallHandler((call) async => _handlers[call.method]?.call(call.arguments));
+  }
+
+  // ---- Calls (see CallAudio.kt and SanctumApplication.kt) ----
+
+  /// The sound formats this phone can play and record into, best first.
+  static Future<({List<String> play, List<String> record})> callCodecs() async {
+    final m = await _call<Map<Object?, Object?>>(_bg, 'callCodecs');
+    List<String> list(Object? l) => [for (final c in (l as List<Object?>?) ?? const []) c! as String];
+    return (play: list(m?['play']), record: list(m?['record']));
+  }
+
+  static Future<bool> callAudioStart({required String send, required String recv, required bool speaker}) async =>
+      await _call<bool>(_bg, 'callAudioStart', {'send': send, 'recv': recv, 'speaker': speaker}) ?? false;
+  static Future<void> callAudioStop() => _call(_bg, 'callAudioStop');
+  static Future<void> callMute(bool on) => _call(_bg, 'callMute', {'on': on});
+  static Future<void> callSpeaker(bool on) => _call(_bg, 'callSpeaker', {'on': on});
+
+  /// Rings with a notification (full screen where allowed) until stopped.
+  static Future<void> callRing(String title) => _call(_bg, 'callRing', {'title': title});
+  static Future<void> callRingStop() => _call(_bg, 'callRingStop');
+
+  /// Keeps the microphone going with the screen off or in another app.
+  static Future<void> callServiceStart(String title) => _call(_bg, 'callServiceStart', {'title': title});
+  static Future<void> callServiceStop() => _call(_bg, 'callServiceStop');
+
+  /// Shows the app over the lock screen (while a call rings or goes on).
+  static Future<void> callShowOverLock(bool on) => _call(_app, 'callShowOverLock', {'on': on});
+
+  /// "decline" or "hangup", tapped on a call's notification.
+  static void onCallAction(void Function(String action) handler) =>
+      _listen('callAction', (args) => handler(args! as String));
 
   /// The system picker: "visual" (photos and videos) or "file". Returns
   /// the prepared file (path, name, mime, kind, width, height, durationMs,

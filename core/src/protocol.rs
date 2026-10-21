@@ -9,8 +9,9 @@
 //!
 //! After that, frames flow both ways. Everything a person writes travels
 //! inside MLS messages ([`Frame::Mls`]) as [`Content`]; Sanctum frames only
-//! carry routing, acknowledgements, the MLS setup and the passing "typing"
-//! signal (which holds no text).
+//! carry routing, acknowledgements, the MLS setup, the passing "typing"
+//! signal (which holds no text) and calls' sealed sound
+//! ([`Frame::CallMedia`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -94,6 +95,60 @@ pub enum Frame {
     Typing {
         group: Vec<u8>,
     },
+    /// A piece of a call's sound (later also video), sealed with the call's
+    /// own key (see `call`). Like [`Frame::Typing`], it goes only over a
+    /// link that is up right now and is never stored, queued or resent; the
+    /// receiver takes it only from the friend in the call. `seq` counts
+    /// this direction's packets: it makes each packet's nonce and catches
+    /// replays.
+    CallMedia {
+        call: CallId,
+        seq: u64,
+        sealed: Vec<u8>,
+    },
+}
+
+/// A call's id, made by the caller.
+pub type CallId = [u8; 16];
+
+/// "Let's talk": everything the friend's phone needs to ring and, if
+/// answered, to talk (see `call`). Room is left for video and direct
+/// connections, which later builds can fill in without changing the wire.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct CallOffer {
+    pub call: CallId,
+    /// Seals every media packet of this call, both ways. Fresh per call.
+    pub key: [u8; 32],
+    /// When the call was started, in milliseconds. Arriving much later, it
+    /// doesn't ring: it's a missed call.
+    pub sent_at: u64,
+    /// A video call. Always false for now.
+    pub video: bool,
+    /// Sound formats this phone can play, best first ("opus", "amr-wb").
+    pub audio_in: Vec<String>,
+    /// Sound formats this phone can record into.
+    pub audio_out: Vec<String>,
+    /// The same for video (empty for now).
+    pub video_in: Vec<String>,
+    pub video_out: Vec<String>,
+    /// Other ways to reach this phone for the media, for a later direct
+    /// mode. Empty: only over the friends' own link.
+    pub routes: Vec<Vec<u8>>,
+}
+
+/// The friend picked up, and chose what each side sends.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct CallAnswer {
+    pub call: CallId,
+    pub video: bool,
+    /// The sound format the caller records into, and the one we do.
+    pub caller_audio: String,
+    pub callee_audio: String,
+    /// The same for video (empty for now).
+    pub caller_video: String,
+    pub callee_video: String,
+    /// See [`CallOffer::routes`].
+    pub routes: Vec<Vec<u8>>,
 }
 
 pub type BlobId = [u8; 16];
@@ -238,6 +293,13 @@ pub enum Content {
         emoji: String,
         at: u64,
     },
+    /// The sender is calling us (friends' 1:1 chats only).
+    CallInvite(CallOffer),
+    /// The sender picked up our call.
+    CallAnswer(CallAnswer),
+    /// The call is over, or never started: `reason` says why (see
+    /// `call::EndReason`; an unknown value counts as a plain hang-up).
+    CallEnd { call: CallId, reason: u8 },
 }
 
 /// A shared album: the photos and videos in a chat that carry its id.
@@ -385,6 +447,13 @@ mod tests {
         assert_eq!(react.encode()[0], 18);
         assert_eq!(Content::decode(&react.encode()), Some(react));
         assert_eq!(Content::MomentGone { id: [0; 16] }.encode()[0], 17);
+        let media = Frame::CallMedia { call: [0; 16], seq: 1, sealed: Vec::new() };
+        assert_eq!(media.to_bytes()[0], 15);
+        assert_eq!(Content::CallInvite(CallOffer::default()).encode()[0], 19);
+        assert_eq!(Content::CallAnswer(CallAnswer::default()).encode()[0], 20);
+        let end = Content::CallEnd { call: [3; 16], reason: 1 };
+        assert_eq!(end.encode()[0], 21);
+        assert_eq!(Content::decode(&end.encode()), Some(end));
     }
 
     #[test]

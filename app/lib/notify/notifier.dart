@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/widgets.dart';
 
 import '../background/background.dart';
+import '../call/call_controller.dart';
 import '../net/net_bus.dart';
 import '../security/profile.dart';
 import '../src/rust/api/session.dart';
@@ -47,8 +48,18 @@ class Notifier with WidgetsBindingObserver {
     _started = true;
     WidgetsBinding.instance.addObserver(this);
     NetBus.instance.events.listen(_onEvent);
-    Background.onOpen(_opens.add);
+    Background.onOpen(_opened);
     _resumed();
+  }
+
+  /// A notification was tapped: a call's goes to the call, others to
+  /// their chat.
+  void _opened(String key) {
+    if (key.startsWith('call')) {
+      CallController.instance.open(key);
+    } else {
+      _opens.add(key);
+    }
   }
 
   @override
@@ -66,7 +77,7 @@ class Notifier with WidgetsBindingObserver {
   Future<void> _resumed() async {
     if (viewing != null) markRead(viewing!);
     final open = await Background.takeOpen();
-    if (open != null) _opens.add(open);
+    if (open != null) _opened(open);
     // Starting the service needs the app on screen (Android 12+).
     if (await Background.enabled()) {
       await Background.start();
@@ -77,6 +88,8 @@ class Notifier with WidgetsBindingObserver {
   void markRead(String key) {
     if (unread.value.containsKey(key)) unread.value = {...unread.value}..remove(key);
     Background.cancel(_notificationId(key));
+    // And its missed call.
+    if (key.startsWith('c:')) Background.cancel(2000000 + int.parse(key.substring(2)));
   }
 
   Future<void> _onEvent(AppEvent e) async {
@@ -89,9 +102,30 @@ class Notifier with WidgetsBindingObserver {
         markRead(tempKey(e.id.toInt()));
       case AppEventKind.request:
         if (!_foreground && !Profile.decoy.value) await _notifyRequest();
+      case AppEventKind.missedCall:
+        await _missedCall(e.id.toInt());
       default:
         break;
     }
+  }
+
+  /// A call to us went unanswered: a badge on the chat, and a notification
+  /// unless it's on screen. Like messages, a hidden chat's doesn't say whose.
+  Future<void> _missedCall(int chatId) async {
+    if (Profile.decoy.value) return;
+    final key = chatKey(chatId);
+    if (_foreground && viewing == key) return;
+    unread.value = {...unread.value, key: (unread.value[key] ?? 0) + 1};
+    final chat = (await chatList()).where((c) => c.id == chatId).firstOrNull;
+    final hidden = chat?.hidden ?? true;
+    await Background.notify(
+      id: 2000000 + chatId,
+      channel: Background.messages,
+      title: hidden ? 'Sanctum' : chat?.title ?? 'Sanctum',
+      body: 'Missed call',
+      open: key,
+      redacted: 'Missed call',
+    );
   }
 
   Future<void> _arrived(String key) async {

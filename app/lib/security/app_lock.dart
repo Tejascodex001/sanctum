@@ -30,6 +30,14 @@ class AppLock extends StatefulWidget {
 
   static int _away = 0;
 
+  /// Whether the app is locked right now (a call screen hides who's
+  /// calling then).
+  static final locked = ValueNotifier<bool>(true);
+
+  /// A call is ringing or going on: don't pop up the unlock prompt over
+  /// it. Tapping the lock screen still unlocks.
+  static final holdPrompt = ValueNotifier<bool>(false);
+
   /// The app's navigator: switching profile closes whatever the other
   /// profile had open.
   static final navigator = GlobalKey<NavigatorState>();
@@ -72,6 +80,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _lock.addListener(() => AppLock.locked.value = _lock.value > 0);
     _refreshPinMode();
     WidgetsBinding.instance.addPostFrameCallback((_) => _maybePrompt());
   }
@@ -144,6 +153,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
   void _maybePrompt() {
     if (!_promptWhenVisible || _lock.value < 1) return;
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;
+    if (AppLock.holdPrompt.value) return;
     _promptWhenVisible = false;
     _unlock();
   }

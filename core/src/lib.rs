@@ -2,6 +2,7 @@
 //! Flutter app through `flutter_rust_bridge`.
 
 pub mod base32;
+pub mod call;
 mod group;
 pub mod identity;
 pub mod invite;

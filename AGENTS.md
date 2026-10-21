@@ -34,6 +34,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `core/src/reaction.rs` | Emoji reactions: one per person per message, newest wins |
 | `core/src/typing.rs` | Typing signals: link-level, never stored or queued |
 | `core/src/taste.rs` | What Reels learns you like (on the phone only) and ranking reels by it |
+| `core/src/call.rs` | 1:1 voice calls: signaling inside MLS, sealed media packets (`MediaHub`), replay window, jitter buffer |
 | `core/src/moment.rs` | Daily moments: one photo a day for every friend, gone after 24 hours |
 | `core/src/store.rs` | The encrypted SQLite store. Every row is sealed; index columns are keyed hashes |
 | `core/src/protocol.rs` | Wire types: `Frame` (link level) and `Content` (inside MLS) |
@@ -46,10 +47,12 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `net/src/fedi.rs` | Reels: reading short videos from Loops, PeerTube and Mastodon sites anonymously |
 | `net/src/relay.rs` | The on-phone relay that streams Reels videos through Tor |
 | `app/rust/src/api/` | The Dart-facing API (flutter_rust_bridge). Keep it thin; logic belongs in `core` |
+| `app/rust/src/call_jni.rs` | JNI functions Kotlin calls directly for call audio (`CallNative.kt`), bypassing Dart |
+| `app/lib/call/` | The call controller (ring, audio, service) and the call screen, shown above the app lock |
 | `app/lib/settings/` | The Settings screen (opened from your sigil) |
 | `app/lib/theme/appearance.dart` | Light, dark or like the phone, and the accent colour. `Palette` is read at build time, so `Restyler` redraws every screen when it changes: don't make widgets using `Palette` colours `const`. Sigils are shown through `SigilLook` (`spec.look`): in the picked accent and light in light mode. Use `spec.look.accent.color` for UI colours taken from a sigil; only comparing sigils with a friend uses `exact: true` |
 | `app/lib/` | The Flutter UI. Design tokens are in `app/lib/theme/tokens.dart`; use them, never one-off values |
-| `app/android/app/src/main/kotlin/` | The scanner, background service, notifications, installer, OEM battery settings and Bluetooth nearby (`BluetoothNearby.kt`) |
+| `app/android/app/src/main/kotlin/` | The scanner, background service, notifications, installer, OEM battery settings, Bluetooth nearby (`BluetoothNearby.kt`) and call audio (`CallAudio.kt`, `CallService.kt`, `CallNative.kt`) |
 
 ## Rules that keep data and the wire compatible
 

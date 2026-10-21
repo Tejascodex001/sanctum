@@ -3,6 +3,8 @@ import 'package:path_provider/path_provider.dart';
 
 import 'home/home_screen.dart';
 import 'background/background.dart';
+import 'call/call_controller.dart';
+import 'call/call_screen.dart';
 import 'identity/secrets.dart';
 import 'chat/media.dart';
 import 'net/net_bus.dart';
@@ -33,6 +35,7 @@ Future<void> main() async {
     await clearDecryptedCopies();
     NetBus.instance.start();
     Notifier.instance.start();
+    CallController.instance.start();
     await NetBus.instance.connect(
       stateDir: '${(await getApplicationSupportDirectory()).path}/tor-state',
       cacheDir: '${(await getApplicationCacheDirectory()).path}/tor-cache',
@@ -81,7 +84,9 @@ class SanctumApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         navigatorKey: AppLock.navigator,
         theme: sanctumTheme(accent: mySigil.look.accent.color),
-        builder: (context, child) => AppLock(sigil: mySigil, child: child!),
+        // Calls show above the lock, so they can be answered without
+        // unlocking (saying who only once unlocked).
+        builder: (context, child) => CallLayer(child: AppLock(sigil: mySigil, child: child!)),
         home: home,
       ),
     );
