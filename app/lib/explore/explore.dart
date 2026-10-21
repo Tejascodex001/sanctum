@@ -209,6 +209,16 @@ class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
     }
   }
 
+  /// The interests picked, in words ("Dance and Music"); empty if none.
+  String get _about {
+    final picked = [
+      for (final i in _interests?.items ?? const <ReelInterest>[])
+        if (i.chosen) i.label
+    ];
+    if (picked.length < 2) return picked.join();
+    return '${picked.sublist(0, picked.length - 1).join(', ')} and ${picked.last}';
+  }
+
   /// Videos on screen: black around them, like any video player, in
   /// light mode too. Everything else (picking interests, loading, nothing
   /// to show) follows the theme.
@@ -292,8 +302,10 @@ class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
       return _Nothing(
         problems: {for (final p in _problems) '${p.kind.name}:${p.host}': p.problem},
         sources: _sources,
+        about: _about,
         onRetry: _restart,
         onServers: _editSources,
+        onInterests: _editInterests,
       );
     }
     return RefreshIndicator(
@@ -304,7 +316,9 @@ class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
         onPageChanged: _onPage,
         itemCount: _posts.length + (_loading || _done ? 1 : 0),
         itemBuilder: (context, i) => i >= _posts.length
-            ? (_loading ? const Center(child: CircularProgressIndicator()) : _CaughtUp(onRefresh: _restart))
+            ? (_loading
+                ? const Center(child: CircularProgressIndicator())
+                : _CaughtUp(about: _about, onRefresh: _restart, onInterests: _editInterests))
             : _Reel(
                 key: ValueKey('${_posts[i].host}/${_posts[i].id}'),
                 post: _posts[i],
@@ -321,12 +335,23 @@ class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
 
 /// Why there's nothing to show, and what to do about it.
 class _Nothing extends StatelessWidget {
-  const _Nothing({required this.problems, required this.sources, required this.onRetry, required this.onServers});
+  const _Nothing({
+    required this.problems,
+    required this.sources,
+    required this.about,
+    required this.onRetry,
+    required this.onServers,
+    required this.onInterests,
+  });
 
   final Map<String, FediProblem> problems;
   final List<FediSource> sources;
+
+  /// The interests picked, in words; empty if none.
+  final String about;
   final VoidCallback onRetry;
   final VoidCallback onServers;
+  final VoidCallback onInterests;
 
   @override
   Widget build(BuildContext context) {
@@ -334,7 +359,10 @@ class _Nothing extends StatelessWidget {
     final lines = <String>[
       if (sources.isEmpty) 'Add a site to watch reels from.',
       if (offline) 'Reels open once Sanctum is connected. This can take a minute after starting.',
-      if (!offline)
+      if (!offline && about.isNotEmpty && problems.isEmpty)
+        'Couldn\'t find reels about $about right now. Without an account, the sites share only some of their '
+            'videos. Try adding more interests, or look again later.',
+      if (!offline && (about.isEmpty || problems.isNotEmpty))
         for (final s in sources)
           switch (problems['${s.kind.name}:${s.host}']) {
             FediProblem.notPublic => '${s.host} only shows its posts to people signed in there. Try another site.',
@@ -362,6 +390,7 @@ class _Nothing extends StatelessWidget {
               spacing: Space.sm,
               children: [
                 OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+                if (about.isNotEmpty) FilledButton.tonal(onPressed: onInterests, child: const Text('Interests')),
                 FilledButton.tonal(onPressed: onServers, child: const Text('Sites')),
               ],
             ),
@@ -410,7 +439,7 @@ class _InterestPickerState extends State<_InterestPicker> {
             Text('What do you love watching?', style: AppText.title.copyWith(color: fg)),
             const SizedBox(height: Space.xs),
             Text(
-              'Pick a few. Reels looks for these and learns more as you watch. It stays on this phone.',
+              'Pick a few. Reels shows only videos about these, and learns more as you watch. It stays on this phone.',
               style: AppText.caption.copyWith(color: muted),
             ),
             const SizedBox(height: Space.lg),
@@ -495,27 +524,52 @@ class _InterestPill extends StatelessWidget {
 
 /// The end of what the sites have for now.
 class _CaughtUp extends StatelessWidget {
-  const _CaughtUp({required this.onRefresh});
+  const _CaughtUp({required this.about, required this.onRefresh, required this.onInterests});
 
+  /// The interests picked, in words; empty if none.
+  final String about;
   final VoidCallback onRefresh;
+  final VoidCallback onInterests;
 
   @override
   Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.check_circle_outline_rounded, color: Colors.white70, size: 44),
-            const SizedBox(height: Space.md),
-            Text("You're all caught up", style: AppText.heading.copyWith(color: Colors.white)),
-            const SizedBox(height: Space.xs),
-            Text('Check back later for new reels.', style: AppText.caption.copyWith(color: Colors.white70)),
-            const SizedBox(height: Space.lg),
-            OutlinedButton(
-              onPressed: onRefresh,
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
-              child: const Text('Look again'),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(Space.xxl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle_outline_rounded, color: Colors.white70, size: 44),
+              const SizedBox(height: Space.md),
+              Text(
+                about.isEmpty ? "You're all caught up" : "That's all the $about reels for now",
+                textAlign: TextAlign.center,
+                style: AppText.heading.copyWith(color: Colors.white),
+              ),
+              const SizedBox(height: Space.xs),
+              Text(
+                about.isEmpty ? 'Check back later for new reels.' : 'Check back later, or add more interests.',
+                textAlign: TextAlign.center,
+                style: AppText.caption.copyWith(color: Colors.white70),
+              ),
+              const SizedBox(height: Space.lg),
+              Wrap(
+                spacing: Space.sm,
+                children: [
+                  OutlinedButton(
+                    onPressed: onRefresh,
+                    style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                    child: const Text('Look again'),
+                  ),
+                  if (about.isNotEmpty)
+                    OutlinedButton(
+                      onPressed: onInterests,
+                      style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                      child: const Text('Add interests'),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       );
 }

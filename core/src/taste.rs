@@ -27,8 +27,9 @@ const EXPLORE_WITH_INTERESTS: f64 = 0.08;
 const INTEREST: f32 = 3.0;
 
 /// Something to watch reels about, picked before Reels starts. Matched
-/// against a reel's hashtags, topic and words; `peertube` is the matching
-/// PeerTube category, which its sites can search by.
+/// against a reel's hashtags, topic and words; the first four `words` are
+/// also what the sites are searched for. `peertube` is the matching PeerTube
+/// category, which its sites can search by.
 #[derive(Debug)]
 pub struct Interest {
     pub id: &'static str,
@@ -39,29 +40,34 @@ pub struct Interest {
 }
 
 pub const INTERESTS: &[Interest] = &[
-    Interest { id: "comedy", label: "Comedy", emoji: "😂", words: &["comedy", "funny", "humor", "humour", "meme", "memes", "lol", "joke", "jokes", "prank", "standup"], peertube: Some(9) },
-    Interest { id: "music", label: "Music", emoji: "🎵", words: &["music", "song", "songs", "singing", "singer", "cover", "guitar", "piano", "rap", "hiphop", "dj", "beats", "concert"], peertube: Some(1) },
-    Interest { id: "dance", label: "Dance", emoji: "💃", words: &["dance", "dancing", "dancer", "choreography", "kpop"], peertube: None },
-    Interest { id: "food", label: "Food", emoji: "🍜", words: &["food", "cooking", "recipe", "recipes", "foodie", "baking", "chef", "cook", "streetfood", "dessert"], peertube: Some(18) },
-    Interest { id: "travel", label: "Travel", emoji: "✈️", words: &["travel", "trip", "vacation", "beach", "mountains", "adventure", "roadtrip", "hiking", "city"], peertube: Some(6) },
-    Interest { id: "animals", label: "Animals", emoji: "🐾", words: &["animals", "animal", "pets", "pet", "cat", "cats", "dog", "dogs", "kitten", "puppy", "wildlife", "birds", "catsofmastodon", "dogsofmastodon"], peertube: Some(16) },
-    Interest { id: "sports", label: "Sports", emoji: "⚽", words: &["sports", "sport", "football", "soccer", "cricket", "basketball", "skate", "skateboarding", "surf", "surfing", "climbing"], peertube: Some(5) },
+    Interest { id: "comedy", label: "Comedy", emoji: "😂", words: &["comedy", "funny", "memes", "humor", "humour", "meme", "lol", "joke", "jokes", "prank", "standup"], peertube: Some(9) },
+    Interest { id: "music", label: "Music", emoji: "🎵", words: &["music", "singing", "cover", "guitar", "song", "songs", "singer", "piano", "rap", "hiphop", "dj", "beats", "concert"], peertube: Some(1) },
+    Interest { id: "dance", label: "Dance", emoji: "💃", words: &["dance", "dancing", "dancer", "kpop", "choreography"], peertube: None },
+    Interest { id: "food", label: "Food", emoji: "🍜", words: &["food", "cooking", "recipe", "baking", "recipes", "foodie", "chef", "cook", "streetfood", "dessert"], peertube: Some(18) },
+    Interest { id: "travel", label: "Travel", emoji: "✈️", words: &["travel", "beach", "hiking", "roadtrip", "trip", "vacation", "mountains", "adventure", "city"], peertube: Some(6) },
+    Interest { id: "animals", label: "Animals", emoji: "🐾", words: &["cats", "dogs", "animals", "pets", "animal", "pet", "cat", "dog", "kitten", "puppy", "wildlife", "birds", "catsofmastodon", "dogsofmastodon"], peertube: Some(16) },
+    Interest { id: "sports", label: "Sports", emoji: "⚽", words: &["sports", "football", "cricket", "skateboarding", "sport", "soccer", "basketball", "skate", "surf", "surfing", "climbing"], peertube: Some(5) },
     Interest { id: "fitness", label: "Fitness", emoji: "💪", words: &["fitness", "gym", "workout", "yoga", "running", "exercise", "calisthenics"], peertube: None },
-    Interest { id: "gaming", label: "Gaming", emoji: "🎮", words: &["gaming", "games", "game", "gamer", "minecraft", "videogames", "speedrun"], peertube: Some(7) },
-    Interest { id: "art", label: "Art", emoji: "🎨", words: &["art", "drawing", "painting", "illustration", "artist", "sketch", "animation", "pottery"], peertube: Some(4) },
-    Interest { id: "tech", label: "Tech", emoji: "💻", words: &["tech", "technology", "coding", "programming", "linux", "gadgets", "ai", "science", "robotics"], peertube: Some(15) },
-    Interest { id: "nature", label: "Nature", emoji: "🌿", words: &["nature", "outdoors", "forest", "garden", "gardening", "flowers", "sunset", "ocean", "plants"], peertube: None },
-    Interest { id: "cars", label: "Cars & bikes", emoji: "🚗", words: &["cars", "car", "motorcycle", "motorbike", "bikes", "racing", "vehicles", "supercar"], peertube: Some(3) },
-    Interest { id: "style", label: "Style & beauty", emoji: "👗", words: &["fashion", "style", "outfit", "ootd", "beauty", "makeup", "skincare", "hair"], peertube: None },
-    Interest { id: "diy", label: "DIY", emoji: "🛠️", words: &["diy", "howto", "crafts", "maker", "woodworking", "3dprinting", "repair", "build"], peertube: Some(12) },
-    Interest { id: "movies", label: "Movies & TV", emoji: "🎬", words: &["movies", "movie", "film", "films", "cinema", "anime", "tv", "series"], peertube: Some(2) },
-    Interest { id: "learning", label: "Learning", emoji: "📚", words: &["education", "learn", "learning", "history", "facts", "tutorial", "til", "space", "physics"], peertube: Some(13) },
+    Interest { id: "gaming", label: "Gaming", emoji: "🎮", words: &["gaming", "minecraft", "games", "gamer", "game", "videogames", "speedrun"], peertube: Some(7) },
+    Interest { id: "art", label: "Art", emoji: "🎨", words: &["art", "drawing", "painting", "animation", "illustration", "artist", "sketch", "pottery"], peertube: Some(4) },
+    Interest { id: "tech", label: "Tech", emoji: "💻", words: &["tech", "coding", "linux", "programming", "technology", "gadgets", "ai", "science", "robotics"], peertube: Some(15) },
+    Interest { id: "nature", label: "Nature", emoji: "🌿", words: &["nature", "garden", "flowers", "sunset", "outdoors", "forest", "gardening", "ocean", "plants"], peertube: None },
+    Interest { id: "cars", label: "Cars & bikes", emoji: "🚗", words: &["cars", "motorcycle", "racing", "car", "motorbike", "bikes", "vehicles", "supercar"], peertube: Some(3) },
+    Interest { id: "style", label: "Style & beauty", emoji: "👗", words: &["fashion", "makeup", "outfit", "ootd", "style", "beauty", "skincare", "hair"], peertube: None },
+    Interest { id: "diy", label: "DIY", emoji: "🛠️", words: &["diy", "woodworking", "3dprinting", "crafts", "howto", "maker", "repair", "build"], peertube: Some(12) },
+    Interest { id: "movies", label: "Movies & TV", emoji: "🎬", words: &["movies", "anime", "film", "cinema", "movie", "films", "tv", "series"], peertube: Some(2) },
+    Interest { id: "learning", label: "Learning", emoji: "📚", words: &["education", "history", "facts", "space", "learn", "learning", "tutorial", "til", "physics"], peertube: Some(13) },
 ];
 
-/// How many of `chosen` a reel matches, from its words (hashtags, topic,
-/// words of its text, all lowercase).
-pub fn interest_matches(chosen: &[&Interest], words: &BTreeSet<String>) -> u8 {
-    chosen.iter().filter(|i| i.words.iter().any(|w| words.contains(*w))).count().min(u8::MAX as usize) as u8
+/// How many of `chosen` a reel matches: a word of its text or topic is one
+/// of an interest's words, or a hashtag contains one ("#kpopdance" is
+/// dance; short words like "ai" must match a hashtag exactly). All
+/// lowercase.
+pub fn interest_matches(chosen: &[&Interest], words: &BTreeSet<String>, tags: &[String]) -> u8 {
+    let hit = |w: &str| {
+        words.contains(w) || tags.iter().any(|t| if w.chars().count() >= 4 { t.contains(w) } else { t == w })
+    };
+    chosen.iter().filter(|i| i.words.iter().any(|w| hit(w))).count().min(u8::MAX as usize) as u8
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -275,8 +281,11 @@ mod tests {
         let t = Taste::default();
         let animals: Vec<&Interest> = INTERESTS.iter().filter(|i| i.id == "animals").collect();
         let words = |ws: &[&str]| ws.iter().map(|w| w.to_string()).collect::<BTreeSet<String>>();
-        assert_eq!(interest_matches(&animals, &words(&["my", "cats", "sleeping"])), 1);
-        assert_eq!(interest_matches(&animals, &words(&["cars"])), 0);
+        assert_eq!(interest_matches(&animals, &words(&["my", "cats", "sleeping"]), &[]), 1);
+        assert_eq!(interest_matches(&animals, &words(&["cars"]), &[]), 0);
+        let dance: Vec<&Interest> = INTERESTS.iter().filter(|i| i.id == "dance").collect();
+        assert_eq!(interest_matches(&dance, &words(&[]), &["kpopdance".into()]), 1, "inside a hashtag");
+        assert_eq!(interest_matches(&dance, &words(&["abundance"]), &[]), 0, "but not inside a word");
         let mut pool = Vec::new();
         for i in 0..30 {
             let mut cat = reel(&format!("c{i}"), &format!("a{i}"), &["cats"]);

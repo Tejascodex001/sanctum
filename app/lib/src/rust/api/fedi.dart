@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `chosen_interests`, `connect`, `connector`, `hints`, `key_of`, `kind_code`, `load_taste`, `net_kind`, `now`, `player_url`, `post_view`, `problem`, `refill`, `relayed`, `save_taste`, `save`, `source_key`, `tor`
+// These functions are ignored because they are not marked as `pub`: `chosen_interests`, `connect`, `connector`, `fits`, `hints`, `key_of`, `kind_code`, `load_taste`, `net_kind`, `now`, `player_url`, `post_view`, `problem`, `refill`, `relayed`, `save_taste`, `save`, `source_key`, `tor`, `usable`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Reels`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`
 // These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`

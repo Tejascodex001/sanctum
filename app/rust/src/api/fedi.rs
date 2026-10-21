@@ -418,17 +418,18 @@ pub fn reels_set_interests(ids: Vec<String>) -> anyhow::Result<()> {
 fn hints(chosen: &[&Interest]) -> fedi::Hints {
     fedi::Hints {
         categories: chosen.iter().filter_map(|i| i.peertube).collect(),
-        // Each interest's main words, as hashtags.
-        tags: chosen.iter().flat_map(|i| i.words.iter().take(3)).map(|w| w.to_string()).collect(),
+        // Each interest's main words: searched on PeerTube, hashtags on
+        // Loops and Mastodon.
+        tags: chosen.iter().flat_map(|i| i.words.iter().take(4)).map(|w| w.to_string()).collect(),
     }
 }
 
 /// Starts reading the next page of every source that has more and isn't
 /// being read, unless the pool already has plenty. Results land in the
 /// pool as each site answers.
-fn refill(sources: &[FediSource], connect: &Connect, target: usize, hints: &fedi::Hints) {
+fn refill(sources: &[FediSource], connect: &Connect, target: usize, hints: &fedi::Hints, chosen: &[&Interest]) {
     let mut r = REELS.lock().unwrap();
-    if r.pool.len() >= target {
+    if usable(&r.pool, chosen) >= target {
         return;
     }
     let round = r.round;
@@ -474,6 +475,16 @@ fn refill(sources: &[FediSource], connect: &Connect, target: usize, hints: &fedi
     }
 }
 
+/// Whether a reel can be shown: with interests picked, only reels about
+/// them.
+fn fits(p: &fedi::Post, chosen: &[&Interest]) -> bool {
+    chosen.is_empty() || interest_matches(chosen, &p.words(), &p.tags) > 0
+}
+
+fn usable(pool: &[fedi::Post], chosen: &[&Interest]) -> usize {
+    pool.iter().filter(|p| fits(p, chosen)).count()
+}
+
 /// The next `count` reels, best fits for your taste and interests first,
 /// with some new things mixed in. `fresh` starts the sites' feeds again
 /// (pull to refresh). Returns as soon as a few are ready; the rest keep
@@ -507,10 +518,10 @@ pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
     let target = count * 3;
     let deadline = Instant::now() + if direct { WAIT_DIRECT } else { WAIT_TOR };
     loop {
-        refill(&sources, &connect, target, &hints);
+        refill(&sources, &connect, target, &hints, &chosen);
         let (have, busy) = {
             let r = REELS.lock().unwrap();
-            (r.pool.len(), !r.fetching.is_empty())
+            (usable(&r.pool, &chosen), !r.fetching.is_empty())
         };
         // Enough to start, or nothing more coming, or waited long enough.
         if have >= count.min(FIRST) || !busy || Instant::now() >= deadline {
@@ -519,13 +530,16 @@ pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
         std::thread::sleep(Duration::from_millis(120));
     }
     // Keep the pool topped up while these are watched.
-    refill(&sources, &connect, target, &hints);
+    refill(&sources, &connect, target, &hints, &chosen);
     let mut taste = load_taste();
     let at = now();
     let mut r = REELS.lock().unwrap();
-    let candidates: Vec<Candidate> = r
-        .pool
+    // With interests, only reels about them: the others stay in the pool
+    // (interests may change) but aren't shown.
+    let showable: Vec<usize> = (0..r.pool.len()).filter(|&i| fits(&r.pool[i], &chosen)).collect();
+    let candidates: Vec<Candidate> = showable
         .iter()
+        .map(|&i| &r.pool[i])
         .map(|p| Candidate {
             key: key_of(&p.host, &p.id),
             author: p.handle.clone(),
@@ -533,19 +547,21 @@ pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
             likes: p.likes,
             upright: p.upright(),
             age_s: at.saturating_sub(p.created_at.max(0) as u64),
-            interests: interest_matches(&chosen, &p.words()),
+            interests: interest_matches(&chosen, &p.words(), &p.tags),
         })
         .collect();
-    let mut picked = taste.rank(&candidates, count, !chosen.is_empty(), &mut rand::thread_rng());
-    let order = picked.clone();
-    picked.sort_unstable_by(|a, b| b.cmp(a));
+    let order = taste.rank(&candidates, count, !chosen.is_empty(), &mut rand::thread_rng());
+    // Candidates are numbered among the showable ones; take them out of the
+    // pool by their place in it, last first.
+    let mut in_pool: Vec<usize> = order.iter().map(|&c| showable[c]).collect();
+    in_pool.sort_unstable_by(|a, b| b.cmp(a));
     let mut taken: HashMap<usize, fedi::Post> = HashMap::new();
-    for i in picked {
+    for i in in_pool {
         taken.insert(i, r.pool.remove(i));
     }
     let mut posts = Vec::new();
     for i in order {
-        let mut p = taken.remove(&i).expect("picked once");
+        let mut p = taken.remove(&showable[i]).expect("picked once");
         let c = &candidates[i];
         taste.mark_seen(&c.key, at);
         r.shown.insert(c.key.clone(), c.features.clone());
@@ -686,5 +702,22 @@ mod tests {
             assert_eq!(player_url(direct, "http://tube.example/v.mp4", relay), None);
             assert_eq!(player_url(direct, "file:///etc/passwd", relay), None);
         }
+    }
+
+    #[test]
+    fn with_interests_only_reels_about_them_are_shown() {
+        let reel = |tags: &[&str], text: &str| fedi::Post {
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            text: text.into(),
+            ..Default::default()
+        };
+        let dance: Vec<&Interest> = INTERESTS.iter().filter(|i| i.id == "dance").collect();
+        let pool = vec![reel(&["kpopdance"], ""), reel(&[], "Dancing in the rain"), reel(&["cars"], "fast")];
+        assert!(fits(&pool[0], &dance) && fits(&pool[1], &dance) && !fits(&pool[2], &dance));
+        assert_eq!(usable(&pool, &dance), 2);
+        assert_eq!(usable(&pool, &[]), 3, "no interests: everything");
+        let h = hints(&dance);
+        assert_eq!(h.tags, ["dance", "dancing", "dancer", "kpop"]);
+        assert!(h.categories.is_empty());
     }
 }
