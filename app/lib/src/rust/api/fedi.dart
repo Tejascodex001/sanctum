@@ -48,8 +48,8 @@ Future<FediPage> fediFeed({
 Future<ReelInterests> reelsInterests() =>
     RustLib.instance.api.crateApiFediReelsInterests();
 
-/// Picks what Reels is about (empty: skipped, no preference). The feed
-/// starts again with them.
+/// Picks what Reels is about (empty: skipped, no preference). The sites
+/// are read again with them.
 Future<void> reelsSetInterests({required List<String> ids}) =>
     RustLib.instance.api.crateApiFediReelsSetInterests(ids: ids);
 

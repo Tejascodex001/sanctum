@@ -401,15 +401,17 @@ pub fn reels_interests() -> anyhow::Result<ReelInterests> {
     })
 }
 
-/// Picks what Reels is about (empty: skipped, no preference). The feed
-/// starts again with them.
+/// Picks what Reels is about (empty: skipped, no preference). The sites
+/// are read again with them.
 pub fn reels_set_interests(ids: Vec<String>) -> anyhow::Result<()> {
     let ids: Vec<String> = ids.into_iter().filter(|id| INTERESTS.iter().any(|i| i.id == id)).collect();
     session::with(|s| Ok(s.store.kv_put(INTERESTS_KEY, &ids)?))?;
+    // Read the sites again with the new interests; what's loaded stays (it's
+    // ranked by them anyway).
     let mut r = REELS.lock().unwrap();
     r.round += 1;
-    r.pool.clear();
     r.cursors.clear();
+    r.fetching.clear();
     Ok(())
 }
 
@@ -446,10 +448,11 @@ fn refill(sources: &[FediSource], connect: &Connect, target: usize, hints: &fedi
             let taste = load_taste();
             let at = now();
             let mut r = REELS.lock().unwrap();
-            r.fetching.remove(&key);
+            // A fresh start since: these are stale, and new reads already began.
             if r.round != round {
                 return;
             }
+            r.fetching.remove(&key);
             match page {
                 Ok(page) => {
                     r.problems.remove(&key);
@@ -482,10 +485,13 @@ pub fn reels_next(count: u32, fresh: bool) -> anyhow::Result<ReelsPage> {
     let chosen = chosen_interests();
     let hints = hints(&chosen);
     if fresh {
+        // From the top of every site again, keeping what's already loaded
+        // (unless its site was removed).
         let mut r = REELS.lock().unwrap();
         r.round += 1;
-        r.pool.clear();
+        r.pool.retain(|p| sources.iter().any(|s| s.host == p.host));
         r.cursors.clear();
+        r.fetching.clear();
         r.problems.clear();
     }
     let direct = fedi_direct().unwrap_or(false);

@@ -147,13 +147,34 @@ class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
   Future<void> _pickInterests(List<String> ids) async {
     await reelsSetInterests(ids: ids);
     if (!mounted) return;
-    setState(() => _picking = false);
-    await _restart();
+    if (_picking) {
+      setState(() => _picking = false);
+      await _restart();
+    } else {
+      await _reloadAhead();
+    }
+  }
+
+  /// After changing interests or sites: the reel playing now keeps
+  /// playing; only the ones after it are picked again.
+  Future<void> _reloadAhead() async {
+    final sources = await fediSources();
+    if (!mounted) return;
+    setState(() {
+      _sources = sources;
+      if (_posts.length > _index + 1) _posts.removeRange(_index + 1, _posts.length);
+      _done = false;
+    });
+    await _more(fresh: true);
   }
 
   Future<void> _editInterests() async {
     final interests = await reelsInterests();
     if (!mounted) return;
+    final before = {
+      for (final i in interests.items)
+        if (i.chosen) i.id
+    };
     final ids = await showModalBottomSheet<List<String>>(
       context: context,
       isScrollControlled: true,
@@ -164,17 +185,28 @@ class _ExplorePageState extends State<ExplorePage> with WidgetsBindingObserver {
         onDone: (ids) => Navigator.pop(sheet, ids),
       ),
     );
-    if (ids != null) await _pickInterests(ids);
+    // Nothing changes unless the picks did.
+    if (ids == null || (ids.length == before.length && ids.every(before.contains))) return;
+    await _pickInterests(ids);
   }
 
   Future<void> _editSources() async {
+    String list(List<FediSource> l) => [for (final s in l) '${s.kind.name}:${s.host}'].join(',');
+    final before = list(await fediSources());
+    if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (_) => const _SourcesSheet(),
     );
-    await _restart();
+    // Closing the sheet without changes leaves Reels as it was.
+    if (!mounted || list(await fediSources()) == before) return;
+    if (_posts.isEmpty) {
+      await _restart();
+    } else {
+      await _reloadAhead();
+    }
   }
 
   /// Videos on screen: black around them, like any video player, in
