@@ -61,12 +61,12 @@ void main() {
     await settle(tester);
   }
 
-  testWidgets('the form shows what will be sent, and waits for an address', (tester) async {
+  testWidgets('the form shows what will be sent, and queues it for the developer', (tester) async {
     await show(tester, const FeedbackScreen());
     expect(find.text('WHAT WILL BE SENT'), findsOneWidget);
-    // This build has no feedback address yet: it says so, and won't send.
-    expect(feedbackOpen(), isFalse);
-    expect(find.textContaining('isn\'t open yet'), findsOneWidget);
+    // This build knows the developer's feedback address.
+    expect(feedbackOpen(), isTrue);
+    expect(find.textContaining('isn\'t open yet'), findsNothing);
     await tester.tap(find.byTooltip('4 of 5'));
     await tester.enterText(find.byType(TextField), 'Love the sigils. Calls drop on my train ride.');
     await settle(tester, 3);
@@ -80,6 +80,12 @@ void main() {
     await settle(tester);
     await _shot(tester, '21-feedback-light');
     await tester.runAsync(() => Appearance.setTheme(ThemeChoice.dark));
+    // Without Tor it waits on this phone, to go once connected.
+    final sent = await tester.runAsync(
+      () => feedbackSend(form: FeedbackForm(phone: '', android: '', build: 0, rating: 4, text: 'Hello')),
+    );
+    expect(sent, FeedbackSent.queued);
+    expect(await tester.runAsync(feedbackWaiting), 1);
     await tester.pumpWidget(const SizedBox());
     await settle(tester, 2);
   });

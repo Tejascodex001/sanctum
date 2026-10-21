@@ -13,7 +13,7 @@ use sanctum_net::tor::RunningOnionService;
 /// Where everyone's feedback goes: the developer's feedback address, from
 /// their inbox screen. Empty until it's set; the app then says feedback
 /// isn't open yet.
-const DEVELOPER: &str = "";
+const DEVELOPER: &str = "zh6d2lkkgnnjt2sp6poebrle647ejzk6mmgvk4wdfwhae4p4mvln3yqd.onion";
 /// Undelivered feedback is retried this often.
 const RETRY_EVERY: Duration = Duration::from_secs(10 * 60);
 
