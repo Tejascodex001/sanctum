@@ -2,15 +2,46 @@
 
 # Sanctum
 
-Private chat for close friends (a circle of 100–200 people at most), on Android.
+**Private chat for you and your close friends. No servers, no accounts, no tracking.**
 
-There are **no servers and no accounts**, and nothing is tracked. Phones talk directly to each other over **Tor**, so nobody, including your friends, sees your IP address (unless you turn on an opt-in faster mode for Reels or calls, which says what it shares). Everything stays on your phone, encrypted, and there are no cloud backups.
+Sanctum is an Android app for a small circle of people who trust each other (about 200 friends at most). Your messages, photos, calls and plans go straight from your phone to your friends' phones, hidden by Tor. There's no company in the middle that stores them, reads them or sells anything about you.
 
-The UI is the **Sigil + Deck** design: every person and chat gets its own generated sigil, and chats are stacked cards.
+> Sanctum is in **beta** (the app says *beta-1.0.0*). It's ready to use with friends, and it updates itself from inside the app.
+
+## Why Sanctum
+
+- **No servers.** Most chat apps send everything through a company's computers. Sanctum doesn't: your phone talks to your friends' phones directly.
+- **No phone number, no email, no account.** You add a friend by scanning their QR code in person, or by typing a short code they send you.
+- **Nobody sees who you talk to.** Connections go through Tor, so not even your friends learn your internet address, and nobody watching the network can tell who is talking to whom.
+- **Everything stays on your phone, locked.** Chats are stored encrypted, behind your fingerprint, face or PIN. There are no cloud backups.
+- **Nothing is tracked.** No ads, no analytics, no crash reports, no Google services. Notifications are made on your phone and never say what a message says.
+- **Made for friends, not for the world.** No public profiles, no strangers, no follower counts.
+
+## What you can do
+
+- **Chat** one to one or in **groups** of up to 50, with replies, threads, reactions, and the "typing…" hint.
+- **Send** photos, videos, files and **voice notes**.
+- **Call** a friend, with **voice or video**.
+- **Plan together** with polls, "which day works?" polls and plans that show who's going.
+- **Share albums** in any chat, and a **daily moment**: one photo a day for your friends, gone after 24 hours.
+- **Temp chats** that live only in memory, with messages that burn after 24 hours.
+- **Chat without internet** with friends on the same Wi-Fi, a phone's hotspot or Bluetooth (Nearby, off until you turn it on).
+- **Watch Reels**: short videos from open, community-run video sites, watched anonymously with no account. What you like is learned on your phone only.
+- **Stay safe** with hidden chats, screenshot blocking, a decoy PIN that opens an empty-looking Sanctum, and a panic wipe that erases everything in two seconds, even from the lock screen.
+
+## Every chat has a sigil
+
+Each person and each chat gets its own **sigil**: a unique piece of artwork made from their secret key. Your chat with a friend has a sigil made from both of you, and it looks the same on both phones. **If your sigils match, nobody is listening in.** That's how you check a chat is secure: no codes to read, just look.
+
+## Good to know
+
+- **Android only.** iPhones stop apps from staying connected in the background, and the usual way around that needs a server, which Sanctum doesn't have. (Briar, a similar app, is Android-only for the same reason.)
+- **Private by default, faster when you choose.** Tor makes some things slower: video calls are choppier and Reels take a moment to load. Two switches in Settings, *Faster calls* and *Faster reels*, speed them up, and each says plainly what it shares.
+- **Messages wait for you.** If a friend writes while you're offline, their phone keeps the message and delivers it when you're both online again. In groups, other members who already have it pass it on, so it reaches you even if the sender has gone offline.
 
 ## Install
 
-Sanctum is in beta: the app says **beta-1.0.0**, and each release is told apart by its build number.
+Each release is told apart by its build number.
 
 1. Download `app-release.apk` from the latest [release](../../releases/latest) (`build-N`).
 2. Install it. Android asks once to allow installs from your browser or file manager.
@@ -70,7 +101,11 @@ Sanctum is in beta: the app says **beta-1.0.0**, and each release is told apart 
 | ✅ | **Video calls** | Start a call with video or turn your camera on during a call; switch cameras, answer without video. Lower quality and choppier through Tor; sharp on the same Wi-Fi or with Faster calls. A hidden chat's video waits until you unlock |
 | ✅ | **Faster calls** | An opt-in Settings switch: calls connect straight between your phones when your networks allow it (less delay, sharper video), else stay private through Tor. Your friend's phone learns your internet address. Used only if both of you turn it on. The call screen says Private, Nearby or Direct |
 
-## How it works
+## For developers
+
+Everything below is for people working on the code.
+
+### How it works
 
 - **`core/` (Rust):** the identity (Ed25519; the same key is your Tor onion address), MLS (OpenMLS), the encrypted store, the protocol engine, groups, temp chats and sigils. It does no I/O, so whole conversations between phones are tested in-process.
 - **`net/` (Rust):** connections. Tor through Arti (onion services, plus HTTPS for updates), nearby Wi-Fi discovery, and the node that keeps live links to friends.
@@ -78,7 +113,7 @@ Sanctum is in beta: the app says **beta-1.0.0**, and each release is told apart 
 - **Reels** read public Fediverse sites (`net/src/fedi.rs`) and are ranked on the phone (`core/src/taste.rs`); nothing about what you watch leaves the phone.
 - **`docs/DESIGN.md`:** the full design: architecture, encryption, protocol, groups, nearby, calls, Reels, updates and the UI system.
 
-## Build and test
+### Build and test
 
 ```sh
 cargo test --workspace              # core + network (Tor bootstrap needs the internet)
