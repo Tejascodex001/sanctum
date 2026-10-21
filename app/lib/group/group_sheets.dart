@@ -109,9 +109,9 @@ class _FriendPickerState extends State<_FriendPicker> {
             Padding(
               padding: EdgeInsets.fromLTRB(Space.xl, Space.xs, Space.xl, Space.xs),
               child: Text(
-                'Only friends can be added. Each joins as soon as their phone is reached; messages go '
-                'straight between your phones. Groups can have up to ${groupMaxMembers()} people for now, so '
-                'everyone\'s messages arrive quickly.',
+                'Only friends can be added, up to ${groupMaxMembers()} people. Each joins as soon as their '
+                'phone is reached. Messages go straight between your phones, and members pass them on, so '
+                'they reach people even when whoever sent them is offline.',
                 style: AppText.caption,
               ),
             ),
@@ -245,7 +245,7 @@ class _GroupSheetState extends State<_GroupSheet> {
     final room = groupMaxMembers() - _g!.members.length;
     if (room <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('This group is full: groups can have up to ${groupMaxMembers()} people for now.')));
+          SnackBar(content: Text('This group is full: groups can have up to ${groupMaxMembers()} people.')));
       return;
     }
     final picked = await showAddMembersSheet(context, friends: candidates, sigil: widget.sigilFor, room: room);

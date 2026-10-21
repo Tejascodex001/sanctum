@@ -6,8 +6,12 @@
 //! The key and a description ([`Media`]) travel inside the chat's MLS
 //! message; the encrypted chunks follow over the same link
 //! ([`Frame::BlobChunk`]), useless without the key. A receiver checks every
-//! chunk as it arrives and shows the file once the last one is in.
+//! chunk as it arrives and shows the file once the last one is in. In
+//! groups, members may fetch a file from each other (see `group_sync`);
+//! its id is a keyed hash of its contents, so such a copy is checked as a
+//! whole too.
 
+use crate::group_sync::blob_id;
 use crate::protocol::{Album, BlobId, Content, Frame, Media, MediaKind, MessageId};
 use crate::session::{clip, now, Event, Result, Session, SessionError};
 use crate::store::{ChatKind, OutboxItem, OutboxState, StoredMessage};
@@ -36,14 +40,18 @@ pub fn max_size(kind: MediaKind) -> u64 {
 /// Big files aren't resent on every flush: only on a new link, or after
 /// this long without an acknowledgement.
 const RESEND_AFTER: Duration = Duration::from_secs(300);
+/// While a member we asked is sending a file, its sender's own resend
+/// waits this long (pieces from two at once would get in each other's way).
+const FETCH_BUSY: Duration = Duration::from_secs(30);
 
 /// What a receiver expects of an attachment announced by a message.
 #[derive(Serialize, Deserialize)]
-struct Expected {
-    from: [u8; 32],
-    key: [u8; 32],
-    total: u32,
-    chat_id: i64,
+pub(crate) struct Expected {
+    /// Who sent the message.
+    pub(crate) from: [u8; 32],
+    pub(crate) key: [u8; 32],
+    pub(crate) total: u32,
+    pub(crate) chat_id: i64,
 }
 
 /// What the app needs to send a file.
@@ -61,19 +69,19 @@ pub struct Outgoing<'a> {
     pub album: Option<Album>,
 }
 
-fn nonce(blob: &BlobId, index: u32) -> XNonce {
+pub(crate) fn nonce(blob: &BlobId, index: u32) -> XNonce {
     let mut n = [0u8; 24];
     n[..16].copy_from_slice(blob);
     n[16..20].copy_from_slice(&index.to_le_bytes());
     XNonce::from(n)
 }
 
-fn kv_name(blob: &BlobId) -> Vec<u8> {
+pub(crate) fn kv_name(blob: &BlobId) -> Vec<u8> {
     [b"blob:".as_slice(), blob].concat()
 }
 
 /// Chunks in a stored blob: `u32` length, then the sealed chunk.
-fn read_chunks(path: &Path) -> std::io::Result<Vec<Vec<u8>>> {
+pub(crate) fn read_chunks(path: &Path) -> std::io::Result<Vec<Vec<u8>>> {
     let data = fs::read(path)?;
     let mut chunks = Vec::new();
     let mut rest = data.as_slice();
@@ -95,8 +103,33 @@ fn append_chunk(file: &mut fs::File, chunk: &[u8]) -> std::io::Result<()> {
 }
 
 impl Session {
-    fn blob_path(&self, blob: &BlobId) -> PathBuf {
+    pub(crate) fn blob_path(&self, blob: &BlobId) -> PathBuf {
         self.media_dir.join(blob.iter().map(|b| format!("{b:02x}")).collect::<String>())
+    }
+
+    /// Whether we hold this file in full.
+    pub(crate) fn blob_done(&self, blob: &BlobId) -> bool {
+        self.blob_path(blob).exists()
+    }
+
+    /// How many pieces of a file still on its way we have.
+    pub(crate) fn blob_progress(&self, blob: &BlobId) -> u32 {
+        read_chunks(&self.blob_path(blob).with_extension("part")).map_or(0, |c| c.len() as u32)
+    }
+
+    /// Whether a whole file matches its id (see [`blob_id`]): files sent by
+    /// older builds have random ids and don't.
+    fn blob_checks_out(&self, path: &Path, key: &[u8; 32], blob: &BlobId) -> bool {
+        let Ok(chunks) = read_chunks(path) else { return false };
+        let cipher = XChaCha20Poly1305::new(key.into());
+        let mut plain = Vec::new();
+        for (i, chunk) in chunks.iter().enumerate() {
+            let Ok(piece) = cipher.decrypt(&nonce(blob, i as u32), chunk.as_slice()) else {
+                return false;
+            };
+            plain.extend_from_slice(&piece);
+        }
+        blob_id(key, &plain) == *blob
     }
 
     /// Encrypts `out.path` into the media folder: its description and how
@@ -106,8 +139,10 @@ impl Session {
         if plain.len() as u64 > max_size(out.kind) {
             return Err(SessionError::TooLarge(max_size(out.kind) / MB));
         }
-        let blob: BlobId = rand::random();
         let key: [u8; 32] = rand::random();
+        // Its id is a hash of what it holds, so a copy pieced together from
+        // other members can be checked.
+        let blob = blob_id(&key, &plain);
         let cipher = XChaCha20Poly1305::new((&key).into());
         fs::create_dir_all(&self.media_dir).map_err(io)?;
         let mut file = fs::File::create(self.blob_path(&blob)).map_err(io)?;
@@ -180,6 +215,10 @@ impl Session {
             },
         };
         let recipients = self.send_to_members(&meta, id, &content, (chat_id, seq))?;
+        if meta.kind == ChatKind::Group {
+            // Other members may fetch it from us, as from whoever gets it.
+            self.keep_blob(&meta.group_id, blob, total)?;
+        }
         // The file itself, to each of them (after the message, in order).
         for peer in &recipients {
             self.store.outbox_put(
@@ -306,23 +345,37 @@ impl Session {
             // A resend after our acknowledgement got lost.
             return Ok(if last { vec![Frame::Ack { id }] } else { Vec::new() });
         }
-        // Only files a message announced, from whoever sent that message.
+        // Only files a message announced, from whoever sent that message, or
+        // (groups) from the member we asked for it.
         let Some(expected) = self.store.kv_get::<Expected>(&kv_name(&blob))? else {
             return Ok(Vec::new());
         };
-        if expected.from != *peer || expected.total != total || index >= total {
+        let from_sender = expected.from == *peer;
+        let fetch = self.sync.fetching.get(&blob);
+        let from_fetch = fetch.is_some_and(|f| f.from == *peer);
+        let busy = fetch.is_some_and(|f| f.at.elapsed() < FETCH_BUSY);
+        if !(from_fetch || from_sender && !busy) || expected.total != total || index >= total {
             return Ok(Vec::new());
         }
         let cipher = XChaCha20Poly1305::new((&expected.key).into());
         if cipher.decrypt(&nonce(&blob, index), bytes.as_slice()).is_err() {
+            if !from_sender {
+                self.blob_rejected(&blob, peer);
+                return Ok(Vec::new());
+            }
             return Err(SessionError::Protocol);
         }
         let part = done.with_extension("part");
         fs::create_dir_all(&self.media_dir).map_err(io)?;
-        // Chunks come in order over a link; a resend starts over.
+        // Chunks come in order over a link; a resend starts over, a fetch
+        // goes on from where the last one stopped.
         let have = if index == 0 { 0 } else { read_chunks(&part).map(|c| c.len() as u32).unwrap_or(0) };
         if index != have {
             return Ok(Vec::new());
+        }
+        if let Some(fetch) = self.sync.fetching.get_mut(&blob).filter(|f| f.from == *peer) {
+            fetch.at = Instant::now();
+            fetch.relayed |= !from_sender;
         }
         let mut file = fs::OpenOptions::new()
             .create(true)
@@ -336,8 +389,24 @@ impl Session {
             return Ok(Vec::new());
         }
         file.sync_all().map_err(io)?;
+        drop(file);
+        let relayed = !from_sender || self.sync.fetching.get(&blob).is_some_and(|f| f.relayed);
+        let checks_out = self.blob_checks_out(&part, &expected.key, &blob);
+        if relayed && !checks_out {
+            // Pieced together from someone other than its sender, and not
+            // what the message announced: thrown away, asked of others.
+            let _ = fs::remove_file(&part);
+            self.blob_rejected(&blob, peer);
+            return Ok(Vec::new());
+        }
         fs::rename(&part, &done).map_err(io)?;
         self.store.kv_delete(&kv_name(&blob))?;
+        self.sync.fetching.remove(&blob);
+        self.sync.expected_at.remove(&blob);
+        if let (true, Some(group)) = (checks_out, self.group_of_chat(expected.chat_id)) {
+            // Ours to pass on to other members now.
+            self.keep_blob(&group, blob, total)?;
+        }
         self.events.push(match expected.chat_id {
             crate::moment::MOMENT_CHAT => Event::Moments,
             chat => Event::Chat(chat),
@@ -363,6 +432,7 @@ impl Session {
             return Ok(());
         }
         self.expect_blob(chat_id, peer, &media)?;
+        self.sync.expected_at.insert(media.blob, Instant::now());
         self.add_received(
             chat_id,
             StoredMessage {

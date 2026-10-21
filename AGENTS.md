@@ -29,6 +29,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 |---|---|
 | `core/src/session.rs` | The protocol engine: friends, sending, frames in and out, deleting. I/O-free; tested by passing frames between in-memory "phones" |
 | `core/src/group.rs` | Groups: single admin, invites, welcomes, broadcasting |
+| `core/src/group_sync.rs` | Members help deliver: group messages kept for a week, lists of what each member has swapped on every link, offers before resends, files fetched from other members. Only with phones that said so in the handshake (`protocol::FEATURES`) |
 | `core/src/poll.rs` | Polls, date polls and plans, and everyone's answers |
 | `core/src/recall.rs` | Search across chats and the "While you were away" catch-up |
 | `core/src/reaction.rs` | Emoji reactions: one per person per message, newest wins |
@@ -64,6 +65,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
   - To add a field, rename the current struct to a `…V<n>` "old format" type, add the field to the new one, and decode newest first. Look at `decode_chat` and `decode_message`; an older record fails to decode as a newer one because it ends early.
   - Add a test that writes the old format and reads it back (see `chats_from_before_hidden_chats_upgrade`).
 - **Wire enums (`Frame`, `Content`, `OutboxState`): add variants at the end only.**
+- **A `Frame` an older build doesn't know drops its link.** Send a new frame only to phones whose handshake said they understand it: add a bit to `protocol::FEATURES` and check what `Session::link_features` was told (see `group_sync`).
 - **Message sequence numbers are never reused** (`chat_seq`), because pending delivery receipts point at them.
 
 ## Building and testing

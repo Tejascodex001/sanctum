@@ -6,12 +6,15 @@
 //! answers with [`Frame::Hello`], signing the challenge and the reached
 //! side's key with its identity key. The reached side is already
 //! authenticated by Tor itself: its onion address is its identity key.
+//! Both handshake frames also carry what the sender's build can do
+//! ([`FEATURES`]), tucked after the frame where older builds don't look.
 //!
 //! After that, frames flow both ways. Everything a person writes travels
 //! inside MLS messages ([`Frame::Mls`]) as [`Content`]; Sanctum frames only
 //! carry routing, acknowledgements, the MLS setup, the passing "typing"
-//! signal (which holds no text) and calls' sealed sound
-//! ([`Frame::CallMedia`]).
+//! signal (which holds no text), calls' sealed sound
+//! ([`Frame::CallMedia`]) and group members' lists of what they have
+//! ([`Frame::GroupHave`]: hashes and ids, never content).
 
 use serde::{Deserialize, Serialize};
 
@@ -106,7 +109,67 @@ pub enum Frame {
         seq: u64,
         sealed: Vec<u8>,
     },
+    /// Members help deliver (see `group_sync`): "these are the recent
+    /// messages and files of this group that I have". Sent only to a
+    /// current member of the group whose phone understands it (see
+    /// [`FEATURES`]). An entry with `owed` is one we haven't delivered to
+    /// them yet: they confirm it with [`Frame::Ack`] if they already have
+    /// it (or can't use it), and ask for it otherwise.
+    GroupHave {
+        group: Vec<u8>,
+        ids: Vec<HaveEntry>,
+        blobs: Vec<HaveBlob>,
+    },
+    /// The answer to [`Frame::GroupHave`]: "send me these". The messages
+    /// come back as ordinary [`Frame::GroupMls`]. Also sent with no ids, to
+    /// say an offer was heard.
+    GroupWant {
+        group: Vec<u8>,
+        ids: Vec<SyncId>,
+    },
+    /// "Send me this group's file, from piece `from` on." It comes back as
+    /// [`Frame::BlobChunk`]s, checked against the message that announced
+    /// the file.
+    BlobWant {
+        group: Vec<u8>,
+        blob: BlobId,
+        from: u32,
+    },
 }
+
+/// A group message as members know it: a hash of its sealed bytes, the
+/// same on every phone (see `group_sync::sync_id`).
+pub type SyncId = [u8; 16];
+
+/// One message in a [`Frame::GroupHave`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HaveEntry {
+    pub id: SyncId,
+    /// The group's MLS epoch it was sent in: a phone that joined later, or
+    /// has moved on too far, doesn't ask for what it can't read.
+    pub epoch: u64,
+    /// Our outbox id, if we still owe it to the phone we tell.
+    pub owed: Option<MessageId>,
+}
+
+/// One file in a [`Frame::GroupHave`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HaveBlob {
+    pub blob: BlobId,
+    /// Our outbox id, if we still owe it to the phone we tell.
+    pub owed: Option<MessageId>,
+    /// "Fetch it from me now." The original sender says no once a few
+    /// members have it, so the rest fetch it from them.
+    pub ask: bool,
+}
+
+/// What this build can do, told to the other phone with the handshake
+/// (see [`encode_frame_with_features`]).
+pub const FEATURES: u32 = FEATURE_GROUP_SYNC;
+/// Understands [`Frame::GroupHave`], [`Frame::GroupWant`] and
+/// [`Frame::BlobWant`], and passes group messages and files on.
+pub const FEATURE_GROUP_SYNC: u32 = 1;
+const FEATURES_TAG: &[u8] = b"SNF1";
 
 /// A call's id, made by the caller.
 pub type CallId = [u8; 16];
@@ -373,10 +436,25 @@ impl Frame {
 }
 
 pub fn encode_frame(frame: &Frame) -> Vec<u8> {
-    let body = postcard::to_stdvec(frame).expect("serializable");
+    frame_with(postcard::to_stdvec(frame).expect("serializable"))
+}
+
+fn frame_with(body: Vec<u8>) -> Vec<u8> {
     let mut out = (body.len() as u32).to_be_bytes().to_vec();
     out.extend(body);
     out
+}
+
+/// A handshake frame ([`Frame::Challenge`] or [`Frame::Hello`]) followed,
+/// inside the same frame, by what this build can do. Older builds read
+/// the frame and ignore the bytes after it (postcard stops where the
+/// frame ends), so they keep working; newer ones learn the features with
+/// [`take_frame_features`].
+pub fn encode_frame_with_features(frame: &Frame, features: u32) -> Vec<u8> {
+    let mut body = postcard::to_stdvec(frame).expect("serializable");
+    body.extend_from_slice(FEATURES_TAG);
+    body.extend(postcard::to_stdvec(&features).expect("serializable"));
+    frame_with(body)
 }
 
 /// The peer sent something that isn't a valid frame; drop the connection.
@@ -399,6 +477,28 @@ pub fn take_frame(buf: &mut Vec<u8>) -> Result<Option<Frame>, BadFrame> {
     let frame = postcard::from_bytes(&buf[4..4 + len]).map_err(|_| BadFrame)?;
     buf.drain(..4 + len);
     Ok(Some(frame))
+}
+
+/// Like [`take_frame`], also reading the features an
+/// [`encode_frame_with_features`] frame carries (0 from older builds).
+pub fn take_frame_features(buf: &mut Vec<u8>) -> Result<Option<(Frame, u32)>, BadFrame> {
+    if buf.len() < 4 {
+        return Ok(None);
+    }
+    let len = u32::from_be_bytes(buf[..4].try_into().unwrap()) as usize;
+    if len > MAX_FRAME {
+        return Err(BadFrame);
+    }
+    if buf.len() < 4 + len {
+        return Ok(None);
+    }
+    let (frame, rest) = postcard::take_from_bytes::<Frame>(&buf[4..4 + len]).map_err(|_| BadFrame)?;
+    let features = rest
+        .strip_prefix(FEATURES_TAG)
+        .and_then(|f| postcard::take_from_bytes::<u32>(f).ok())
+        .map_or(0, |(f, _)| f);
+    buf.drain(..4 + len);
+    Ok(Some((frame, features)))
 }
 
 #[cfg(test)]
@@ -454,6 +554,30 @@ mod tests {
         let end = Content::CallEnd { call: [3; 16], reason: 1 };
         assert_eq!(end.encode()[0], 21);
         assert_eq!(Content::decode(&end.encode()), Some(end));
+        let have = Frame::GroupHave { group: vec![1], ids: Vec::new(), blobs: Vec::new() };
+        assert_eq!(have.to_bytes()[0], 16);
+        assert_eq!(Frame::GroupWant { group: vec![1], ids: Vec::new() }.to_bytes()[0], 17);
+        assert_eq!(Frame::BlobWant { group: vec![1], blob: [0; 16], from: 0 }.to_bytes()[0], 18);
+    }
+
+    /// Older builds read a handshake frame that carries features as if it
+    /// didn't (they use [`take_frame`]); newer ones read the features.
+    #[test]
+    fn features_ride_along_with_the_handshake() {
+        let hello = Frame::Hello { from: [4; 32], signature: vec![5; 64] };
+        let mut old = encode_frame_with_features(&hello, FEATURES);
+        old.extend(encode_frame(&Frame::Ping));
+        assert_eq!(take_frame(&mut old).unwrap(), Some(hello.clone()));
+        assert_eq!(take_frame(&mut old).unwrap(), Some(Frame::Ping));
+        assert!(old.is_empty());
+
+        let mut new = encode_frame_with_features(&hello, FEATURES);
+        assert_eq!(take_frame_features(&mut new).unwrap(), Some((hello.clone(), FEATURES)));
+        let mut from_old = encode_frame(&hello);
+        assert_eq!(take_frame_features(&mut from_old).unwrap(), Some((hello, 0)));
+        let challenge = Frame::Challenge { nonce: [6; 32] };
+        let mut both = encode_frame_with_features(&challenge, FEATURES);
+        assert_eq!(take_frame(&mut both).unwrap(), Some(challenge));
     }
 
     #[test]

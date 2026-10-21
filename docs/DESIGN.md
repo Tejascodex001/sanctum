@@ -47,8 +47,9 @@ Rust core (sanctum-core)
 ### Delivery without a server
 - Each phone runs its own Tor onion service; its onion address is derived from its identity key.
 - A foreground service keeps it reachable (no Google push, so Google never sees activity).
-- If a recipient is offline, the **sender's** phone keeps the sealed message in its outbox and delivers it when both phones are online at the same time (retried on every connection and every 30 s). Nobody else holds it. Relaying through other online group members (store-and-forward, unreadable to them) is planned, not built.
-- Trade-offs: messages may take a few seconds longer; the app uses some battery; two friends who are never online at the same time can't exchange messages until they are.
+- If a recipient is offline, the **sender's** phone keeps the sealed message in its outbox and delivers it when both phones are online at the same time (retried on every connection and every 30 s).
+- **In groups, members help deliver** (see "Groups at scale"): every member keeps the group's sealed messages for a week and passes them on to other members it's linked with, so a message reaches someone who comes online after its sender went offline. Only members get them, and they could read them anyway.
+- Trade-offs: messages may take a few seconds longer; the app uses some battery; two friends who are never online at the same time can't exchange 1:1 messages until they are.
 
 ## Encryption
 - **In transit:** MLS with ciphersuite X25519 / ChaCha20-Poly1305 / SHA-256 / Ed25519. Forward secrecy and post-compromise security from MLS ratchets. Messages padded to 64-byte blocks to hide length. A member's MLS identity must equal their signing key, so nobody can impersonate a friend inside a group. Tampered or replayed messages are rejected.
@@ -80,8 +81,10 @@ An opt-in feature in the sigil sheet (`net/src/nearby.rs`).
 
 ## Groups
 Peer to peer, with no server (`core/src/group.rs`).
+- **Size:** up to 50 people (`MAX_GROUP`, counting the admin).
 - **Encryption:** each group is an MLS group. A message is encrypted once, and the same bytes go to every member over their own Tor link (`Frame::GroupMls`).
-- **Delivery:** each copy is acknowledged separately. The message shows ✓✓ once every member has it, and copies for offline members wait in the outbox.
+- **Delivery:** each member confirms receipt to the sender. The message shows ✓✓ once every member has it, however it got to them; copies for offline members wait in the sender's outbox, and other members also pass the message on (see "Groups at scale").
+- **Whose message:** MLS says who wrote a message, so a message passed on by another member is still shown as its author's. A current member may pass on anyone's; anyone else may only send their own.
 - **One admin:** the creator is the only one who commits membership changes. With a single committer, members can't disagree about the group's state, which a server would otherwise guarantee.
 - **Adding members:** the admin adds friends only.
   1. It asks a friend for a key package over their link and checks it really is theirs.
@@ -95,15 +98,29 @@ Peer to peer, with no server (`core/src/group.rs`).
   - A message that can't be read yet is left unacknowledged and resent (live links resend every 30 seconds). It is dropped after 5 tries.
 
 ## Groups at scale
-**Today:** groups have up to 20 people (`MAX_GROUP`, counting the admin). Every member's phone sends to every other member's: text costs little, but a photo is uploaded once per member (a 2 MB photo in a 20-person group is about 40 MB of upload), and a message reaches someone only while the sender and they are online at the same time.
+**Members help deliver** (`core/src/group_sync.rs`), much as in Briar or Quiet. Before this, every member's phone sent to every other member's: a photo was uploaded once per member, and a message reached someone only while its sender and they were online at the same time. A group message is encrypted once and every member gets the identical sealed bytes; a photo's pieces are sealed with its own key and are identical too. Members can already read the group, so passing those bytes on costs no privacy, and nobody outside the group gets them.
+1. **Ids:** a group message is known by a hash of its sealed bytes (`sync_id`, 16 bytes of BLAKE3), the same on every phone. That's also how a copy that arrives twice (from its sender and from a member) is recognised and dropped before MLS sees it, so it causes no error or retry.
+2. **Keeping:** each member keeps the sealed bytes of the group's messages it sends and receives (membership changes too) for 7 days, at most 300 and 4 MB per group, oldest dropped first: a new sealed table (`kept`), indexed by keyed hashes like the rest of the store. It also notes which of the group's files it holds in full. Leaving the group, or being removed, forgets it all.
+3. **Catching up:** when a link comes up between two members, each sends, for every group they share, the list of what it keeps (`Frame::GroupHave`: ids, each with the MLS epoch it was sent in, plus file ids). The other asks for what it lacks (`Frame::GroupWant`) and gets ordinary `Frame::GroupMls`, processed like any group message. Lists come oldest first, so messages arrive in order. A phone doesn't ask for messages from before it joined, or too old for MLS to still read (4 epochs back). On a live link, what's new is swapped every 30 seconds, and the whole list every 10 minutes. At most 500 entries per list.
+4. **Offers first:** what the sender still owes a member who was away is offered in the list (an entry with `owed`, its outbox id) instead of sent. A member who already got it from someone else confirms with an ordinary `Frame::Ack`, which clears the outbox item and counts as delivered; otherwise it asks, and gets it under the outbox id. So ✓✓ still means everyone has it, and nothing is uploaded twice. While an offer waits for its answer, newer messages to that member are offered too, to keep their order. A brand-new message to a member who is online goes straight away, as before (no extra round trip).
+5. **Files:** the sender pushes a file to the first 3 members it reaches (`SEEDS`). Others get only an offer, with "ask me" off; they fetch the file (`Frame::BlobWant`, from the piece they have up to) from any member whose list has it, and from the sender only if nobody else turns up within 45 seconds. A fetch with no new piece for a minute goes to someone else, carrying on from where it stopped (every copy's pieces are identical).
+   - **Checked:** each piece is still checked with the file's key as it arrives, but every member has that key, so that alone wouldn't stop a member from passing on a different file. So a file's id is now a keyed hash of its contents (`blob_id`, keyed with the file's own key), and a file pieced together from someone other than its sender is checked as a whole against the id in the message before it's kept; one that doesn't match is thrown away and fetched from someone else. Pieces are taken only from the sender or the member we asked.
+   - Files from older builds have random ids: they don't match, so they're never passed on, and still come from their sender only.
+6. **Who:** lists are swapped only with current members of the group (by MLS), and only on links where the other phone said, in the handshake, that it understands them (`FEATURES`, see "Older builds" below). A list or request about a group from anyone else gets nothing. Members pass messages on over the links they have: friends' links, and links made to deliver something. Everyone is friends with the admin, so the admin's phone is a natural hub.
+7. **Big answers** (a file asked for, a long catch-up) are written a frame at a time between reads (`Node::send_paced`, over 64 KB), so two phones sending each other a lot at once never stop reading.
 
-**Planned: members help deliver.** A group message is encrypted once and every member gets the identical sealed bytes; a photo's pieces are sealed with its own key and are identical too. Members can already read the group, so passing those bytes on costs no privacy.
-1. **Ids:** each group message is known by a hash of its sealed bytes.
-2. **Keeping:** members keep what they receive for 7 days (sealed, capped per group).
-3. **Catching up:** when two members connect, they swap short lists of the recent ids they have for their shared groups, then ask for what they're missing (new `Frame` variants at the end). A message reaches an offline member from whoever in the group is online when they come back, not only from its sender.
-4. **Photos and videos:** text still goes straight to everyone online (fast). For attachments, the sender uploads to a few online members, and the rest fetch the pieces from whoever has them, checked against the hash in the message.
-5. **Ticks:** each member still confirms to the sender directly, so ✓✓ keeps meaning everyone has it.
-6. **Then:** raise `MAX_GROUP` to 50, with a scale test (a simulated 50-person group, measuring upload per message and time to reach everyone).
+**Measured** (`a_big_group_shares_the_load` and, in a release build, `big_groups_numbers`; simulated phones, every exchange on a fresh link, so the full lists go each time):
+
+| Group | Text: what the sender uploads to everyone | 1 MB photo: the sender uploads | Without members' help |
+|---|---|---|---|
+| 30 | 38 KB (about 1.3 KB per member, mostly the lists) | 3.2 MB (3.1×) | 29 MB |
+| 50 | 100 KB (about 2 KB per member) | 3.3 MB (3.2×) | 49 MB |
+
+- The photo's other copies (27 MB for 30 people) are uploaded by members, each passing it to the next.
+- A message sent just before its sender went offline, having reached one member, reached all the others through that member and those who got it from them.
+- Setting up a 50-person group's encryption (every member applying every newcomer's addition) is the slow part: about 55 s for the simulation in a release build, and much more in a debug build, so CI runs it with 16 phones.
+
+**Older builds:** they don't know the new frames, and a frame a phone doesn't know drops the link. So each phone now adds what it can do after its handshake frame, inside the same frame (`encode_frame_with_features`); older builds stop reading where the frame they know ends, so they don't notice. A phone that says nothing gets none of the new frames, nothing passed on by others, and its files from the sender, exactly as before; it never counts as one of the 3 a file is pushed to.
 
 ## Media
 Photos, videos and files (`core/src/media.rs`).
@@ -111,8 +128,9 @@ Photos, videos and files (`core/src/media.rs`).
 - **Delivery:**
   - The key, a description and a tiny blurred preview travel inside MLS (`Content::Media`).
   - The encrypted chunks follow as `Frame::BlobChunk`s, useless without the key.
-  - The receiver accepts only chunks for a file a message announced, from that message's sender, and checks each chunk as it arrives.
-  - The message gets ✓✓ only once the file has arrived. In groups it goes to each member.
+  - The receiver accepts only chunks for a file a message announced, from that message's sender (or, in groups, from the member it asked), and checks each chunk as it arrives.
+  - A file's id is a keyed hash of its contents (keyed with its own key), so a whole file can be checked against its message (see "Groups at scale").
+  - The message gets ✓✓ only once the file has arrived. In groups the sender pushes it to a few members and the rest fetch it from whoever has it.
 - **Resending:** big files aren't resent on every flush, only on a new link or after 5 minutes without an acknowledgement.
 - **Photos** are shrunk (2048 px max) and re-encoded on the phone before sending. That also strips EXIF metadata such as location.
 - **Viewing:** photos are decrypted in memory. Videos play in the app from a temporary decrypted copy, which is deleted when the player closes and on every start. Files open in another app through a read-only link.

@@ -2,7 +2,9 @@
 //!
 //! Each group is an MLS group. A message is encrypted once and the same
 //! bytes go to every member over their own link, each copy acknowledged on
-//! its own; it shows as delivered once every member has it.
+//! its own; it shows as delivered once every member has it. Members also
+//! pass messages and files on to each other (see `group_sync`), so a
+//! message reaches someone even when its sender is offline.
 //!
 //! The admin (the creator) is the only one who changes membership. With a
 //! single committer, members can never disagree about the group's state,
@@ -12,6 +14,7 @@
 //! Members who aren't friends with each other still connect directly for
 //! the group's sake (see [`Session::knows`]).
 
+use crate::group_sync::sync_id;
 use crate::mls::Received;
 use crate::protocol::{Content, Frame, GroupInfo, GroupMember, MessageId, Quote};
 use crate::session::{clip, now, Event, Result, Session, SessionError};
@@ -43,10 +46,10 @@ pub struct GroupView {
     pub members: Vec<Member>,
 }
 
-/// Most people in a group, counting the admin. Every member's phone sends
-/// to every other member's, so this keeps groups fast until members help
-/// pass messages on (see docs/DESIGN.md, "Groups at scale").
-pub const MAX_GROUP: usize = 20;
+/// Most people in a group, counting the admin. Members pass messages and
+/// files on to each other (see `group_sync`), so a sender doesn't upload a
+/// file once per member (see docs/DESIGN.md, "Groups at scale").
+pub const MAX_GROUP: usize = 50;
 
 /// Refuses a group that would have more than [`MAX_GROUP`] people.
 fn fits_group(people: usize) -> Result<()> {
@@ -109,6 +112,7 @@ impl Session {
         }
         let commit = self.mls.remove(&meta.group_id, member)?;
         self.mls.persist(&self.store)?;
+        self.keep_message(&meta.group_id, &commit)?;
         let mut reach = self.others(&meta)?;
         for peer in reach.iter().chain([member]) {
             self.enqueue(peer, &meta.group_id, commit.clone(), None)?;
@@ -145,6 +149,9 @@ impl Session {
         };
         // Already encrypted, the goodbyes still go out from the outbox.
         self.store.delete_chat(chat_id)?;
+        if !meta.group_id.is_empty() {
+            self.sync_forget(&meta.group_id)?;
+        }
         Ok(reach)
     }
 
@@ -279,6 +286,7 @@ impl Session {
                 Ok(vec![Frame::Ack { id }])
             }
             Frame::GroupMls { group, id, bytes } => self.on_group_message(peer, &group, id, &bytes),
+            Frame::GroupHave { .. } | Frame::GroupWant { .. } | Frame::BlobWant { .. } => self.on_sync_frame(peer, frame),
             _ => Err(SessionError::Protocol),
         }
     }
@@ -297,6 +305,7 @@ impl Session {
         }
         let invite = self.mls.invite_expecting(group, key_package, peer)?;
         self.mls.persist(&self.store)?;
+        self.keep_message(group, &invite.commit)?;
         // Everyone already in applies the change...
         for member in before.iter().filter(|m| **m != me) {
             self.enqueue(member, group, invite.commit.clone(), None)?;
@@ -336,6 +345,8 @@ impl Session {
         if members != claimed || !members.contains(&me) {
             return Err(SessionError::Protocol);
         }
+        // Messages from before we joined can't be read: never asked for.
+        self.set_joined_epoch(&group)?;
         let mut meta = ChatMeta {
             kind: ChatKind::Group,
             title: clip(&info.title, 64),
@@ -365,27 +376,47 @@ impl Session {
         let Some((chat_id, mut meta)) = self.group_chat(group)? else {
             return ack;
         };
-        if self.store.is_seen(&id)? {
+        // The same message may come from its sender and from members passing
+        // it on: known by the hash of its bytes, it's taken once.
+        let sid = sync_id(bytes);
+        self.sync_heard(peer, group, &sid);
+        if self.store.is_seen(&id)? || self.store.is_seen(&sid)? {
             return ack;
         }
+        // Passed on by a member (under its hash, not an outbox id): nobody
+        // resends it, so an unreadable one isn't counted down as below.
+        let relayed = id == sid;
+        // Any current member may pass on anyone's message; MLS says whose it
+        // is. Someone else may only send their own, as before.
+        let member = |s: &Self| s.mls.members(group).is_ok_and(|m| m.contains(peer));
+        let mut out = Vec::new();
         match self.mls.receive(group, bytes) {
-            Ok(Received::Message { sender, plaintext }) if sender == *peer => {
+            Ok(Received::Message { sender, plaintext }) if sender == *peer || member(self) => {
                 self.mls.persist(&self.store)?;
+                self.keep_message(group, bytes)?;
                 if let Some(content) = Content::decode(&plaintext) {
-                    self.deliver_group(chat_id, &mut meta, peer, content)?;
+                    self.deliver_group(chat_id, &mut meta, &sender, content)?;
                 }
+                // It may announce a file this member has.
+                out.extend(self.blob_fetches(peer)?);
             }
             Ok(Received::Message { .. }) => self.mls.persist(&self.store)?,
             Ok(Received::MembersChanged) => {
                 self.mls.persist(&self.store)?;
+                self.keep_message(group, bytes)?;
                 self.sync_members(chat_id, &mut meta)?;
             }
             Ok(Received::Removed) => {
                 self.mls.persist(&self.store)?;
+                self.sync_forget(group)?;
                 meta.group_id = Vec::new();
                 meta.peers = Vec::new();
                 self.store.update_chat(chat_id, &meta)?;
                 self.events.push(Event::Chat(chat_id));
+            }
+            Err(_) if relayed => {
+                self.sync_unreadable(group, bytes)?;
+                return Ok(Vec::new());
             }
             Err(_) => {
                 let tries = self.unreadable.entry(id).or_insert(0);
@@ -395,12 +426,16 @@ impl Session {
                     return Ok(Vec::new());
                 }
                 self.unreadable.remove(&id);
+                self.store.mark_seen(&sid)?;
             }
         }
         self.store.mark_seen(&id)?;
-        ack
+        out.insert(0, Frame::Ack { id });
+        Ok(out)
     }
 
+    /// Applies a group message from `sender` (whose it is, by MLS: it may
+    /// have been passed on by another member).
     fn deliver_group(&mut self, chat_id: i64, meta: &mut ChatMeta, peer: &[u8; 32], content: Content) -> Result<()> {
         let me = self.public_key();
         match content {
@@ -518,6 +553,8 @@ impl Session {
     fn broadcast(&mut self, meta: &ChatMeta, content: &Content, message: Option<(i64, i64)>) -> Result<Vec<[u8; 32]>> {
         let cipher = self.mls.encrypt(&meta.group_id, &content.encode())?;
         self.mls.persist(&self.store)?;
+        // Kept to pass on, like what we receive.
+        self.keep_message(&meta.group_id, &cipher)?;
         let recipients = self.others(meta)?;
         for peer in &recipients {
             self.enqueue(peer, &meta.group_id, cipher.clone(), message)?;

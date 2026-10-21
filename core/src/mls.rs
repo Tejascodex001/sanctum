@@ -127,22 +127,29 @@ impl MlsClient {
     /// Writes any state changed since the last call into the encrypted store.
     /// Call after every operation; until then, changes exist only in memory.
     pub fn persist(&mut self, store: &Store) -> Result<()> {
-        let current = self.provider.storage.values.read().unwrap().clone();
-        let upserts: Vec<(&[u8], &[u8])> = current
-            .iter()
-            .filter(|(k, v)| self.persisted.get(*k) != Some(v))
-            .map(|(k, v)| (k.as_slice(), v.as_slice()))
-            .collect();
-        let deletes: Vec<&[u8]> = self
-            .persisted
-            .keys()
-            .filter(|k| !current.contains_key(*k))
-            .map(Vec::as_slice)
-            .collect();
-        if !upserts.is_empty() || !deletes.is_empty() {
-            store.mls_apply(&upserts, &deletes)?;
+        // Only what changed is copied: a big group's state is large, and
+        // this runs after every message.
+        let (upserts, deletes) = {
+            let current = self.provider.storage.values.read().unwrap();
+            let upserts: Vec<(Vec<u8>, Vec<u8>)> = current
+                .iter()
+                .filter(|(k, v)| self.persisted.get(*k) != Some(v))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            let deletes: Vec<Vec<u8>> =
+                self.persisted.keys().filter(|k| !current.contains_key(*k)).cloned().collect();
+            (upserts, deletes)
+        };
+        if upserts.is_empty() && deletes.is_empty() {
+            return Ok(());
         }
-        self.persisted = current;
+        let up: Vec<(&[u8], &[u8])> = upserts.iter().map(|(k, v)| (k.as_slice(), v.as_slice())).collect();
+        let del: Vec<&[u8]> = deletes.iter().map(Vec::as_slice).collect();
+        store.mls_apply(&up, &del)?;
+        for k in &deletes {
+            self.persisted.remove(k);
+        }
+        self.persisted.extend(upserts);
         Ok(())
     }
 
@@ -302,6 +309,11 @@ impl MlsClient {
         commit.to_bytes().map_err(protocol)
     }
 
+    /// The group's current epoch (it moves on with every membership change).
+    pub fn epoch(&self, group_id: &[u8]) -> Result<u64> {
+        Ok(self.group(group_id)?.epoch().as_u64())
+    }
+
     /// Members' public keys.
     pub fn members(&self, group_id: &[u8]) -> Result<Vec<[u8; 32]>> {
         let group = self.group(group_id)?;
@@ -317,6 +329,16 @@ impl MlsClient {
             .ok_or(MlsError::NoSuchGroup)
     }
 }
+
+/// The epoch a group message was sent in (it travels in the clear in the
+/// message's header), or `None` if it isn't one.
+pub fn message_epoch(bytes: &[u8]) -> Option<u64> {
+    let message = MlsMessageIn::tls_deserialize_exact(bytes).ok()?.try_into_protocol_message().ok()?;
+    Some(message.epoch().as_u64())
+}
+
+/// How many past epochs' keys a member keeps (see [`PAST_EPOCHS`]).
+pub const KEPT_EPOCHS: u64 = PAST_EPOCHS as u64;
 
 fn identity_of(credential: &Credential) -> Result<[u8; 32]> {
     BasicCredential::try_from(credential.clone())

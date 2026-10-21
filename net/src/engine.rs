@@ -5,7 +5,9 @@
 use crate::direct::DirectSocket;
 use async_trait::async_trait;
 use sanctum_core::call::{MediaHub, Outgoing, Route, VideoSent};
-use sanctum_core::protocol::{encode_frame, take_frame, Frame};
+use sanctum_core::protocol::{
+    encode_frame, encode_frame_with_features, take_frame, take_frame_features, Frame, FEATURES,
+};
 use sanctum_core::session::{Event, Session};
 use sanctum_core::video::{Backlog, FrameInfo};
 use std::collections::{HashMap, HashSet};
@@ -72,6 +74,8 @@ const MAX_DIALS: usize = 6;
 /// While a call goes on, its media's housekeeping (direct-path probes,
 /// camera news, keyframe requests) runs this often.
 const CALL_TICK: Duration = Duration::from_millis(50);
+/// Answers bigger than this are written a frame at a time, between reads.
+const WRITE_AT_ONCE: usize = 64 * 1024;
 /// A friend linked over Tor who is also nearby is offered the nearby link
 /// at most this often.
 const UPGRADE_EVERY: Duration = Duration::from_secs(60);
@@ -392,9 +396,15 @@ impl Node {
             *tick
         };
         if tick % RESEND_EVERY == 0 {
-            let pending = self.session.lock().unwrap().pending_peers().unwrap_or_default();
+            let linked = self.connected();
+            let (pending, swap) = {
+                let mut s = self.session.lock().unwrap();
+                // Group members linked to us also swap what's new in the
+                // groups we share (see `sanctum_core::group_sync`).
+                (s.pending_peers().unwrap_or_default(), s.sync_due(&linked).unwrap_or_default())
+            };
             for (peer, link) in self.links.lock().unwrap().iter() {
-                if pending.contains(peer) {
+                if pending.contains(peer) || swap.contains(peer) {
                     let _ = link.tx.send(Cmd::News);
                 }
             }
@@ -524,21 +534,22 @@ impl Node {
 
     async fn run(self: Arc<Self>, mut conn: BoxConn, role: Role) -> anyhow::Result<()> {
         let mut buf = Vec::new();
-        let peer = timeout(HANDSHAKE_TIMEOUT, async {
+        // Each side's first frame also says what its build can do; older
+        // builds don't say, and ignore what they're told.
+        let (peer, features) = timeout(HANDSHAKE_TIMEOUT, async {
             match role {
                 Role::Reached(_) => {
                     let (nonce, challenge) = self.session.lock().unwrap().challenge();
-                    write_frames(&mut conn, &[challenge]).await?;
-                    let hello = read_frame(&mut conn, &mut buf).await?;
-                    Ok::<_, anyhow::Error>(
-                        self.session.lock().unwrap().accept_hello(&nonce, &hello)?,
-                    )
+                    write_handshake(&mut conn, &challenge).await?;
+                    let (hello, features) = read_handshake(&mut conn, &mut buf).await?;
+                    let peer = self.session.lock().unwrap().accept_hello(&nonce, &hello)?;
+                    Ok::<_, anyhow::Error>((peer, features))
                 }
                 Role::Dialed(peer, _) => {
-                    let challenge = read_frame(&mut conn, &mut buf).await?;
+                    let (challenge, features) = read_handshake(&mut conn, &mut buf).await?;
                     let hello = self.session.lock().unwrap().hello(&peer, &challenge)?;
-                    write_frames(&mut conn, &[hello]).await?;
-                    Ok(peer)
+                    write_handshake(&mut conn, &hello).await?;
+                    Ok((peer, features))
                 }
             }
         })
@@ -581,7 +592,7 @@ impl Node {
         self.backoff.lock().unwrap().remove(&peer);
         let _ = self.events.send(NetEvent::PeerConnected(peer));
 
-        let result = self.serve(&mut conn, &mut buf, &peer, &mut news, &mut pictures, &backlog).await;
+        let result = self.serve(&mut conn, &mut buf, &peer, features, &mut news, &mut pictures, &backlog).await;
 
         let mut links = self.links.lock().unwrap();
         if links.get(&peer).is_some_and(|l| l.id == link) {
@@ -592,11 +603,13 @@ impl Node {
         result
     }
 
+    #[allow(clippy::too_many_arguments)] // one link's state
     async fn serve(
         self: &Arc<Self>,
         conn: &mut BoxConn,
         buf: &mut Vec<u8>,
         peer: &[u8; 32],
+        features: u32,
         news: &mut mpsc::UnboundedReceiver<Cmd>,
         pictures: &mut mpsc::UnboundedReceiver<VideoPiece>,
         backlog: &Backlog,
@@ -604,9 +617,10 @@ impl Node {
         let first = {
             let mut session = self.session.lock().unwrap();
             session.link_started(peer);
+            session.link_features(peer, features)?;
             session.on_link_up(peer)?
         };
-        write_frames(conn, &first).await?;
+        self.send_paced(conn, peer, first).await?;
         self.emit_session_events();
         // Frames may have arrived together with the handshake.
         self.handle_buffered(conn, buf, peer).await?;
@@ -623,7 +637,7 @@ impl Node {
                 cmd = news.recv() => match cmd {
                     Some(Cmd::News) => {
                         let out = self.session.lock().unwrap().on_link_up(peer)?;
-                        write_frames(conn, &out).await?;
+                        self.send_paced(conn, peer, out).await?;
                         self.emit_session_events();
                     }
                     Some(Cmd::Send(frame)) => write_frames(conn, &[frame]).await?,
@@ -671,10 +685,47 @@ impl Node {
                 continue;
             }
             let out = self.session.lock().unwrap().on_frame(peer, frame)?;
-            write_frames(conn, &out).await?;
+            self.send_paced(conn, peer, out).await?;
             self.emit_session_events();
         }
         Ok(())
+    }
+
+    /// Writes `frames` now, up to [`WRITE_AT_ONCE`] bytes; the rest queue on
+    /// the link and go one at a time between reads, so a big answer (a
+    /// file a member asked for, say) never keeps this side from reading
+    /// while the other side is writing too.
+    async fn send_paced(&self, conn: &mut BoxConn, peer: &[u8; 32], frames: Vec<Frame>) -> anyhow::Result<()> {
+        let mut size = 0;
+        let split = frames
+            .iter()
+            .position(|f| {
+                size += encoded_len(f);
+                size > WRITE_AT_ONCE
+            })
+            .map_or(frames.len(), |i| i.max(1));
+        let mut frames = frames;
+        let later = frames.split_off(split);
+        write_frames(conn, &frames).await?;
+        if !later.is_empty() {
+            let tx = self.links.lock().unwrap().get(peer).map(|l| l.tx.clone());
+            match tx {
+                Some(tx) => {
+                    for frame in later {
+                        let _ = tx.send(Cmd::Send(frame));
+                    }
+                }
+                None => write_frames(conn, &later).await?,
+            }
+        }
+        Ok(())
+    }
+}
+
+fn encoded_len(frame: &Frame) -> usize {
+    match frame {
+        Frame::BlobChunk { bytes, .. } | Frame::GroupMls { bytes, .. } => bytes.len() + 64,
+        _ => 64,
     }
 }
 
@@ -686,6 +737,26 @@ async fn write_frames(conn: &mut BoxConn, frames: &[Frame]) -> anyhow::Result<()
     conn.write_all(&bytes).await?;
     conn.flush().await?;
     Ok(())
+}
+
+async fn write_handshake(conn: &mut BoxConn, frame: &Frame) -> anyhow::Result<()> {
+    conn.write_all(&encode_frame_with_features(frame, FEATURES)).await?;
+    conn.flush().await?;
+    Ok(())
+}
+
+async fn read_handshake(conn: &mut BoxConn, buf: &mut Vec<u8>) -> anyhow::Result<(Frame, u32)> {
+    let mut chunk = [0u8; 4096];
+    loop {
+        if let Some(got) = take_frame_features(buf)? {
+            return Ok(got);
+        }
+        let n = conn.read(&mut chunk).await?;
+        if n == 0 {
+            anyhow::bail!("closed during handshake");
+        }
+        buf.extend_from_slice(&chunk[..n]);
+    }
 }
 
 async fn read_frame(conn: &mut BoxConn, buf: &mut Vec<u8>) -> anyhow::Result<Frame> {
@@ -937,6 +1008,139 @@ mod tests {
         // Delivered to everyone.
         let session = carol.session.clone();
         until(move || session.lock().unwrap().store.messages(cg, None).unwrap()[0].delivered).await;
+    }
+
+    /// The group chat on this phone, once it has `members` people.
+    fn group_chat(p: &Phone, members: usize) -> Option<i64> {
+        p.session
+            .lock()
+            .unwrap()
+            .store
+            .chats()
+            .unwrap()
+            .into_iter()
+            .find(|(_, m)| m.kind == ChatKind::Group && m.peers.len() + 1 == members)
+            .map(|(id, _)| id)
+    }
+
+    /// A group of everyone in `phones`, the first its admin (friends with
+    /// all). Returns each one's chat.
+    async fn net_group(phones: &[&Phone]) -> Vec<i64> {
+        let admin = phones[0];
+        let mut friends = Vec::new();
+        for p in &phones[1..] {
+            friends.push(befriend(admin, p).await.0);
+        }
+        admin.node.spawn_retry_loop(Duration::from_millis(50));
+        let (chat, invitees) = admin.session.lock().unwrap().create_group("Crew", &friends).unwrap();
+        for p in invitees {
+            admin.node.poke(p);
+        }
+        let n = phones.len();
+        let mut chats = vec![chat];
+        for p in &phones[1..] {
+            let s = p.session.clone();
+            until(move || {
+                let p = s.lock().unwrap();
+                p.store.chats().unwrap().iter().any(|(_, m)| m.kind == ChatKind::Group && m.peers.len() + 1 == n)
+            })
+            .await;
+            chats.push(group_chat(p, n).unwrap());
+        }
+        chats
+    }
+
+    fn offline(book: &Arc<Mutex<HashMap<[u8; 32], SocketAddr>>>, p: &Phone) -> SocketAddr {
+        let addr = book.lock().unwrap().remove(&p.pk).unwrap();
+        p.node.shutdown_links();
+        addr
+    }
+
+    fn has_text(p: &Phone, chat: i64, body: &'static str) -> impl Fn() -> bool {
+        let s = p.session.clone();
+        move || s.lock().unwrap().store.messages(chat, None).unwrap().iter().any(|m| m.body == body)
+    }
+
+    #[tokio::test]
+    async fn a_member_passes_a_message_on_while_its_sender_is_offline() {
+        let book = Arc::default();
+        let (alice, bob, carol) = (phone(&book).await, phone(&book).await, phone(&book).await);
+        let chats = net_group(&[&alice, &bob, &carol]).await;
+        // Carol goes offline; Bob writes, reaches Alice, then goes offline.
+        let carol_addr = offline(&book, &carol);
+        let reach = bob.session.lock().unwrap().send_to_chat(chats[1], "running late", None).unwrap();
+        for p in reach {
+            bob.node.poke(p);
+        }
+        until(has_text(&alice, chats[0], "running late")).await;
+        let bob_addr = offline(&book, &bob);
+        // Carol is back: Alice reaches her and passes Bob's message on.
+        book.lock().unwrap().insert(carol.pk, carol_addr);
+        alice.node.reconnect_now();
+        until(has_text(&carol, chats[2], "running late")).await;
+        let from = carol.session.lock().unwrap().store.messages(chats[2], None).unwrap().pop().unwrap().sender;
+        assert_eq!(from, Some(bob.pk));
+        assert!(!bob.session.lock().unwrap().store.messages(chats[1], None).unwrap()[0].delivered);
+        // Bob is back: Carol tells him she has it, and it's delivered.
+        book.lock().unwrap().insert(bob.pk, bob_addr);
+        bob.node.poke_pending();
+        let (s, bg) = (bob.session.clone(), chats[1]);
+        until(move || s.lock().unwrap().store.messages(bg, None).unwrap()[0].delivered).await;
+        let count = carol.session.lock().unwrap().store.messages(chats[2], None).unwrap().len();
+        assert_eq!(count, 1, "no duplicate");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_photo_is_fetched_from_another_member() {
+        let book = Arc::default();
+        let mut p = Vec::new();
+        for _ in 0..5 {
+            p.push(phone(&book).await);
+        }
+        let all: Vec<&Phone> = p.iter().collect();
+        let chats = net_group(&all).await;
+        // Eve is offline when Alice shares a photo with the others.
+        let eve_addr = offline(&book, &p[4]);
+        let bytes: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        let path = p[0]._dir.path().join("p.jpg");
+        std::fs::write(&path, &bytes).unwrap();
+        let out = sanctum_core::media::Outgoing {
+            path: &path,
+            kind: sanctum_core::protocol::MediaKind::Image,
+            mime: "image/jpeg",
+            name: "p.jpg",
+            caption: "",
+            thumb: Vec::new(),
+            width: 1,
+            height: 1,
+            duration_ms: 0,
+            album: None,
+        };
+        let reach = p[0].session.lock().unwrap().send_media(chats[0], out, None).unwrap();
+        for peer in reach {
+            p[0].node.poke(peer);
+        }
+        let got = |i: usize| {
+            let (s, chat) = (p[i].session.clone(), chats[i]);
+            move || {
+                let s = s.lock().unwrap();
+                let seq = s.store.messages_indexed(chat, None).unwrap().last().map(|m| m.0);
+                seq.is_some_and(|seq| matches!(s.media_bytes(chat, seq), Ok(Some(_))))
+            }
+        };
+        for i in 1..4 {
+            until(got(i)).await;
+        }
+        // Alice goes offline; Eve, Bob's friend, comes back and gets both
+        // the message and the photo from Bob.
+        offline(&book, &p[0]);
+        befriend(&p[1], &p[4]).await;
+        book.lock().unwrap().insert(p[4].pk, eve_addr);
+        p[1].node.spawn_retry_loop(Duration::from_millis(50));
+        until(got(4)).await;
+        let s = p[4].session.lock().unwrap();
+        let seq = s.store.messages_indexed(chats[4], None).unwrap().last().unwrap().0;
+        assert_eq!(s.media_bytes(chats[4], seq).unwrap().unwrap(), bytes);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -345,6 +345,28 @@ pub enum OutboxState {
     Blob { blob: BlobId, total: u32 },
 }
 
+/// A group message or file this phone keeps for a while to pass on to
+/// other members (see `group_sync`). Sealed like every row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Kept {
+    /// The message's hash ([`crate::protocol::SyncId`]) or the file's id.
+    pub id: [u8; 16],
+    /// When we got it (Unix seconds): kept for a week.
+    pub at: u64,
+    /// The MLS epoch it was sent in.
+    pub epoch: u64,
+    pub item: KeptItem,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum KeptItem {
+    /// The message's sealed bytes, exactly as sent.
+    Message(Vec<u8>),
+    /// A file we hold in full, checked against its id (the file itself is
+    /// in the media folder).
+    Blob { total: u32 },
+}
+
 pub struct Store {
     db: Connection,
     cipher: XChaCha20Poly1305,
@@ -392,7 +414,15 @@ impl Store {
              CREATE TABLE IF NOT EXISTS chat_seq (
                  chat_id INTEGER PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
                  next INTEGER NOT NULL
-             );",
+             );
+             -- Group messages kept to pass on to other members. Both
+             -- columns before `sealed` are keyed hashes.
+             CREATE TABLE IF NOT EXISTS kept (
+                 k BLOB PRIMARY KEY,
+                 grp BLOB NOT NULL,
+                 sealed BLOB NOT NULL
+             );
+             CREATE INDEX IF NOT EXISTS kept_grp ON kept(grp);",
         )?;
         let store = Self {
             db,
@@ -685,6 +715,104 @@ impl Store {
             .is_some())
     }
 
+    /// Keeps a group message or file (once: a second copy is ignored), then
+    /// drops the group's oldest while it has more than `max_count` or they
+    /// take more than `max_bytes`. Returns whether it was new, and the ids
+    /// dropped.
+    pub fn kept_put(
+        &self,
+        group: &[u8],
+        kept: &Kept,
+        max_count: usize,
+        max_bytes: usize,
+    ) -> Result<(bool, Vec<[u8; 16]>)> {
+        let k = self.kept_key(group, &kept.id);
+        let grp = self.kept_group(group);
+        let added = self.db.execute(
+            "INSERT OR IGNORE INTO kept (k, grp, sealed) VALUES (?1, ?2, ?3)",
+            params![k, grp, self.seal(&kept_aad(&k), kept)?],
+        )? == 1;
+        let mut dropped = Vec::new();
+        loop {
+            let (count, bytes): (i64, i64) = self.db.query_row(
+                "SELECT COUNT(*), COALESCE(SUM(LENGTH(sealed)), 0) FROM kept WHERE grp = ?1",
+                [&grp],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            if count <= 1 || (count as usize <= max_count && bytes as usize <= max_bytes) {
+                break;
+            }
+            let (old_k, sealed): (Vec<u8>, Vec<u8>) = self.db.query_row(
+                "SELECT k, sealed FROM kept WHERE grp = ?1 ORDER BY rowid LIMIT 1",
+                [&grp],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            if let Ok(old) = self.open_sealed::<Kept>(&kept_aad(&old_k), &sealed) {
+                dropped.push(old.id);
+            }
+            self.db.execute("DELETE FROM kept WHERE k = ?1", [&old_k])?;
+        }
+        Ok((added, dropped))
+    }
+
+    pub fn kept_get(&self, group: &[u8], id: &[u8; 16]) -> Result<Option<Kept>> {
+        let k = self.kept_key(group, id);
+        let sealed: Option<Vec<u8>> = self
+            .db
+            .query_row("SELECT sealed FROM kept WHERE k = ?1", [&k], |r| r.get(0))
+            .optional()?;
+        sealed.map(|s| self.open_sealed(&kept_aad(&k), &s)).transpose()
+    }
+
+    /// Everything kept for a group, oldest first.
+    pub fn kept_list(&self, group: &[u8]) -> Result<Vec<Kept>> {
+        let mut stmt = self.db.prepare("SELECT k, sealed FROM kept WHERE grp = ?1 ORDER BY rowid")?;
+        let rows = stmt.query_map([self.kept_group(group)], |r| {
+            Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?))
+        })?;
+        rows.map(|row| {
+            let (k, sealed) = row?;
+            self.open_sealed(&kept_aad(&k), &sealed)
+        })
+        .collect()
+    }
+
+    /// Drops what was kept before `before` (Unix seconds), in every group.
+    /// Returns how many went.
+    pub fn kept_prune(&self, before: u64) -> Result<usize> {
+        // Rows go in as they arrive, so the old ones come first.
+        let mut old = Vec::new();
+        {
+            let mut stmt = self.db.prepare("SELECT k, sealed FROM kept ORDER BY rowid")?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
+            for row in rows {
+                let (k, sealed) = row?;
+                match self.open_sealed::<Kept>(&kept_aad(&k), &sealed) {
+                    Ok(kept) if kept.at >= before => break,
+                    _ => old.push(k),
+                }
+            }
+        }
+        for k in &old {
+            self.db.execute("DELETE FROM kept WHERE k = ?1", [k])?;
+        }
+        Ok(old.len())
+    }
+
+    /// Drops everything kept for a group (we left it, or were removed).
+    pub fn kept_forget(&self, group: &[u8]) -> Result<()> {
+        self.db.execute("DELETE FROM kept WHERE grp = ?1", [self.kept_group(group)])?;
+        Ok(())
+    }
+
+    fn kept_key(&self, group: &[u8], id: &[u8; 16]) -> Vec<u8> {
+        self.mls_index(&[b"kept:".as_slice(), id, group].concat())
+    }
+
+    fn kept_group(&self, group: &[u8]) -> Vec<u8> {
+        self.mls_index(&[b"kept-group:".as_slice(), group].concat())
+    }
+
     fn peer_index(&self, peer: &[u8; 32]) -> Vec<u8> {
         self.mls_index(&[b"peer:".as_slice(), peer].concat())
     }
@@ -910,6 +1038,10 @@ fn kv_aad(hashed_key: &[u8]) -> Vec<u8> {
 
 fn mls_aad(hashed_key: &[u8]) -> Vec<u8> {
     [b"mls:".as_slice(), hashed_key].concat()
+}
+
+fn kept_aad(hashed_key: &[u8]) -> Vec<u8> {
+    [b"kept:".as_slice(), hashed_key].concat()
 }
 
 fn outbox_aad(id: &[u8; 16]) -> Vec<u8> {

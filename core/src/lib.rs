@@ -6,6 +6,7 @@ pub mod call;
 pub mod direct;
 mod group;
 pub use group::MAX_GROUP;
+pub mod group_sync;
 pub mod identity;
 pub mod invite;
 pub mod media;

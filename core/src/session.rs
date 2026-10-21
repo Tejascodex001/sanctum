@@ -7,6 +7,7 @@
 //! between two sessions.
 
 use crate::call::{now_ms, CallView, Calls, MediaHub};
+use crate::group_sync::{GroupSync, Offers};
 use crate::identity::{pair_fingerprint, safety_number, verify, Identity};
 use crate::invite::{FriendCode, InviteError};
 use crate::mls::{MlsClient, MlsError, Received};
@@ -151,6 +152,8 @@ pub struct Session {
     pub(crate) calls: Calls,
     /// Its sealed sound, shared with the network and the phone's audio.
     pub(crate) media: MediaHub,
+    /// Members passing group messages and files on (see `group_sync`).
+    pub(crate) sync: GroupSync,
 }
 
 impl Session {
@@ -182,6 +185,7 @@ impl Session {
             typing_heard: Default::default(),
             calls: Calls::default(),
             media: MediaHub::default(),
+            sync: GroupSync::default(),
         })
     }
 
@@ -521,6 +525,7 @@ impl Session {
         }
         let _ = self.purge_moments();
         let _ = self.call_tick(now_ms(), std::time::Instant::now());
+        let _ = self.prune_kept(now(), false);
     }
 
     fn queue_temp(&mut self, peer: [u8; 32], content: Content) {
@@ -683,7 +688,10 @@ impl Session {
             Frame::GroupKeyPackageRequest { .. }
             | Frame::GroupKeyPackage { .. }
             | Frame::GroupWelcome { .. }
-            | Frame::GroupMls { .. } => return self.on_group_frame(peer, frame),
+            | Frame::GroupMls { .. }
+            | Frame::GroupHave { .. }
+            | Frame::GroupWant { .. }
+            | Frame::BlobWant { .. } => return self.on_group_frame(peer, frame),
             Frame::BlobChunk {
                 id,
                 blob,
@@ -1040,6 +1048,9 @@ impl Session {
                     self.store.outbox_remove(&id)?;
                 }
             }
+            if meta.kind == ChatKind::Group && !meta.group_id.is_empty() {
+                self.sync_forget(&meta.group_id)?;
+            }
         }
         self.store.delete_chat(chat_id)?;
         Ok(())
@@ -1071,8 +1082,17 @@ impl Session {
         Ok(())
     }
 
-    /// Everything waiting for `peer`, encrypted for the pair's group.
+    /// Everything waiting for `peer`, encrypted for the pair's group, then
+    /// (for a member whose phone swaps lists) what we have of the groups we
+    /// share and what we owe them there (see `group_sync`).
     pub(crate) fn flush(&mut self, peer: &[u8; 32]) -> Result<Vec<Frame>> {
+        let mut offers = Offers::default();
+        let mut frames = self.flush_outbox(peer, &mut offers)?;
+        frames.extend(self.sync_frames(peer, offers)?);
+        Ok(frames)
+    }
+
+    fn flush_outbox(&mut self, peer: &[u8; 32], offers: &mut Offers) -> Result<Vec<Frame>> {
         // The pair's group, if set up: needed for direct messages.
         let pair_group = self
             .direct_chat(peer)?
@@ -1081,13 +1101,16 @@ impl Session {
         let mut frames = Vec::new();
         for (id, mut item) in self.store.outbox_for(peer)? {
             match &item.state {
-                // Group messages and welcomes go out as they are.
+                // Group messages and welcomes go out as they are (or are
+                // offered first, if the member may have them already).
                 OutboxState::Group { group, cipher } => {
-                    frames.push(Frame::GroupMls {
-                        group: group.clone(),
-                        id,
-                        bytes: cipher.clone(),
-                    });
+                    if self.sync_send_message(peer, &id, group, cipher, offers)? {
+                        frames.push(Frame::GroupMls {
+                            group: group.clone(),
+                            id,
+                            bytes: cipher.clone(),
+                        });
+                    }
                     continue;
                 }
                 OutboxState::Frame(bytes) => {
@@ -1096,7 +1119,9 @@ impl Session {
                 }
                 OutboxState::Blob { blob, .. } => {
                     let blob = *blob;
-                    frames.extend(self.blob_frames(peer, id, &blob)?);
+                    if self.sync_send_blob(peer, &id, &blob, item.message, offers)? {
+                        frames.extend(self.blob_frames(peer, id, &blob)?);
+                    }
                     continue;
                 }
                 _ => {}
@@ -1165,7 +1190,10 @@ pub(crate) mod tests {
         pub(crate) s: Session,
         secret: [u8; 32],
         key: [u8; 32],
-        dir: TempDir,
+        pub(crate) dir: TempDir,
+        /// What its build can do: 0 plays an older build, which never
+        /// swaps lists of group messages.
+        pub(crate) features: u32,
     }
 
     impl Phone {
@@ -1179,6 +1207,7 @@ pub(crate) mod tests {
                 secret,
                 key,
                 dir,
+                features: crate::protocol::FEATURES,
             }
         }
 
@@ -1191,7 +1220,7 @@ pub(crate) mod tests {
             self.s = Session::open(self.secret, self.dir.path().join("s.db"), &self.key).unwrap();
         }
 
-        fn texts(&self, chat: i64) -> Vec<(bool, String, bool)> {
+        pub(crate) fn texts(&self, chat: i64) -> Vec<(bool, String, bool)> {
             self.s
                 .store
                 .messages(chat, None)
@@ -1212,30 +1241,59 @@ pub(crate) mod tests {
     /// `dialer` connects to `reached`: handshake, then frames flow both ways
     /// until both sides are quiet. Returns how many frames were exchanged.
     pub(crate) fn connect(dialer: &mut Phone, reached: &mut Phone) -> usize {
+        link(dialer, reached).frames
+    }
+
+    /// What went over one connection.
+    #[derive(Default)]
+    pub(crate) struct Traffic {
+        pub(crate) frames: usize,
+        /// Bytes each side sent, as framed on the wire.
+        pub(crate) dialer_sent: usize,
+        pub(crate) reached_sent: usize,
+        /// Every frame each side sent.
+        pub(crate) from_dialer: Vec<Frame>,
+        pub(crate) from_reached: Vec<Frame>,
+    }
+
+    /// Like [`connect`], counting what each side sent.
+    pub(crate) fn link(dialer: &mut Phone, reached: &mut Phone) -> Traffic {
+        use crate::protocol::encode_frame;
         let (nonce, challenge) = reached.s.challenge();
         let hello = dialer.s.hello(&reached.pk(), &challenge).unwrap();
         let who = reached.s.accept_hello(&nonce, &hello).unwrap();
         assert_eq!(who, dialer.pk());
         let (dpk, rpk) = (dialer.pk(), reached.pk());
+        // Each side learns what the other's build can do (an older build
+        // tells nothing, and ignores what it's told).
+        let features = dialer.features & reached.features;
+        dialer.s.link_started(&rpk);
+        dialer.s.link_features(&rpk, features).unwrap();
+        reached.s.link_started(&dpk);
+        reached.s.link_features(&dpk, features).unwrap();
         let mut to_reached = dialer.s.on_link_up(&rpk).unwrap();
         let mut to_dialer = reached.s.on_link_up(&dpk).unwrap();
-        let mut count = 0;
+        let mut t = Traffic::default();
         while !to_reached.is_empty() || !to_dialer.is_empty() {
             let mut next_to_dialer = Vec::new();
             for f in to_reached.drain(..) {
-                count += 1;
+                t.frames += 1;
+                t.dialer_sent += encode_frame(&f).len();
+                t.from_dialer.push(f.clone());
                 next_to_dialer.extend(reached.s.on_frame(&dpk, f).unwrap());
             }
             let mut next_to_reached = Vec::new();
             for f in to_dialer.drain(..) {
-                count += 1;
+                t.frames += 1;
+                t.reached_sent += encode_frame(&f).len();
+                t.from_reached.push(f.clone());
                 next_to_reached.extend(dialer.s.on_frame(&rpk, f).unwrap());
             }
             to_dialer.extend(next_to_dialer);
             to_reached.extend(next_to_reached);
-            assert!(count < 1000, "frames never settle");
+            assert!(t.frames < 20_000, "frames never settle");
         }
-        count
+        t
     }
 
     #[test]
@@ -1460,7 +1518,7 @@ pub(crate) mod tests {
     }
 
     /// The group chat on `phone` with this title.
-    fn group_of(phone: &Phone, title: &str) -> Option<i64> {
+    pub(crate) fn group_of(phone: &Phone, title: &str) -> Option<i64> {
         phone
             .s
             .store
@@ -1792,8 +1850,11 @@ pub(crate) mod tests {
         connect(&mut bob, &mut alice);
         let seq = alice.s.store.messages_indexed(group, None).unwrap().last().unwrap().0;
         assert_eq!(alice.s.react(group, seq, "🚆").unwrap().len(), 2);
-        // Carol hears Alice's reaction before Bob's message reaches her.
+        // Carol hears Alice's reaction before Bob's message reaches her (on
+        // an older build, Alice doesn't pass Bob's message on).
+        alice.features = 0;
         connect(&mut alice, &mut carol);
+        alice.features = crate::protocol::FEATURES;
         assert!(carol.texts(cg).is_empty());
         connect(&mut bob, &mut carol);
         let cseq = carol.s.store.messages_indexed(cg, None).unwrap().last().unwrap().0;
@@ -1899,14 +1960,14 @@ pub(crate) mod tests {
         assert_eq!(alice.s.nearby_friend(&bob.s.my_nearby_id(minute), minute).unwrap(), None);
     }
 
-    fn photo(phone: &Phone, len: usize) -> (std::path::PathBuf, Vec<u8>) {
+    pub(crate) fn photo(phone: &Phone, len: usize) -> (std::path::PathBuf, Vec<u8>) {
         let bytes: Vec<u8> = (0..len).map(|i| (i * 7 % 251) as u8).collect();
         let path = phone.dir.path().join("photo.jpg");
         std::fs::write(&path, &bytes).unwrap();
         (path, bytes)
     }
 
-    fn outgoing(path: &std::path::Path) -> crate::media::Outgoing<'_> {
+    pub(crate) fn outgoing(path: &std::path::Path) -> crate::media::Outgoing<'_> {
         crate::media::Outgoing {
             path,
             kind: crate::protocol::MediaKind::Image,
