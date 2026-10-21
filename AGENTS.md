@@ -21,7 +21,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
   - A blank line, then `- ` bullets with details. Bullets can continue on lines indented by two spaces.
   - Use plain words: no jargon (MLS, Argon2, crate or file names, protocol details).
   - Start the subject with `Internal:`, `Docs:` or `CI:` for developer-only changes; they're left out of the changelog.
-- Every push to `main` builds and publishes release `build-<run number>`. A red build means no release; fix it before moving on.
+- Every push to `main` builds and publishes release `build-N`, where N is the last published build plus one (a cancelled or failed build leaves no gap). A red build means no release; fix it before moving on.
 
 ## Layout
 

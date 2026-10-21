@@ -122,6 +122,6 @@ cargo build -p rust_lib_sanctum     # the host library the Flutter tests load
 cd app && flutter analyze && flutter test
 ```
 
-Every push to `main` runs the tests, builds a signed arm64 APK and publishes it as release `build-<run number>`, with a changelog made from the commit messages. The signing key lives only in the repository secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`).
+Every push to `main` runs the tests, builds a signed arm64 APK and publishes it as release `build-N` (the last published build plus one), with a changelog made from the commit messages. The signing key lives only in the repository secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`).
 
 Contributing with an AI agent? Read [AGENTS.md](AGENTS.md).
