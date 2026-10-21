@@ -47,6 +47,9 @@ abstract final class Background {
     return await _call<bool>(_app, 'requestNotifications') ?? false;
   }
 
+  /// Android's notification settings for Sanctum.
+  static Future<void> openNotificationSettings() => _call(_app, 'openNotificationSettings');
+
   static Future<bool> batteryUnrestricted() async => await _call<bool>(_bg, 'batteryUnrestricted') ?? true;
   static Future<void> requestUnrestricted() => _call(_app, 'requestUnrestricted');
 

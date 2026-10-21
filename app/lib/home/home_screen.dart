@@ -59,6 +59,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _search = TextEditingController();
   final _sigils = <String, SigilSpec>{};
   double _page = 0;
+
+  /// The search field is open (from the search button).
+  bool _searching = false;
   Timer? _purge;
   StreamSubscription<AppEvent>? _events;
   StreamSubscription<String>? _opens;
@@ -575,7 +578,61 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _goTo(int page) {
     HapticFeedback.selectionClick();
-    _pages.animateToPage(page, duration: const Duration(milliseconds: 380), curve: Curves.easeOutCubic);
+    // Far tabs jump, instead of sliding past everything between.
+    if ((page - _page).abs() > 1.5) {
+      _pages.jumpToPage(page);
+    } else {
+      _pages.animateToPage(page, duration: const Duration(milliseconds: 380), curve: Curves.easeOutCubic);
+    }
+  }
+
+  void _closeSearch() {
+    _search.clear();
+    FocusScope.of(context).unfocus();
+    setState(() => _searching = false);
+  }
+
+  /// Chats tab: add a friend, start a group or a temp chat.
+  Future<void> _newChat() async {
+    HapticFeedback.selectionClick();
+    final pick = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.person_add_alt_1_rounded),
+              title: const Text('Add a friend'),
+              subtitle: const Text('Share codes in person or send yours'),
+              onTap: () => Navigator.pop(sheet, 'friend'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.group_add_rounded),
+              title: const Text('New group'),
+              subtitle: const Text('Chat with several friends at once'),
+              onTap: () => Navigator.pop(sheet, 'group'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.timer_outlined),
+              title: const Text('New temp chat'),
+              subtitle: const Text('Messages burn after 24 hours'),
+              onTap: () => Navigator.pop(sheet, 'temp'),
+            ),
+          ],
+        ),
+      ),
+    );
+    switch (pick) {
+      case 'friend':
+        await _addFriend();
+      case 'group':
+        await _newGroup();
+      case 'temp':
+        _goTo(1);
+        await _newTemp();
+    }
   }
 
   Future<void> _addFriend() async {
@@ -654,163 +711,175 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Space.xl, Space.md, Space.md, Space.sm),
-              child: Row(
-                children: [
-                  // Long-press: reveal hidden chats (after a biometric check).
-                  GestureDetector(
-                    onLongPress: _toggleHidden,
-                    child: const Text('Sanctum', style: AppText.display),
-                  ),
-                  const SizedBox(width: Space.md),
-                  const _NetPill(),
-                  const Spacer(),
-                  AnimatedSwitcher(
-                    duration: Motion.fast,
-                    child: _onTemp && _temp.isNotEmpty
-                        ? IconButton(
-                            key: const ValueKey('wipe-all'),
-                            tooltip: 'Wipe all',
-                            onPressed: _wipeAll,
-                            icon: const Icon(Icons.local_fire_department_rounded, color: Palette.danger),
-                          )
-                        : const SizedBox(key: ValueKey('none')),
-                  ),
-                  IconButton(
-                    tooltip: 'Add a friend',
-                    onPressed: _addFriend,
-                    icon: const Icon(Icons.person_add_alt_1_rounded),
-                  ),
-                  const SizedBox(width: Space.xs),
-                  GestureDetector(
-                    onTap: _showMe,
-                    child: Container(
-                      width: 38,
-                      height: 38,
-                      padding: const EdgeInsets.all(1.5),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: widget.mySigil.accent.color.withValues(alpha: 0.6)),
-                      ),
-                      child: ClipOval(child: SigilView(spec: widget.mySigil)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(Space.lg, Space.xs, Space.lg, Space.sm),
-              child: _Tabs(
-                page: _page,
-                onTap: _goTo,
-                tabs: [
-                  ('Chats', 0),
-                  (_temp.isEmpty ? 'Temp' : 'Temp · ${_temp.length}', 0),
-                  ('Friends', _requests.length),
-                  ('Explore', 0),
-                ],
-              ),
-            ),
-            AnimatedSize(
-              duration: Motion.medium,
-              curve: Motion.decelerate,
-              child: _onExplore
-                  ? const SizedBox(width: double.infinity)
-                  : Padding(
-                      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
-                      child: _SearchField(controller: _search),
-                    ),
-            ),
-            AnimatedSize(
-              duration: Motion.medium,
-              curve: Motion.decelerate,
-              child: _page.round() == 0 && _search.text.isEmpty
-                  ? MomentsStrip(mySigil: widget.mySigil, sigil: _sigil)
-                  : const SizedBox(width: double.infinity),
-            ),
-            if (_page.round() == 0 && _search.text.isEmpty) CatchUpCard(hidden: _showHidden, onOpen: _openAt),
-            const _UpdateBanner(),
-            const _ReliabilityBanner(),
-            AnimatedSize(
-              duration: Motion.medium,
-              curve: Motion.decelerate,
-              child: _requests.isEmpty || _onFriends || _onExplore
-                  ? const SizedBox(width: double.infinity)
-                  : Padding(
-                      padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
-                      child: _RequestsBanner(requests: _requests, sigil: _sigil, onTap: () => _goTo(2)),
-                    ),
-            ),
-            Expanded(
-              child: PageView(
-                controller: _pages,
-                onPageChanged: (_) => HapticFeedback.selectionClick(),
-                children: [
-                  if (_search.text.trim().isNotEmpty)
-                    SearchResults(
-                      query: _search.text.trim(),
-                      chats: [
-                        for (final c in _visibleChats)
-                          if (c.title.toLowerCase().contains(_search.text.trim().toLowerCase())) c,
+      backgroundColor: _onExplore ? Colors.black : null,
+      body: Column(
+        children: [
+          // Reels fill the screen; everything else sits under the header.
+          AnimatedSize(
+            duration: Motion.medium,
+            curve: Motion.decelerate,
+            alignment: Alignment.topCenter,
+            child: _onExplore
+                ? const SizedBox(width: double.infinity)
+                : SafeArea(
+                    bottom: false,
+                    child: Column(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(Space.xl, Space.md, Space.md, Space.sm),
+                          child: Row(
+                            children: [
+                              // Long-press: reveal hidden chats (after a biometric check).
+                              GestureDetector(
+                                onLongPress: _toggleHidden,
+                                child: const Text('Sanctum', style: AppText.display),
+                              ),
+                              const SizedBox(width: Space.md),
+                              const _NetPill(),
+                              const Spacer(),
+                              AnimatedSwitcher(
+                                duration: Motion.fast,
+                                child: _onTemp && _temp.isNotEmpty
+                                    ? IconButton(
+                                        key: const ValueKey('wipe-all'),
+                                        tooltip: 'Wipe all',
+                                        onPressed: _wipeAll,
+                                        icon: const Icon(Icons.local_fire_department_rounded, color: Palette.danger),
+                                      )
+                                    : const SizedBox(key: ValueKey('none')),
+                              ),
+                              IconButton(
+                                tooltip: 'Search',
+                                onPressed: () => _searching ? _closeSearch() : setState(() => _searching = true),
+                                icon: Icon(_searching ? Icons.search_off_rounded : Icons.search_rounded),
+                              ),
+                              const SizedBox(width: Space.xs),
+                              GestureDetector(
+                                onTap: _showMe,
+                                child: Container(
+                                  width: 38,
+                                  height: 38,
+                                  padding: const EdgeInsets.all(1.5),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: widget.mySigil.accent.color.withValues(alpha: 0.6)),
+                                  ),
+                                  child: ClipOval(child: SigilView(spec: widget.mySigil)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        AnimatedSize(
+                          duration: Motion.medium,
+                          curve: Motion.decelerate,
+                          child: _onExplore || !(_searching || _search.text.isNotEmpty)
+                              ? const SizedBox(width: double.infinity)
+                              : Padding(
+                                  padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+                                  child: _SearchField(controller: _search, onClose: _closeSearch),
+                                ),
+                        ),
+                        AnimatedSize(
+                          duration: Motion.medium,
+                          curve: Motion.decelerate,
+                          child: _page.round() == 0 && _search.text.isEmpty
+                              ? MomentsStrip(mySigil: widget.mySigil, sigil: _sigil)
+                              : const SizedBox(width: double.infinity),
+                        ),
+                        if (_page.round() == 0 && _search.text.isEmpty)
+                          CatchUpCard(hidden: _showHidden, onOpen: _openAt),
+                        const _UpdateBanner(),
+                        const _ReliabilityBanner(),
+                        AnimatedSize(
+                          duration: Motion.medium,
+                          curve: Motion.decelerate,
+                          child: _requests.isEmpty || _onFriends || _onExplore
+                              ? const SizedBox(width: double.infinity)
+                              : Padding(
+                                  padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+                                  child: _RequestsBanner(requests: _requests, sigil: _sigil, onTap: () => _goTo(2)),
+                                ),
+                        ),
                       ],
-                      hidden: _showHidden,
-                      onOpenChat: _open,
-                      onOpenMessage: _openAt,
-                    )
-                  else
-                    ChatStack(
-                      cards: _visibleChats,
-                      query: _search.text,
-                      openBuilder: _openChat,
-                      onClosed: _closed,
-                      onLongPress: _actions,
-                      onRefresh: _refresh,
-                      empty: const _Empty(text: 'No chats yet'),
                     ),
+                  ),
+          ),
+          Expanded(
+            child: PageView(
+              controller: _pages,
+              onPageChanged: (_) => HapticFeedback.selectionClick(),
+              children: [
+                if (_search.text.trim().isNotEmpty)
+                  SearchResults(
+                    query: _search.text.trim(),
+                    chats: [
+                      for (final c in _visibleChats)
+                        if (c.title.toLowerCase().contains(_search.text.trim().toLowerCase())) c,
+                    ],
+                    hidden: _showHidden,
+                    onOpenChat: _open,
+                    onOpenMessage: _openAt,
+                  )
+                else
                   ChatStack(
-                    cards: _temp,
+                    cards: _visibleChats,
                     query: _search.text,
                     openBuilder: _openChat,
                     onClosed: _closed,
                     onLongPress: _actions,
-                    onDismiss: _wipe,
                     onRefresh: _refresh,
-                    empty: const _Empty(
-                      text: 'No temp chats',
-                      detail: 'Start one with a friend. Temp chats live only in memory on both '
-                          'phones, every message burns 24 hours after it is sent, and either of '
-                          'you can wipe it for both at any time.',
-                    ),
+                    empty: const _Empty(text: 'No chats yet'),
                   ),
-                  _FriendsPage(
-                    requests: _requests,
-                    friends: [
-                      for (final c in _visibleChats)
-                        if (c.friend && !c.group && !_waiting.contains(c.id)) c,
-                    ],
-                    waiting: [
-                      for (final c in _visibleChats)
-                        if (_waiting.contains(c.id)) c,
-                    ],
-                    query: _search.text,
-                    sigil: _sigil,
-                    onAccept: _accept,
-                    onDecline: _decline,
-                    onOpen: _open,
-                    onActions: _actions,
-                    onRefresh: _refresh,
-                    onAdd: _addFriend,
+                ChatStack(
+                  cards: _temp,
+                  query: _search.text,
+                  openBuilder: _openChat,
+                  onClosed: _closed,
+                  onLongPress: _actions,
+                  onDismiss: _wipe,
+                  onRefresh: _refresh,
+                  empty: const _Empty(
+                    text: 'No temp chats',
+                    detail: 'Start one with a friend. Temp chats live only in memory on both '
+                        'phones, every message burns 24 hours after it is sent, and either of '
+                        'you can wipe it for both at any time.',
                   ),
-                  ExplorePage(active: _page.round() == 3),
-                ],
-              ),
+                ),
+                _FriendsPage(
+                  requests: _requests,
+                  friends: [
+                    for (final c in _visibleChats)
+                      if (c.friend && !c.group && !_waiting.contains(c.id)) c,
+                  ],
+                  waiting: [
+                    for (final c in _visibleChats)
+                      if (_waiting.contains(c.id)) c,
+                  ],
+                  query: _search.text,
+                  sigil: _sigil,
+                  onAccept: _accept,
+                  onDecline: _decline,
+                  onOpen: _open,
+                  onActions: _actions,
+                  onRefresh: _refresh,
+                  onAdd: _addFriend,
+                ),
+                ExplorePage(active: _page.round() == 3),
+              ],
             ),
-          ],
+          ),
+        ],
+      ),
+      bottomNavigationBar: ValueListenableBuilder<Map<String, int>>(
+        valueListenable: Notifier.instance.unread,
+        builder: (context, unread, _) => _NavBar(
+          page: _page.round().clamp(0, 3),
+          onTap: _goTo,
+          dark: _onExplore,
+          chats: _visibleChats.where((c) => unread.containsKey(Notifier.chatKey(c.id))).length,
+          temp: _temp.where((c) => unread.containsKey(Notifier.tempKey(c.id))).length,
+          requests: _requests.length,
         ),
       ),
       floatingActionButton: _onExplore
@@ -820,12 +889,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ? _newTemp
                   : _onFriends
                       ? _addFriend
-                      : _newGroup,
+                      : _newChat,
               icon: Icon(_onFriends
                   ? Icons.person_add_alt_1_rounded
                   : _onTemp
                       ? Icons.add_rounded
-                      : Icons.group_add_rounded),
+                      : Icons.edit_rounded),
               label: AnimatedSwitcher(
                 duration: Motion.fast,
                 child: Text(
@@ -833,7 +902,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ? 'Add a friend'
                       : _onTemp
                           ? 'New temp chat'
-                          : 'New group',
+                          : 'New chat',
                   key: ValueKey(_page.round()),
                 ),
               ),
@@ -842,97 +911,72 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 }
 
-/// Segments with a pill that slides between them, tracking the swipe.
-class _Tabs extends StatelessWidget {
-  const _Tabs({required this.page, required this.onTap, required this.tabs});
+/// The tabs, at the bottom where thumbs reach, with unread counts.
+class _NavBar extends StatelessWidget {
+  const _NavBar({
+    required this.page,
+    required this.onTap,
+    required this.dark,
+    required this.chats,
+    required this.temp,
+    required this.requests,
+  });
 
-  final double page;
+  final int page;
   final ValueChanged<int> onTap;
 
-  /// Label, and a count to badge it with (0: none).
-  final List<(String, int)> tabs;
+  /// Over Reels: black, to match the video.
+  final bool dark;
+
+  /// Chats and temp chats with unread messages, and friend requests.
+  final int chats;
+  final int temp;
+  final int requests;
 
   @override
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
-    return Container(
-      height: 44,
-      padding: const EdgeInsets.all(4),
+    Widget icon(IconData data, int count, {Color? badge}) => Badge(
+          isLabelVisible: count > 0,
+          backgroundColor: badge ?? accent,
+          textColor: Palette.onColor(badge ?? accent),
+          label: Text('$count'),
+          child: Icon(data),
+        );
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: Palette.surface,
-        borderRadius: BorderRadius.circular(Radii.md),
-        border: Border.all(color: Palette.outline),
+        border: Border(top: BorderSide(color: dark ? Colors.transparent : Palette.outline)),
       ),
-      child: LayoutBuilder(
-        builder: (context, box) {
-          final width = box.maxWidth / tabs.length;
-          return Stack(
-            children: [
-              Positioned(
-                left: page.clamp(0.0, tabs.length - 1.0) * width,
-                width: width,
-                top: 0,
-                bottom: 0,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Palette.surfaceHigh,
-                    borderRadius: BorderRadius.circular(Radii.sm),
-                    border: Border.all(color: accent.withValues(alpha: 0.45)),
-                  ),
-                ),
-              ),
-              Positioned.fill(
-                child: Row(
-                  children: [
-                    for (final (i, (label, badge)) in tabs.indexed)
-                      Expanded(
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => onTap(i),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.fade,
-                                  softWrap: false,
-                                  style: AppText.bodyStrong.copyWith(
-                                    fontSize: 14,
-                                    color: Color.lerp(
-                                      Palette.text,
-                                      Palette.textFaint,
-                                      (page - i).abs().clamp(0.0, 1.0),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // Only takes space when shown, so labels stay centred.
-                              if (badge > 0)
-                                Container(
-                                  margin: const EdgeInsets.only(left: 6),
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: _amber,
-                                    borderRadius: BorderRadius.circular(Radii.sm),
-                                  ),
-                                  child: Text(
-                                    '$badge',
-                                    style: AppText.micro.copyWith(color: Palette.bg, fontWeight: FontWeight.w700),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          );
-        },
+      child: NavigationBar(
+        selectedIndex: page,
+        onDestinationSelected: onTap,
+        height: 64,
+        backgroundColor: dark ? Colors.black : Palette.bg,
+        indicatorColor: accent.withValues(alpha: 0.18),
+        surfaceTintColor: Colors.transparent,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        destinations: [
+          NavigationDestination(
+            icon: icon(Icons.chat_bubble_outline_rounded, chats),
+            selectedIcon: icon(Icons.chat_bubble_rounded, chats),
+            label: 'Chats',
+          ),
+          NavigationDestination(
+            icon: icon(Icons.timer_outlined, temp),
+            selectedIcon: icon(Icons.timer_rounded, temp),
+            label: 'Temp',
+          ),
+          NavigationDestination(
+            icon: icon(Icons.people_outline_rounded, requests, badge: _amber),
+            selectedIcon: icon(Icons.people_rounded, requests, badge: _amber),
+            label: 'Friends',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.slow_motion_video_rounded),
+            selectedIcon: Icon(Icons.smart_display_rounded),
+            label: 'Reels',
+          ),
+        ],
       ),
     );
   }
@@ -941,9 +985,10 @@ class _Tabs extends StatelessWidget {
 const _amber = Color(0xFFFFC145);
 
 class _SearchField extends StatelessWidget {
-  const _SearchField({required this.controller});
+  const _SearchField({required this.controller, required this.onClose});
 
   final TextEditingController controller;
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -951,17 +996,16 @@ class _SearchField extends StatelessWidget {
       height: 42,
       child: TextField(
         controller: controller,
+        autofocus: true,
         textInputAction: TextInputAction.search,
         decoration: InputDecoration(
-          hintText: 'Search',
+          hintText: 'Search chats and messages',
           prefixIcon: const Icon(Icons.search_rounded, size: 20),
-          suffixIcon: controller.text.isEmpty
-              ? null
-              : IconButton(
-                  tooltip: 'Clear',
-                  icon: const Icon(Icons.close_rounded, size: 18),
-                  onPressed: controller.clear,
-                ),
+          suffixIcon: IconButton(
+            tooltip: 'Close search',
+            icon: const Icon(Icons.close_rounded, size: 18),
+            onPressed: onClose,
+          ),
           fillColor: Palette.surface,
           contentPadding: EdgeInsets.zero,
         ),
@@ -1582,12 +1626,13 @@ class _BackgroundSettingsState extends State<_BackgroundSettings> with WidgetsBi
               await _load();
             },
           ),
-          if (on && !_canNotify)
+          if (!_canNotify)
             const ListTile(
               dense: true,
-              leading: Icon(Icons.notifications_off_outlined),
+              leading: Icon(Icons.notifications_off_outlined, color: _amber),
               title: Text('Notifications are off'),
-              subtitle: Text('Turn them on for Sanctum in Android settings to hear about new messages.'),
+              subtitle: Text('Tap to turn them on, so you hear about new messages.'),
+              onTap: Background.openNotificationSettings,
             ),
           if (on && !_unrestricted)
             ListTile(

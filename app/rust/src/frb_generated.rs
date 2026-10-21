@@ -3130,7 +3130,7 @@ impl SseDecode for crate::api::fedi::FediKind {
         let mut inner = <i32>::sse_decode(deserializer);
         return match inner {
             0 => crate::api::fedi::FediKind::Videos,
-            1 => crate::api::fedi::FediKind::Photos,
+            1 => crate::api::fedi::FediKind::Social,
             _ => unreachable!("Invalid variant for FediKind: {}", inner),
         };
     }
@@ -4426,7 +4426,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::fedi::FediKind {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         match self {
             Self::Videos => 0.into_dart(),
-            Self::Photos => 1.into_dart(),
+            Self::Social => 1.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -5259,7 +5259,7 @@ impl SseEncode for crate::api::fedi::FediKind {
         <i32>::sse_encode(
             match self {
                 crate::api::fedi::FediKind::Videos => 0,
-                crate::api::fedi::FediKind::Photos => 1,
+                crate::api::fedi::FediKind::Social => 1,
                 _ => {
                     unimplemented!("");
                 }

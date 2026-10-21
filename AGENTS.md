@@ -5,7 +5,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 ## Non-negotiables
 
 - **Privacy:**
-  - The app connects to friends, update servers and Explore's Fediverse servers **only through Tor**. The one exception is opt-in Nearby (the local Wi-Fi). Video plays through the on-phone relay (`net/src/relay.rs`); never hand a player or WebView a remote URL.
+  - The app connects to friends, update servers and the Fediverse sites Reels reads **only through Tor**. The one exception is opt-in Nearby (the local Wi-Fi). Video plays through the on-phone relay (`net/src/relay.rs`); never hand a player or WebView a remote URL.
   - No analytics, no crash reporting, no Google services (no ML Kit, no Firebase, no Play Services). Notifications are posted on the phone itself.
   - Message content never leaves the encrypted store or MLS: not in notifications, logs or URLs.
 - **Strictly on-device:** no backups (`allowBackup` stays off), no cloud.
@@ -39,9 +39,9 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `net/src/tor.rs` | Arti (Tor): onion service, dialing, a connector for HTTPS |
 | `net/src/nearby.rs` | Local-network discovery (per-friend rotating tags) and the `Reach` transport |
 | `core/src/nearby.rs` | Rotating Bluetooth IDs and the friends-only nearby key exchange |
-| `net/src/https.rs` | A small HTTPS client for updates and Explore, through Tor |
-| `net/src/fedi.rs` | Explore: reading PeerTube and Pixelfed feeds anonymously |
-| `net/src/relay.rs` | The on-phone relay that streams Explore videos through Tor |
+| `net/src/https.rs` | A small HTTPS client for updates and Reels, through Tor |
+| `net/src/fedi.rs` | Reels: reading short videos from PeerTube and Mastodon sites anonymously |
+| `net/src/relay.rs` | The on-phone relay that streams Reels videos through Tor |
 | `app/rust/src/api/` | The Dart-facing API (flutter_rust_bridge). Keep it thin; logic belongs in `core` |
 | `app/lib/` | The Flutter UI. Design tokens are in `app/lib/theme/tokens.dart`; use them, never one-off values |
 | `app/android/app/src/main/kotlin/` | The scanner, background service, notifications, installer, OEM battery settings and Bluetooth nearby (`BluetoothNearby.kt`) |

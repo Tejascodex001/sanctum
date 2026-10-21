@@ -96,8 +96,8 @@ enum FediKind {
   /// PeerTube.
   videos,
 
-  /// Pixelfed (or any Mastodon-compatible server).
-  photos,
+  /// Mastodon or another Mastodon-compatible server.
+  social,
 }
 
 class FediPage {

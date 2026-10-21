@@ -97,6 +97,15 @@ void main() {
     await tester.tap(find.byTooltip('Send'));
     await settle(tester);
     expect(find.text('hello'), findsOneWidget);
+    // The attach sheet offers every kind of thing to send.
+    await tester.tap(find.byTooltip('Attach'));
+    await settle(tester);
+    for (final kind in ['Gallery', 'Camera', 'File', 'Album', 'Poll or plan']) {
+      expect(find.text(kind), findsOneWidget);
+    }
+    await shot(tester, '7-attach');
+    await tester.tapAt(const Offset(20, 100));
+    await settle(tester);
     await tester.tap(find.byTooltip('Back'));
     await settle(tester);
     expect(find.text('hello'), findsOneWidget, reason: 'card shows the last message');
@@ -132,10 +141,12 @@ void main() {
     await shot(tester, '2-temp-list');
 
     // Search filters by last message.
+    await tester.tap(find.byTooltip('Search'));
+    await settle(tester, 3);
     await tester.enterText(find.byType(TextField).first, 'see you');
     await settle(tester, 3);
     expect(find.text('Just me'), findsOneWidget);
-    await tester.enterText(find.byType(TextField).first, '');
+    await tester.tap(find.byTooltip('Close search'));
     await settle(tester, 3);
 
     // Wipe from inside a chat.
@@ -152,7 +163,10 @@ void main() {
     await shot(tester, '1-chats');
 
     // Add a friend: the screen shows our code and a way to read theirs.
-    await tester.tap(find.byTooltip('Add a friend'));
+    await tester.tap(find.text('New chat'));
+    await settle(tester);
+    await shot(tester, '6-new-chat');
+    await tester.tap(find.text('Add a friend'));
     await settle(tester);
     await tester.enterText(find.byType(TextField).first, 'Tejas');
     await settle(tester, 8);

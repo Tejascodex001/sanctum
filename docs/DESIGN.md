@@ -35,7 +35,7 @@ Rust core (sanctum-core)
   - A `remoteMessaging` foreground service ("Connected privately", silent and minimal) keeps the process, and with it Tor and the friend links, alive while the app is closed.
   - While closed, offline friends are retried every 10 minutes at most (2 minutes when messages wait) to save battery. Opening the app reconnects everyone at once.
   - The user can grant a battery-optimization exemption for phones with aggressive battery savers.
-- **Notifications** are posted natively on the phone, never through Google or any push service.
+- **Notifications** are posted natively on the phone, never through Google or any push service. Every message gets one, while the app is open too, except in the chat on screen. In groups they say who wrote.
   - They say who wrote and how many messages ("3 new messages"), never what. On the lock screen even the name is hidden ("New message").
   - Tapping one opens that chat. Chat cards show unread badges.
   - Rust emits a separate `Message` event for an incoming message, so a delivery receipt never notifies.
@@ -133,18 +133,21 @@ One photo a day for all your friends, gone 24 hours after it was shared (`core/s
 - **Hidden chats:** a hidden friend's moment isn't shown, so it can't give the chat away.
 - The photo can be taken right then with the camera app (written to Sanctum's cache through a one-off link, then deleted) or picked from the gallery. Either way it's resized and stripped of hidden data such as location.
 
-## Explore (the Fediverse)
-A fourth tab with public posts from PeerTube (videos) and Pixelfed or other Mastodon-compatible servers (photos), Reels-style (`net/src/fedi.rs`, `net/src/relay.rs`).
-- **Anonymous and through Tor:** no account and nothing is posted. Every request (feeds, pictures, videos) goes through Tor with the HTTPS client, so servers see a Tor exit. The list of servers is kept sealed on the phone (`kv` "fedi:sources").
-- **Feeds:** PeerTube's `/api/v1/videos` (trending, local, no sensitive videos, no live streams), and the Mastodon API's local public timeline with media only (sensitive posts left out). Servers that show their feed only to signed-in people get a plain explanation. Feeds from several servers are interleaved.
-- **Videos:** the player only speaks plain HTTP, so it's given `http://127.0.0.1:port/<token>`. A relay on the phone forwards each request, ranges included, to the real `https://` address through Tor, and follows redirects itself, so the player never connects anywhere else. It listens on loopback only and answers only for random tokens it handed out. Android's network security config allows plain HTTP to 127.0.0.1 and nothing else. PeerTube videos play at up to 480p, which streams well over Tor.
-- Sending a post to a chat sends its link as a message. Nothing is fetched from the link for a preview.
+## Reels (the Fediverse)
+A fourth tab of short public videos, full screen, one after another (`net/src/fedi.rs`, `net/src/relay.rs`).
+- **Anonymous and through Tor:** no account and nothing is posted. Every request (feeds, pictures, videos) goes through Tor with the HTTPS client, so sites see a Tor exit. The list of sites is kept sealed on the phone (`kv` "fedi:sources").
+- **Only short videos** (3 minutes or less, `MAX_REEL_S`):
+  - PeerTube: its search with `durationMax`, newest first, including videos the site knows from others. If a site's search won't do that, its video list is read 100 at a time and the short ones kept.
+  - Mastodon-compatible sites: the local public timeline with media only, keeping short videos. Sensitive posts and live streams are left out.
+  - A call reads up to 3 pages until it has 6 reels. Feeds from several sites are interleaved.
+- **Pixelfed can't be used:** it shows its feeds only to signed-in people. Pixelfed sites saved before are dropped from the list.
+- **Videos:** the player only speaks plain HTTP, so it's given `http://127.0.0.1:port/<token>`. A relay on the phone forwards each request, ranges included, to the real `https://` address through Tor, and follows redirects itself, so the player never connects anywhere else. It listens on loopback only and answers only for random tokens it handed out. Android's network security config allows plain HTTP to 127.0.0.1 and nothing else. PeerTube videos play at up to 480p. The next reel starts loading while the current one plays, so at most two stream at once.
+- Sending a reel to a chat sends its link as a message. Nothing is fetched from the link for a preview.
 
 ## Search and catch-up
 On the phone, over the sealed store (`core/src/recall.rs`). Nothing is indexed in the clear: messages are opened and checked in memory.
 - **Search** finds messages with all the typed words in any case, looking at text, poll questions and choices, plan places, file names and album names. It returns up to 100, newest first, and opens the chat scrolled to the message. Hidden chats are searched only while revealed.
 - **Catch-up** ("While you were away") counts what friends wrote since the app was last left (`kv` "catchup:since", set when it goes to the background). It shows chats with new messages, mentions of your name (whole words), plans in the next two weeks you haven't answered, and others' polls from the last week you haven't answered. It appears only for 5 or more new messages, or a mention.
-- On-device AI (transcription, written summaries) comes later and will run models on the phone only.
 
 ## Deleting
 - **Delete a message:** for me, or (your own messages only) for everyone (`Content::DeleteMessage`, by the shared message id). Works in groups too.
@@ -200,5 +203,5 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 ## Roadmap
 Status per feature is tracked in the README's feature table. In short:
 - **v1, private messaging:** done. Only nearby over Wi-Fi Direct remains, and hotspot mode mostly covers it.
-- **v2:** plans and date polls, shared albums, daily moments, the Explore tab for the Fediverse, search and catch-up (done); on-device AI (voice note transcription, written summaries).
+- **v2:** plans and date polls, shared albums, daily moments, Reels from the Fediverse, search and catch-up (done). On-device AI was dropped.
 - **v3:** voice and video calls, with no IP exposure.

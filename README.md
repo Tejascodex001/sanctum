@@ -33,7 +33,7 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Threads** | Messages with replies show "↳ N replies"; tap to see the whole thread and answer in it |
 | ✅ | **Delete & clear** | Delete a message (for me / for everyone), clear a chat (for me / for everyone), remove a friend (it's removed on both phones) |
 | ✅ | **Background delivery** | A foreground service keeps you reachable while the app is closed. A one-tap shortcut opens your phone maker's battery page |
-| ✅ | **Notifications** | Posted on the phone itself, never through Google. They say who wrote, never what. On the lock screen they say only "New message" |
+| ✅ | **Notifications** | For every message, even while Sanctum is open, except in the chat you're looking at. Posted on the phone itself, never through Google. They say who wrote, never what. On the lock screen they say only "New message" |
 | ✅ | **App lock** | Fingerprint, face or PIN, every time the app opens |
 | ✅ | **Screenshot blocking** | On everywhere. Can be allowed per chat after a fingerprint check |
 | ✅ | **Hidden chats** | Long-press the wordmark and authenticate to see them; their notifications show no name |
@@ -51,10 +51,9 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Polls, date polls and plans** | Ask a question, find a day that works for everyone, or plan something (when and where) and see who's going. In friends' chats and groups |
 | ✅ | **Shared albums** | Albums in any chat or group. Everyone can add photos and videos, up to 30 at a time |
 | ✅ | **Daily moments** | One photo a day for all your friends, gone after 24 hours. Take it on the spot or pick one, and see friends' moments above your chats |
-| ✅ | **Explore (Fediverse)** | Public PeerTube videos and Pixelfed photos, Reels-style. Read anonymously through Tor, with no account. Pick your own servers, and send a post's link to a chat |
+| ✅ | **Reels** | Short public videos (under 3 minutes) from PeerTube and Mastodon sites, full screen; swipe for the next. Watched anonymously through Tor, with no account. Pick your own sites, and send a reel's link to a chat. (Pixelfed can't be shown: it needs an account) |
 | ✅ | **Search** | Type in the home search box to find any message, poll, plan or file name across your chats. Done on the phone; hidden chats only while revealed |
 | ✅ | **Catch-up** | "While you were away": who wrote, who mentioned you, plans to answer and polls waiting for you |
-| ⏳ | On-device AI | Voice note transcription and written summaries, with models that run on the phone |
 
 ### Milestone v3: calls
 ⏳ Voice and video calls, with no IP exposure

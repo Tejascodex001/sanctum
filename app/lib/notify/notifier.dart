@@ -9,7 +9,8 @@ import '../src/rust/api/session.dart';
 import '../src/rust/api/store.dart';
 import '../src/rust/api/temp_chat.dart';
 
-/// Unread counts, and notifications while the app is in the background.
+/// Unread counts, and a notification for every message, except in the chat
+/// that's on screen.
 ///
 /// Chats are keyed `c:ID` (chat id) and temp chats `t:ID` (temp id). Notifications
 /// say only who wrote ("New message"), never what: Sanctum's content stays
@@ -99,22 +100,30 @@ class Notifier with WidgetsBindingObserver {
     if (_foreground && viewing == key) return;
     final count = (unread.value[key] ?? 0) + 1;
     unread.value = {...unread.value, key: count};
-    if (_foreground) return;
     final temp = key.startsWith('t:');
     final id = int.parse(key.substring(2));
     final chat = temp ? null : (await chatList()).where((c) => c.id == id).firstOrNull;
     // A hidden chat's notification doesn't say whose it is.
-    final title = temp
-        ? (await tempList()).where((t) => t.id.toInt() == id).firstOrNull?.title
-        : chat?.hidden ?? true
-            ? null
-            : chat?.title;
+    final hidden = !temp && (chat?.hidden ?? true);
+    final title = temp ? (await tempList()).where((t) => t.id.toInt() == id).firstOrNull?.title : chat?.title;
+    // Groups: who wrote.
+    var from = '';
+    if (!hidden && chat?.kind == ChatKindView.group) {
+      final names = <String>[];
+      for (final m in await messageList(chatId: id, limit: count.clamp(1, 20))) {
+        final name = m.senderName;
+        if (!m.fromMe && name != null && !names.contains(name)) names.add(name);
+      }
+      if (names.isNotEmpty) from = ' from ${names.length == 1 ? names.first : '${names.first} and others'}';
+    }
+    // Opened or read meanwhile.
+    if ((_foreground && viewing == key) || !unread.value.containsKey(key)) return;
     final what = temp ? 'temp message' : 'message';
     await Background.notify(
       id: _notificationId(key),
       channel: Background.messages,
-      title: title ?? 'Sanctum',
-      body: count == 1 ? 'New $what' : '$count new ${what}s',
+      title: hidden ? 'Sanctum' : title ?? 'Sanctum',
+      body: '${count == 1 ? 'New $what' : '$count new ${what}s'}$from',
       open: key,
       count: count,
     );

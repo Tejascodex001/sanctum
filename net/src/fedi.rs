@@ -1,5 +1,8 @@
-//! Reading the Fediverse anonymously, through Tor: videos from PeerTube
-//! servers and photos from Pixelfed (or any Mastodon-compatible) servers.
+//! Reels from the Fediverse, read anonymously through Tor: short videos
+//! from PeerTube servers and from Mastodon-compatible servers' posts.
+//!
+//! (Pixelfed can't be read this way: it shows its feeds only to people
+//! signed in there.)
 //!
 //! There's no account and nothing is posted: the app only reads public
 //! feeds, and which servers it reads stays on the phone. Every request goes
@@ -10,14 +13,19 @@ use serde_json::Value;
 
 const MAX_JSON: usize = 4 << 20;
 const MAX_IMAGE: usize = 15 << 20;
-const PAGE: u32 = 12;
+/// Longest video that counts as a reel, in seconds.
+pub const MAX_REEL_S: u32 = 180;
+/// Pages read at most for one call, looking for reels among longer videos.
+const SCAN_PAGES: usize = 3;
+/// Enough reels for one call.
+const ENOUGH: usize = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// PeerTube: videos.
+    /// PeerTube.
     Videos,
-    /// Pixelfed or Mastodon: posts with photos (and short videos).
-    Photos,
+    /// Mastodon or another Mastodon-compatible server: posts with videos.
+    Social,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -98,21 +106,60 @@ async fn json(connect: &Connect, url: &str) -> Result<Value, FediError> {
     serde_json::from_slice(&body).map_err(|e| FediError::Unreachable(e.to_string()))
 }
 
-/// One page of a server's feed. `next` comes from the previous page.
+/// One page of reels from a server. `next` comes from the previous page.
 pub async fn feed(connect: &Connect, kind: Kind, host: &str, next: Option<&str>) -> Result<Page, FediError> {
     let host = clean_host(host)?;
-    match kind {
-        Kind::Videos => {
-            let start: u32 = next.and_then(|n| n.parse().ok()).unwrap_or(0);
-            let url = format!("https://{host}/api/v1/videos?sort=-trending&count={PAGE}&start={start}&nsfw=false&isLocal=true");
-            Ok(parse_videos(&host, &json(connect, &url).await?, start))
-        }
-        Kind::Photos => {
-            let max = next.map(|n| format!("&max_id={}", urlencode(n))).unwrap_or_default();
-            let url = format!("https://{host}/api/v1/timelines/public?local=true&only_media=true&limit={PAGE}{max}");
-            Ok(parse_statuses(&host, &json(connect, &url).await?))
+    let mut out = Page::default();
+    let mut cursor = next.map(str::to_string);
+    for _ in 0..SCAN_PAGES {
+        let page = match kind {
+            Kind::Videos => peertube_page(connect, &host, cursor.as_deref()).await?,
+            Kind::Social => {
+                let max = cursor.as_ref().map(|n| format!("&max_id={}", urlencode(n))).unwrap_or_default();
+                let url = format!("https://{host}/api/v1/timelines/public?local=true&only_media=true&limit=40{max}");
+                parse_statuses(&host, &json(connect, &url).await?)
+            }
+        };
+        out.posts.extend(page.posts);
+        out.next = page.next;
+        cursor = out.next.clone();
+        if out.posts.len() >= ENOUGH || cursor.is_none() {
+            break;
         }
     }
+    Ok(out)
+}
+
+/// PeerTube: its search finds short videos directly ("s:" cursors); servers
+/// whose search won't, are read page by page for them ("l:" cursors).
+async fn peertube_page(connect: &Connect, host: &str, cursor: Option<&str>) -> Result<Page, FediError> {
+    let (search, start) = match cursor.and_then(|c| c.split_once(':')) {
+        Some(("s", n)) => (true, n.parse().unwrap_or(0)),
+        Some((_, n)) => (false, n.parse().unwrap_or(0)),
+        None => (true, 0),
+    };
+    let list = |start: u32| {
+        format!("https://{host}/api/v1/videos?sort=-publishedAt&count=100&start={start}&nsfw=false&isLive=false")
+    };
+    if search {
+        let url = format!(
+            "https://{host}/api/v1/search/videos?durationMax={MAX_REEL_S}&sort=-publishedAt&count=30&start={start}\
+             &nsfw=false&isLive=false&searchTarget=local"
+        );
+        match json(connect, &url).await.map(|v| parse_videos(host, &v, start)) {
+            Ok(page) if start > 0 || !page.posts.is_empty() || page.next.is_some() => return Ok(with_mode(page, "s")),
+            Err(e) if start > 0 => return Err(e),
+            // Nothing found, or no search here: read the list instead.
+            _ => {}
+        }
+    }
+    let start = if search { 0 } else { start };
+    Ok(with_mode(parse_videos(host, &json(connect, &list(start)).await?, start), "l"))
+}
+
+fn with_mode(mut page: Page, mode: &str) -> Page {
+    page.next = page.next.map(|n| format!("{mode}:{n}"));
+    page
 }
 
 /// A PeerTube video's file, at a size that streams well over Tor.
@@ -157,6 +204,7 @@ pub fn parse_videos(host: &str, v: &Value, start: u32) -> Page {
         .iter()
         .filter(|d| !d.get("nsfw").and_then(Value::as_bool).unwrap_or(false))
         .filter(|d| !d.get("isLive").and_then(Value::as_bool).unwrap_or(false))
+        .filter(|d| (1..=MAX_REEL_S as u64).contains(&d.get("duration").and_then(Value::as_u64).unwrap_or(0)))
         .filter_map(|d| {
             let uuid = str_of(d, "uuid");
             if uuid.is_empty() {
@@ -250,25 +298,27 @@ pub fn parse_statuses(host: &str, v: &Value) -> Page {
     }
 }
 
+/// A short video attached to a post (photos and long videos are left out).
 fn attachment(a: &Value) -> Option<Item> {
-    let kind = str_of(a, "type");
-    let video = match kind.as_str() {
-        "image" => false,
-        "video" | "gifv" => true,
-        _ => return None,
-    };
+    if !matches!(str_of(a, "type").as_str(), "video" | "gifv") {
+        return None;
+    }
     let url = str_of(a, "url");
     if !url.starts_with("https://") {
         return None;
     }
     let original = a.get("meta").and_then(|m| m.get("original")).cloned().unwrap_or_default();
     let dim = |k: &str| original.get(k).and_then(Value::as_u64).unwrap_or(0) as u32;
+    let duration_s = original.get("duration").and_then(Value::as_f64).unwrap_or(0.0) as u32;
+    if duration_s > MAX_REEL_S {
+        return None;
+    }
     Some(Item {
-        video,
+        video: true,
         preview: str_of(a, "preview_url"),
         width: dim("width"),
         height: dim("height"),
-        duration_s: original.get("duration").and_then(Value::as_f64).unwrap_or(0.0) as u32,
+        duration_s,
         url,
         video_id: String::new(),
     })
@@ -353,15 +403,17 @@ mod tests {
         let v = json!({"total": 30, "data": [
             {"uuid": "u1", "shortUUID": "s1", "name": "Hills", "duration": 61, "previewPath": "/lazy-static/previews/p.jpg",
              "publishedAt": "2024-03-01T00:00:00Z", "account": {"name": "ann", "displayName": "Ann", "host": "tube.example"}},
-            {"uuid": "u2", "name": "Adult", "nsfw": true},
-            {"uuid": "u3", "name": "Live now", "isLive": true}
+            {"uuid": "u2", "name": "Adult", "nsfw": true, "duration": 30},
+            {"uuid": "u3", "name": "Live now", "isLive": true, "duration": 30},
+            {"uuid": "u4", "name": "A long talk", "duration": 3600}
         ]});
         let page = parse_videos("tube.example", &v, 0);
-        assert_eq!(page.posts.len(), 1);
+        assert_eq!(page.posts.len(), 1, "only short videos");
         let p = &page.posts[0];
         assert_eq!((p.author.as_str(), p.handle.as_str(), p.link.as_str()), ("Ann", "ann@tube.example", "https://tube.example/w/s1"));
         assert_eq!(p.media[0].preview, "https://tube.example/lazy-static/previews/p.jpg");
-        assert_eq!(page.next.as_deref(), Some("3"));
+        assert_eq!(page.next.as_deref(), Some("4"));
+        assert_eq!(with_mode(page, "s").next.as_deref(), Some("s:4"));
 
         let detail = json!({"files": [], "streamingPlaylists": [{"files": [
             {"resolution": {"id": 1080}, "fileUrl": "https://cdn.example/1080.mp4"},
@@ -375,20 +427,25 @@ mod tests {
     }
 
     #[test]
-    fn photo_posts() {
+    fn short_videos_from_posts() {
         let v = json!([
-            {"id": "9", "content": "<p>Morning</p>", "url": "https://px.example/p/ann/9", "created_at": "2024-03-01T00:00:00Z",
-             "account": {"acct": "ann", "display_name": ""  , "username": "ann"},
-             "media_attachments": [{"type": "image", "url": "https://px.example/m/1.jpg", "preview_url": "https://px.example/m/1s.jpg",
-                                    "meta": {"original": {"width": 1080, "height": 1350}}}]},
-            {"id": "8", "sensitive": true, "media_attachments": [{"type": "image", "url": "https://px.example/m/2.jpg"}]},
-            {"id": "7", "content": "text only", "media_attachments": []}
+            {"id": "9", "content": "<p>Morning</p>", "url": "https://so.example/@ann/9", "created_at": "2024-03-01T00:00:00Z",
+             "account": {"acct": "ann", "display_name": "", "username": "ann"},
+             "media_attachments": [
+                {"type": "image", "url": "https://so.example/m/1.jpg"},
+                {"type": "video", "url": "https://so.example/m/2.mp4", "preview_url": "https://so.example/m/2s.jpg",
+                 "meta": {"original": {"width": 720, "height": 1280, "duration": 14.5}}}]},
+            {"id": "8", "sensitive": true, "media_attachments": [{"type": "video", "url": "https://so.example/m/3.mp4"}]},
+            {"id": "7", "media_attachments": [{"type": "video", "url": "https://so.example/m/4.mp4",
+                                                "meta": {"original": {"duration": 900.0}}}]},
+            {"id": "6", "content": "photo only", "media_attachments": [{"type": "image", "url": "https://so.example/m/5.jpg"}]}
         ]);
-        let page = parse_statuses("px.example", &v);
+        let page = parse_statuses("so.example", &v);
         assert_eq!(page.posts.len(), 1);
         let p = &page.posts[0];
-        assert_eq!((p.author.as_str(), p.handle.as_str(), p.text.as_str()), ("ann", "ann@px.example", "Morning"));
-        assert_eq!((p.media[0].width, p.media[0].height), (1080, 1350));
-        assert_eq!(page.next.as_deref(), Some("7"));
+        assert_eq!((p.author.as_str(), p.handle.as_str(), p.text.as_str()), ("ann", "ann@so.example", "Morning"));
+        assert_eq!(p.media.len(), 1);
+        assert_eq!((p.media[0].video, p.media[0].height, p.media[0].duration_s), (true, 1280, 14));
+        assert_eq!(page.next.as_deref(), Some("6"));
     }
 }

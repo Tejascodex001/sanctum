@@ -269,6 +269,17 @@ class MainActivity : FlutterFragmentActivity() {
                         runCatching { startActivity(intent) }
                         result.success(null)
                     }
+                    "openNotificationSettings" -> {
+                        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                        } else {
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                                .setData(Uri.parse("package:$packageName"))
+                        }
+                        runCatching { startActivity(intent) }
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }

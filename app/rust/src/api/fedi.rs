@@ -1,5 +1,6 @@
-//! The Explore tab: public Fediverse feeds (PeerTube videos, Pixelfed
-//! photos), read anonymously through Tor. See `sanctum_net::fedi`.
+//! The Reels tab: short public videos from the Fediverse (PeerTube and
+//! Mastodon-compatible servers), read anonymously through Tor. See
+//! `sanctum_net::fedi`.
 
 use super::session::{self, runtime};
 use super::update::CONNECT;
@@ -12,9 +13,9 @@ use std::sync::{LazyLock, Mutex};
 const SOURCES: &[u8] = b"fedi:sources";
 /// Until the user picks their own.
 const DEFAULTS: &[(FediKind, &str)] = &[
-    (FediKind::Videos, "framatube.org"),
     (FediKind::Videos, "tilvids.com"),
-    (FediKind::Photos, "pixelfed.social"),
+    (FediKind::Videos, "makertube.net"),
+    (FediKind::Videos, "framatube.org"),
 ];
 
 static RELAY: LazyLock<Mutex<Option<Relay>>> = LazyLock::new(Default::default);
@@ -23,8 +24,8 @@ static RELAY: LazyLock<Mutex<Option<Relay>>> = LazyLock::new(Default::default);
 pub enum FediKind {
     /// PeerTube.
     Videos,
-    /// Pixelfed (or any Mastodon-compatible server).
-    Photos,
+    /// Mastodon or another Mastodon-compatible server.
+    Social,
 }
 
 #[derive(Clone)]
@@ -75,7 +76,8 @@ pub struct FediPage {
 fn kind_code(kind: FediKind) -> &'static str {
     match kind {
         FediKind::Videos => "videos",
-        FediKind::Photos => "photos",
+        // "photos": what these were called before reels.
+        FediKind::Social => "photos",
     }
 }
 
@@ -89,9 +91,13 @@ pub fn fedi_sources() -> anyhow::Result<Vec<FediSource>> {
                 let (kind, host) = e.split_once(':')?;
                 let kind = match kind {
                     "videos" => FediKind::Videos,
-                    "photos" => FediKind::Photos,
+                    "photos" => FediKind::Social,
                     _ => return None,
                 };
+                // Pixelfed shows nothing without signing in there.
+                if host.contains("pixelfed") {
+                    return None;
+                }
                 Some(FediSource { kind, host: host.into() })
             })
             .collect(),
@@ -155,7 +161,7 @@ pub fn fedi_feed(kind: FediKind, host: String, next: Option<String>) -> FediPage
     };
     let kind = match kind {
         FediKind::Videos => Kind::Videos,
-        FediKind::Photos => Kind::Photos,
+        FediKind::Social => Kind::Social,
     };
     match runtime().block_on(fedi::feed(&connect, kind, &host, next.as_deref())) {
         Ok(page) => FediPage {

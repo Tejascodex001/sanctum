@@ -28,14 +28,16 @@ class _Pictures {
   }
 }
 
-enum _Filter { all, videos, photos }
+/// Sound on or off, for every reel.
+final _muted = ValueNotifier<bool>(false);
 
-/// Public Fediverse posts, Reels-style: PeerTube videos and Pixelfed
-/// photos, read anonymously through Tor. Swipe up for the next.
+/// Reels: short public videos from the Fediverse (PeerTube and
+/// Mastodon-compatible servers), read anonymously through Tor. Swipe up
+/// for the next.
 class ExplorePage extends StatefulWidget {
   const ExplorePage({super.key, required this.active});
 
-  /// The Explore tab is showing (videos play only then).
+  /// The Reels tab is showing (videos play only then).
   final bool active;
 
   @override
@@ -48,7 +50,6 @@ class _ExplorePageState extends State<ExplorePage> {
   final _seen = <String>{};
   final _next = <String, String?>{};
   final _problems = <String, FediProblem>{};
-  var _filter = _Filter.all;
   var _loading = false;
   var _started = false;
   var _index = 0;
@@ -91,17 +92,11 @@ class _ExplorePageState extends State<ExplorePage> {
     await _more();
   }
 
-  Iterable<FediSource> get _active => _sources.where((s) => switch (_filter) {
-        _Filter.all => true,
-        _Filter.videos => s.kind == FediKind.videos,
-        _Filter.photos => s.kind == FediKind.photos,
-      });
-
-  /// The next page from every server that has more, mixed together.
+  /// The next reels from every server that has more, mixed together.
   Future<void> _more() async {
     if (_loading) return;
     final due = [
-      for (final s in _active)
+      for (final s in _sources)
         if (!_next.containsKey(_key(s)) || _next[_key(s)] != null) s,
     ];
     if (due.isEmpty) return;
@@ -124,7 +119,7 @@ class _ExplorePageState extends State<ExplorePage> {
         _next[_key(s)] = page.next;
         batches.add([
           for (final p in page.posts)
-            if (_seen.add('${p.host}/${p.id}')) p,
+            if (p.media.isNotEmpty && _seen.add('${p.host}/${p.id}')) p,
         ]);
       }
       // Take turns, so one busy server doesn't fill the feed.
@@ -153,41 +148,54 @@ class _ExplorePageState extends State<ExplorePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.sm, Space.sm),
-          child: Row(
-            children: [
-              Expanded(
-                child: SegmentedButton<_Filter>(
-                  segments: const [
-                    ButtonSegment(value: _Filter.all, label: Text('All')),
-                    ButtonSegment(value: _Filter.videos, label: Text('Videos')),
-                    ButtonSegment(value: _Filter.photos, label: Text('Photos')),
-                  ],
-                  selected: {_filter},
-                  showSelectedIcon: false,
-                  style: const ButtonStyle(visualDensity: VisualDensity.compact),
-                  onSelectionChanged: (s) {
-                    _filter = s.first;
-                    _restart();
-                  },
+    return ColoredBox(
+      color: Colors.black,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _body(),
+          // Over the video, below the status bar.
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: DecoratedBox(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.black54, Colors.transparent],
                 ),
               ),
-              IconButton(tooltip: 'Servers', icon: const Icon(Icons.tune_rounded), onPressed: _editSources),
-            ],
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(Space.xl, Space.sm, Space.sm, Space.lg),
+                  child: Row(
+                    children: [
+                      Text('Reels', style: AppText.title.copyWith(color: Colors.white)),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: 'Where reels come from',
+                        color: Colors.white,
+                        icon: const Icon(Icons.tune_rounded),
+                        onPressed: _editSources,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
-        Expanded(child: _body()),
-      ],
+        ],
+      ),
     );
   }
 
   Widget _body() {
     if (_posts.isEmpty) {
       if (_loading || !_started) return const Center(child: CircularProgressIndicator());
-      return _Nothing(problems: _problems, sources: _active.toList(), onRetry: _restart, onServers: _editSources);
+      return _Nothing(problems: _problems, sources: _sources, onRetry: _restart, onServers: _editSources);
     }
     return RefreshIndicator(
       onRefresh: _restart,
@@ -198,13 +206,12 @@ class _ExplorePageState extends State<ExplorePage> {
         itemCount: _posts.length + (_loading ? 1 : 0),
         itemBuilder: (context, i) => i >= _posts.length
             ? const Center(child: CircularProgressIndicator())
-            : Padding(
-                padding: const EdgeInsets.fromLTRB(Space.sm, 0, Space.sm, Space.sm),
-                child: _PostCard(
-                  key: ValueKey('${_posts[i].host}/${_posts[i].id}'),
-                  post: _posts[i],
-                  playing: widget.active && i == _index,
-                ),
+            : _Reel(
+                key: ValueKey('${_posts[i].host}/${_posts[i].id}'),
+                post: _posts[i],
+                playing: widget.active && i == _index,
+                // The next one starts loading early: Tor is slow to start.
+                preload: widget.active && i == _index + 1,
               ),
       ),
     );
@@ -224,15 +231,15 @@ class _Nothing extends StatelessWidget {
   Widget build(BuildContext context) {
     final offline = problems.values.any((p) => p == FediProblem.offline);
     final lines = <String>[
-      if (sources.isEmpty) 'Add a server to see what people are sharing.',
-      if (offline) 'Explore opens once Sanctum is connected. This can take a minute after starting.',
+      if (sources.isEmpty) 'Add a site to watch reels from.',
+      if (offline) 'Reels open once Sanctum is connected. This can take a minute after starting.',
       if (!offline)
         for (final s in sources)
           switch (problems['${s.kind.name}:${s.host}']) {
-            FediProblem.notPublic => '${s.host} only shows its posts to people signed in there. Try another server.',
+            FediProblem.notPublic => '${s.host} only shows its posts to people signed in there. Try another site.',
             FediProblem.unreachable => 'Couldn\'t reach ${s.host} right now.',
-            FediProblem.badHost => '${s.host} isn\'t a server address.',
-            _ => '${s.host} has nothing new.',
+            FediProblem.badHost => '${s.host} isn\'t a site address.',
+            _ => '${s.host} has no new short videos.',
           },
     ];
     return Center(
@@ -241,7 +248,7 @@ class _Nothing extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.travel_explore_rounded, size: 44, color: Palette.textMuted),
+            const Icon(Icons.slow_motion_video_rounded, size: 44, color: Palette.textMuted),
             const SizedBox(height: Space.md),
             for (final l in lines)
               Padding(
@@ -253,7 +260,7 @@ class _Nothing extends StatelessWidget {
               spacing: Space.sm,
               children: [
                 OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
-                FilledButton.tonal(onPressed: onServers, child: const Text('Servers')),
+                FilledButton.tonal(onPressed: onServers, child: const Text('Sites')),
               ],
             ),
           ],
@@ -271,32 +278,21 @@ String _ago(int unix) {
   return '${d.inMinutes.clamp(1, 59)}m';
 }
 
-/// One post, filling the feed: its photos or video, who posted it and
-/// what they wrote.
-class _PostCard extends StatefulWidget {
-  const _PostCard({super.key, required this.post, required this.playing});
+/// One reel, filling the screen: the video, who posted it and what they
+/// wrote, with sound and send buttons on the side.
+class _Reel extends StatefulWidget {
+  const _Reel({super.key, required this.post, required this.playing, required this.preload});
 
   final FediPost post;
   final bool playing;
+  final bool preload;
 
   @override
-  State<_PostCard> createState() => _PostCardState();
+  State<_Reel> createState() => _ReelState();
 }
 
-class _PostCardState extends State<_PostCard> {
-  var _shown = 0;
+class _ReelState extends State<_Reel> {
   var _expanded = false;
-
-  FediItem get _item => widget.post.media[_shown];
-
-  void _tap(TapUpDetails d, double width) {
-    final media = widget.post.media;
-    if (media.length < 2) return;
-    setState(() {
-      _shown =
-          d.localPosition.dx > width / 2 ? (_shown + 1) % media.length : (_shown - 1 + media.length) % media.length;
-    });
-  }
 
   Future<void> _share() async {
     final chats = (await chatList()).where((c) => !c.hidden && c.active).toList();
@@ -310,7 +306,7 @@ class _PostCardState extends State<_PostCard> {
           children: [
             const Padding(
               padding: EdgeInsets.fromLTRB(Space.xl, 0, Space.xl, Space.sm),
-              child: Text('Send the link to', style: AppText.overline),
+              child: Text('SEND THE LINK TO', style: AppText.overline),
             ),
             for (final c in chats)
               ListTile(
@@ -337,155 +333,122 @@ class _PostCardState extends State<_PostCard> {
   @override
   Widget build(BuildContext context) {
     final post = widget.post;
-    final item = _item;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(Radii.lg),
-      child: ColoredBox(
-        color: Colors.black,
-        child: LayoutBuilder(
-          builder: (context, box) => GestureDetector(
-            onTapUp: item.video ? null : (d) => _tap(d, box.maxWidth),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                item.video
-                    ? _Video(
-                        key: ValueKey(item.videoId.isEmpty ? item.url : item.videoId),
-                        host: post.host,
-                        item: item,
-                        playing: widget.playing,
-                      )
-                    : _Picture(key: ValueKey(item.url), item: item),
-                if (post.media.length > 1)
-                  Positioned(
-                    top: Space.md,
-                    left: 0,
-                    right: 0,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        for (var i = 0; i < post.media.length; i++)
-                          AnimatedContainer(
-                            duration: Motion.fast,
-                            margin: const EdgeInsets.symmetric(horizontal: 2),
-                            width: i == _shown ? 18 : 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: i == _shown ? 0.95 : 0.5),
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: DecoratedBox(
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [Colors.black87, Colors.transparent],
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(Space.lg, Space.xxl, Space.sm, Space.lg),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
+    final item = post.media.first;
+    const white = TextStyle(color: Colors.white);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        _Video(
+          key: ValueKey(item.videoId.isEmpty ? item.url : item.videoId),
+          host: post.host,
+          item: item,
+          playing: widget.playing,
+          preload: widget.preload,
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [Colors.black87, Colors.transparent],
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(Space.lg, Space.xxl, Space.sm, Space.xl),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _expanded = !_expanded),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => setState(() => _expanded = !_expanded),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(post.author,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: AppText.bodyStrong.copyWith(color: Colors.white)),
-                                  Text(
-                                    [post.handle, _ago(post.createdAt)].where((t) => t.isNotEmpty).join(' · '),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: AppText.micro.copyWith(color: Colors.white70),
-                                  ),
-                                  if (post.text.isNotEmpty) ...[
-                                    const SizedBox(height: Space.xs),
-                                    Text(
-                                      post.text,
-                                      maxLines: _expanded ? 12 : 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: AppText.caption.copyWith(color: Colors.white),
-                                    ),
-                                  ],
-                                ],
-                              ),
+                          Text(post.author,
+                              maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.bodyStrong.merge(white)),
+                          Text(
+                            [post.handle, _ago(post.createdAt)].where((t) => t.isNotEmpty).join(' · '),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppText.micro.copyWith(color: Colors.white70),
+                          ),
+                          if (post.text.isNotEmpty) ...[
+                            const SizedBox(height: Space.xs),
+                            Text(
+                              post.text,
+                              maxLines: _expanded ? 12 : 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: AppText.caption.merge(white),
                             ),
-                          ),
-                          IconButton(
-                            tooltip: 'Send to a chat',
-                            color: Colors.white,
-                            icon: const Icon(Icons.send_rounded),
-                            onPressed: _share,
-                          ),
+                          ],
                         ],
                       ),
                     ),
                   ),
-                ),
-              ],
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ValueListenableBuilder<bool>(
+                        valueListenable: _muted,
+                        builder: (context, muted, _) => _SideButton(
+                          icon: muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                          label: muted ? 'Sound off' : 'Sound on',
+                          onTap: () => _muted.value = !muted,
+                        ),
+                      ),
+                      const SizedBox(height: Space.md),
+                      _SideButton(icon: Icons.send_rounded, label: 'Send', onTap: _share),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-      ),
+      ],
     );
   }
 }
 
-/// A photo: its small preview first, then the full picture.
-class _Picture extends StatelessWidget {
-  const _Picture({super.key, required this.item});
+class _SideButton extends StatelessWidget {
+  const _SideButton({required this.icon, required this.label, required this.onTap});
 
-  final FediItem item;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<Uint8List?>(
-      future: _Pictures.load(item.url),
-      builder: (context, full) {
-        if (full.data != null) {
-          return Image.memory(full.data!, fit: BoxFit.contain, gaplessPlayback: true, cacheWidth: 1440);
-        }
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            FutureBuilder<Uint8List?>(
-              future: _Pictures.load(item.preview),
-              builder: (context, small) => small.data == null
-                  ? const SizedBox()
-                  : Image.memory(small.data!, fit: BoxFit.contain, gaplessPlayback: true),
-            ),
-            if (full.connectionState != ConnectionState.done) const Center(child: CircularProgressIndicator()),
-            if (full.connectionState == ConnectionState.done)
-              const Center(child: Icon(Icons.broken_image_outlined, color: Colors.white54, size: 40)),
-          ],
-        );
-      },
-    );
-  }
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        label: label,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 28,
+          child: Padding(
+            padding: const EdgeInsets.all(Space.sm),
+            child: Icon(icon, color: Colors.white, size: 30, shadows: const [Shadow(blurRadius: 8)]),
+          ),
+        ),
+      );
 }
 
-/// A video: plays (looping) while its page is showing, streamed through
-/// Tor by Sanctum's own relay. Tap to pause.
+/// A video: plays (looping) while its reel is showing, streamed through
+/// Tor by Sanctum's own relay. Tap to pause. Upright videos fill the
+/// screen; wide ones fit its width.
 class _Video extends StatefulWidget {
-  const _Video({super.key, required this.host, required this.item, required this.playing});
+  const _Video({super.key, required this.host, required this.item, required this.playing, required this.preload});
 
   final String host;
   final FediItem item;
   final bool playing;
+
+  /// Load it now, to play as soon as it's swiped to.
+  final bool preload;
 
   @override
   State<_Video> createState() => _VideoState();
@@ -497,47 +460,57 @@ class _VideoState extends State<_Video> {
   var _paused = false;
   var _starting = false;
 
+  bool get _wanted => widget.playing || widget.preload;
+
   @override
   void initState() {
     super.initState();
-    if (widget.playing) _start();
+    _muted.addListener(_applyVolume);
+    if (_wanted) _start();
   }
 
   @override
   void didUpdateWidget(_Video old) {
     super.didUpdateWidget(old);
-    if (widget.playing && !old.playing) {
+    if (_wanted) {
       _start();
-    } else if (!widget.playing && old.playing) {
+    } else {
       _stop();
     }
   }
 
   @override
   void dispose() {
+    _muted.removeListener(_applyVolume);
     _video?.dispose();
     super.dispose();
   }
 
+  void _applyVolume() => _video?.setVolume(_muted.value ? 0 : 1);
+
   Future<void> _start() async {
-    if (_video != null || _starting) {
-      if (!_paused) _video?.play();
+    final video = _video;
+    if (video != null || _starting) {
+      if (video != null && video.value.isInitialized) {
+        widget.playing && !_paused ? video.play() : video.pause();
+      }
       return;
     }
     _starting = true;
     final local = await fediVideo(host: widget.host, url: widget.item.url, videoId: widget.item.videoId);
     _starting = false;
-    if (!mounted || !widget.playing) return;
+    if (!mounted || !_wanted) return;
     if (local == null) {
       setState(() => _failed = true);
       return;
     }
-    final video = VideoPlayerController.networkUrl(Uri.parse(local));
-    setState(() => _video = video);
+    final fresh = VideoPlayerController.networkUrl(Uri.parse(local));
+    setState(() => _video = fresh);
     try {
-      await video.initialize();
-      await video.setLooping(true);
-      if (mounted && widget.playing) await video.play();
+      await fresh.initialize();
+      await fresh.setLooping(true);
+      _applyVolume();
+      if (mounted && _video == fresh && widget.playing && !_paused) await fresh.play();
       if (mounted) setState(() {});
     } catch (_) {
       if (mounted) setState(() => _failed = true);
@@ -545,16 +518,19 @@ class _VideoState extends State<_Video> {
   }
 
   void _stop() {
-    // Freed when scrolled away: only one video streams at a time.
+    // Freed when scrolled away: at most two videos stream at a time.
     final video = _video;
+    if (video == null) return;
     _video = null;
-    video?.dispose();
+    _paused = false;
+    video.dispose();
     if (mounted) setState(() {});
   }
 
   void _toggle() {
     final video = _video;
     if (video == null || !video.value.isInitialized) return;
+    HapticFeedback.selectionClick();
     setState(() => _paused = !_paused);
     _paused ? video.pause() : video.play();
   }
@@ -563,6 +539,10 @@ class _VideoState extends State<_Video> {
   Widget build(BuildContext context) {
     final video = _video;
     final ready = video != null && video.value.isInitialized;
+    final upright = ready
+        ? video.value.aspectRatio < 1
+        : widget.item.height > 0 && widget.item.width > 0 && widget.item.height > widget.item.width;
+    final fit = upright ? BoxFit.cover : BoxFit.contain;
     return GestureDetector(
       onTap: _toggle,
       child: Stack(
@@ -571,35 +551,49 @@ class _VideoState extends State<_Video> {
           if (!ready)
             FutureBuilder<Uint8List?>(
               future: _Pictures.load(widget.item.preview),
-              builder: (context, snap) =>
-                  snap.data == null ? const SizedBox() : Image.memory(snap.data!, fit: BoxFit.contain),
+              builder: (context, snap) => snap.data == null ? const SizedBox() : Image.memory(snap.data!, fit: fit),
             ),
           if (ready)
-            Center(
-              child: AspectRatio(aspectRatio: video.value.aspectRatio, child: VideoPlayer(video)),
+            FittedBox(
+              fit: fit,
+              clipBehavior: Clip.hardEdge,
+              child: SizedBox(
+                width: video.value.size.width,
+                height: video.value.size.height,
+                child: VideoPlayer(video),
+              ),
             ),
           if (ready)
             Positioned(
               left: 0,
               right: 0,
               bottom: 0,
-              child: VideoProgressIndicator(video, allowScrubbing: true, padding: EdgeInsets.zero),
+              child: VideoProgressIndicator(
+                video,
+                allowScrubbing: true,
+                padding: EdgeInsets.zero,
+                colors: const VideoProgressColors(
+                  playedColor: Colors.white,
+                  bufferedColor: Colors.white24,
+                  backgroundColor: Colors.white10,
+                ),
+              ),
             ),
           if (_failed)
             const Center(
               child: Text('This video can\'t play right now.', style: TextStyle(color: Colors.white70)),
             )
           else if (widget.playing && !ready)
-            const Center(child: CircularProgressIndicator())
+            const Center(child: CircularProgressIndicator(color: Colors.white))
           else if (ready && _paused)
-            const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 64)),
+            const Center(child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 72)),
         ],
       ),
     );
   }
 }
 
-/// The servers Explore reads, and adding or removing them.
+/// The sites Reels come from, and adding or removing them.
 class _SourcesSheet extends StatefulWidget {
   const _SourcesSheet();
 
@@ -610,7 +604,7 @@ class _SourcesSheet extends StatefulWidget {
 class _SourcesSheetState extends State<_SourcesSheet> {
   List<FediSource> _sources = const [];
   final _host = TextEditingController();
-  var _kind = FediKind.photos;
+  var _kind = FediKind.videos;
 
   @override
   void initState() {
@@ -630,11 +624,16 @@ class _SourcesSheetState extends State<_SourcesSheet> {
   }
 
   Future<void> _add() async {
+    if (_host.text.toLowerCase().contains('pixelfed')) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Pixelfed only shows its posts to people signed in there, so Sanctum can\'t show it.')));
+      return;
+    }
     final added = await fediAddSource(kind: _kind, host: _host.text);
     if (!mounted) return;
     if (added == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('That doesn\'t look like a server address, like pixelfed.social.')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('That doesn\'t look like a site address, like tilvids.com.')));
       return;
     }
     _host.clear();
@@ -652,20 +651,20 @@ class _SourcesSheetState extends State<_SourcesSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('Servers', style: AppText.title),
+              const Text('Where reels come from', style: AppText.title),
               const SizedBox(height: Space.xs),
               const Text(
-                'Explore shows public posts from these servers. Sanctum reads them privately: no account, and the '
-                'servers can\'t see who you are or where you are. Which servers you follow stays on this phone.',
+                'Reels shows public videos under 3 minutes from these sites. Sanctum watches them privately: no '
+                'account, and the sites can\'t see who you are or where you are. Your list stays on this phone.',
                 style: AppText.caption,
               ),
               const SizedBox(height: Space.md),
               for (final s in _sources)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(s.kind == FediKind.videos ? Icons.smart_display_outlined : Icons.photo_outlined),
+                  leading: Icon(s.kind == FediKind.videos ? Icons.smart_display_outlined : Icons.forum_outlined),
                   title: Text(s.host),
-                  subtitle: Text(s.kind == FediKind.videos ? 'Videos (PeerTube)' : 'Photos (Pixelfed)'),
+                  subtitle: Text(s.kind == FediKind.videos ? 'Video site (PeerTube)' : 'Social site (Mastodon)'),
                   trailing: IconButton(
                     tooltip: 'Remove',
                     icon: const Icon(Icons.close_rounded),
@@ -678,9 +677,9 @@ class _SourcesSheetState extends State<_SourcesSheet> {
               const SizedBox(height: Space.md),
               SegmentedButton<FediKind>(
                 segments: const [
-                  ButtonSegment(value: FediKind.photos, label: Text('Photos'), icon: Icon(Icons.photo_outlined)),
                   ButtonSegment(
-                      value: FediKind.videos, label: Text('Videos'), icon: Icon(Icons.smart_display_outlined)),
+                      value: FediKind.videos, label: Text('Video site'), icon: Icon(Icons.smart_display_outlined)),
+                  ButtonSegment(value: FediKind.social, label: Text('Social site'), icon: Icon(Icons.forum_outlined)),
                 ],
                 selected: {_kind},
                 showSelectedIcon: false,
@@ -693,8 +692,8 @@ class _SourcesSheetState extends State<_SourcesSheet> {
                 keyboardType: TextInputType.url,
                 decoration: InputDecoration(
                   hintText: _kind == FediKind.videos
-                      ? 'A PeerTube server, like framatube.org'
-                      : 'A Pixelfed server, like pixelfed.social',
+                      ? 'A PeerTube site, like tilvids.com'
+                      : 'A Mastodon site, like mastodon.social',
                   suffixIcon: IconButton(tooltip: 'Add', icon: const Icon(Icons.add_rounded), onPressed: _add),
                 ),
                 onSubmitted: (_) => _add(),

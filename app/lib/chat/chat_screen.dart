@@ -468,35 +468,27 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       context: context,
       showDragHandle: true,
       builder: (sheet) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library_rounded),
-              title: const Text('Photo or video'),
-              subtitle:
-                  const Text('Photos up to 10 MB (resized, hidden data like location removed), videos up to 20 MB'),
-              onTap: () => Navigator.pop(sheet, 'visual'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.attach_file_rounded),
-              title: const Text('File'),
-              subtitle: const Text('Up to 50 MB'),
-              onTap: () => Navigator.pop(sheet, 'file'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Shared albums'),
-              subtitle: const Text('Photos and videos everyone here can add to'),
-              onTap: () => Navigator.pop(sheet, 'albums'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.poll_outlined),
-              title: const Text('Poll or plan'),
-              subtitle: const Text('Ask a question, find a date that works, or plan something together'),
-              onTap: () => Navigator.pop(sheet, 'poll'),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(Space.md, 0, Space.md, Space.lg),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final (key, icon, label) in const [
+                ('visual', Icons.photo_library_rounded, 'Gallery'),
+                ('camera', Icons.photo_camera_rounded, 'Camera'),
+                ('file', Icons.insert_drive_file_rounded, 'File'),
+                ('albums', Icons.photo_album_rounded, 'Album'),
+                ('poll', Icons.poll_rounded, 'Poll or plan'),
+              ])
+                _AttachButton(
+                  icon: icon,
+                  label: label,
+                  color: widget.card.sigil.accent.color,
+                  onTap: () => Navigator.pop(sheet, key),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -510,7 +502,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       if (sent) await _reload();
       return;
     }
-    final picked = await Background.pickMedia(kind);
+    final picked = kind == 'camera' ? await Background.capturePhoto() : await Background.pickMedia(kind);
     if (picked == null || !mounted) return;
     final caption = _input.text.trim();
     final replyTo = _replyTo;
@@ -1493,4 +1485,43 @@ class _ThreadSheetState extends State<_ThreadSheet> {
       ),
     );
   }
+}
+
+/// One choice in the attach sheet: a coloured circle with a label.
+class _AttachButton extends StatelessWidget {
+  const _AttachButton({required this.icon, required this.label, required this.color, required this.onTap});
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: 68,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(Radii.md),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: Space.xs),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: color.withValues(alpha: 0.16),
+                    border: Border.all(color: color.withValues(alpha: 0.5)),
+                  ),
+                  child: Icon(icon, color: color),
+                ),
+                const SizedBox(height: Space.xs),
+                Text(label, textAlign: TextAlign.center, maxLines: 2, style: AppText.micro),
+              ],
+            ),
+          ),
+        ),
+      );
 }
