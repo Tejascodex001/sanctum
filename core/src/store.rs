@@ -194,6 +194,10 @@ pub struct StoredMessage {
     /// person; an empty emoji is a reaction taken back, kept so an older
     /// one arriving late can't bring it back.
     pub reactions: Vec<Reaction>,
+    /// A call's record in the chat ("Voice call · 4:12", "Missed call"),
+    /// kept on this phone only. `from_me`: we called. `body` holds the
+    /// words shown, so previews and search need nothing special.
+    pub call: Option<CallLog>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -203,6 +207,33 @@ pub struct Reaction {
     pub emoji: String,
     /// When they reacted (milliseconds), so a late older reaction loses.
     pub at: u64,
+}
+
+/// How a call went, for its record in the chat.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct CallLog {
+    pub video: bool,
+    /// `call::Outcome` as a number (an unknown one reads as "ended").
+    pub outcome: u8,
+    /// How long we talked, in seconds.
+    pub seconds: u32,
+}
+
+/// The seventh message format, before calls.
+#[derive(Deserialize)]
+struct StoredMessageV6 {
+    from_me: bool,
+    body: String,
+    sent_at: u64,
+    delivered: bool,
+    id: Option<MessageId>,
+    reply: Option<Quote>,
+    sender: Option<[u8; 32]>,
+    media: Option<Media>,
+    poll: Option<Poll>,
+    votes: Vec<Vote>,
+    album: Option<Album>,
+    reactions: Vec<Reaction>,
 }
 
 /// The sixth message format, before reactions.
@@ -664,6 +695,23 @@ impl Store {
         if let Ok(m) = postcard::from_bytes::<StoredMessage>(&plain) {
             return Ok(m);
         }
+        if let Ok(v6) = postcard::from_bytes::<StoredMessageV6>(&plain) {
+            return Ok(StoredMessage {
+                from_me: v6.from_me,
+                body: v6.body,
+                sent_at: v6.sent_at,
+                delivered: v6.delivered,
+                id: v6.id,
+                reply: v6.reply,
+                sender: v6.sender,
+                media: v6.media,
+                poll: v6.poll,
+                votes: v6.votes,
+                album: v6.album,
+                reactions: v6.reactions,
+                call: None,
+            });
+        }
         if let Ok(v5) = postcard::from_bytes::<StoredMessageV5>(&plain) {
             return Ok(StoredMessage {
                 from_me: v5.from_me,
@@ -677,7 +725,7 @@ impl Store {
                 poll: v5.poll,
                 votes: v5.votes,
                 album: v5.album,
-                reactions: Vec::new(),
+                ..Default::default()
             });
         }
         if let Ok(v4) = postcard::from_bytes::<StoredMessageV4>(&plain) {
@@ -974,6 +1022,59 @@ mod tests {
         hidden.admin = Some([5; 32]);
         s.update_chat(7, &hidden).unwrap();
         assert_eq!(s.chats().unwrap().remove(0).1, hidden);
+    }
+
+    #[test]
+    fn messages_from_before_calls_upgrade() {
+        #[derive(Serialize)]
+        struct V6 {
+            from_me: bool,
+            body: String,
+            sent_at: u64,
+            delivered: bool,
+            id: Option<MessageId>,
+            reply: Option<Quote>,
+            sender: Option<[u8; 32]>,
+            media: Option<Media>,
+            poll: Option<Poll>,
+            votes: Vec<Vote>,
+            album: Option<Album>,
+            reactions: Vec<Reaction>,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[7; 32]).unwrap();
+        let chat = s.create_chat(&meta("Bob")).unwrap();
+        let old = V6 {
+            from_me: true,
+            body: "see you".into(),
+            sent_at: 5,
+            delivered: true,
+            id: Some([2; 16]),
+            reply: None,
+            sender: None,
+            media: None,
+            poll: None,
+            votes: Vec::new(),
+            album: None,
+            reactions: vec![Reaction { who: [4; 32], emoji: "👍".into(), at: 3 }],
+        };
+        s.db.execute(
+            "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, 0, ?2)",
+            params![chat, s.seal(&message_aad(chat, 0), &old).unwrap()],
+        )
+        .unwrap();
+        let m = s.message(chat, 0).unwrap().unwrap();
+        assert_eq!((m.body.as_str(), m.id, m.delivered), ("see you", Some([2; 16]), true));
+        assert_eq!(m.reactions[0].emoji, "👍");
+        assert!(m.call.is_none());
+        let call = StoredMessage {
+            from_me: true,
+            body: "Voice call · 4:12".into(),
+            call: Some(CallLog { video: false, outcome: 0, seconds: 252 }),
+            ..Default::default()
+        };
+        let seq = s.add_message(chat, &call).unwrap();
+        assert_eq!(s.message(chat, seq).unwrap().unwrap(), call);
     }
 
     #[test]

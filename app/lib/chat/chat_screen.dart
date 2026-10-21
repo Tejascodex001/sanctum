@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../background/background.dart';
+import '../call/call_controller.dart';
+import '../src/rust/api/call.dart';
 import '../deck/chat_card.dart';
 import '../deck/chat_tile.dart';
 import '../net/net_bus.dart';
@@ -215,7 +217,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   /// Friends' chats and groups (not notes or temp chats) take reactions.
   bool _canReact(ChatMessage m) =>
-      m.seq != null && widget.card.source is StoreSource && (widget.card.friend || widget.card.group);
+      m.seq != null && m.call == null && widget.card.source is StoreSource && (widget.card.friend || widget.card.group);
 
   /// Reacts to [m] with [emoji]; the same one again takes it back.
   Future<void> _react(ChatMessage m, String emoji) async {
@@ -326,7 +328,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   ],
                 ),
               ),
-            if (widget.card.source.replies && m.seq != null)
+            if (widget.card.source.replies && m.seq != null && m.call == null)
               ListTile(
                 leading: const Icon(Icons.reply_rounded),
                 title: const Text('Reply'),
@@ -335,14 +337,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   _startReply(m);
                 },
               ),
-            ListTile(
-              leading: const Icon(Icons.copy_rounded),
-              title: const Text('Copy'),
-              onTap: () {
-                Navigator.pop(sheet);
-                Clipboard.setData(ClipboardData(text: m.body));
-              },
-            ),
+            if (m.call == null)
+              ListTile(
+                leading: const Icon(Icons.copy_rounded),
+                title: const Text('Copy'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  Clipboard.setData(ClipboardData(text: m.body));
+                },
+              ),
             if (m.seq != null) ...[
               ListTile(
                 leading: const Icon(Icons.delete_outline_rounded, color: Palette.danger),
@@ -352,7 +355,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   _delete(m, everyone: false);
                 },
               ),
-              if (m.fromMe && widget.card.friend)
+              // A call's record is only on this phone.
+              if (m.fromMe && widget.card.friend && m.call == null)
                 ListTile(
                   leading: const Icon(Icons.delete_forever_rounded, color: Palette.danger),
                   title: const Text('Delete for everyone', style: TextStyle(color: Palette.danger)),
@@ -366,6 +370,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         ),
       ),
     );
+  }
+
+  /// Calls the friend (the call screen takes over from here).
+  Future<void> _call() async {
+    HapticFeedback.selectionClick();
+    final problem = await CallController.instance.startCall(widget.card.id, widget.card.title);
+    if (problem != null && mounted) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(problem)));
+    }
   }
 
   Future<void> _doWipe() async {
@@ -401,6 +414,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 _Header(
                   card: widget.card,
                   onBack: widget.close,
+                  onCall: widget.card.friend && !widget.card.temp && !widget.card.group ? _call : null,
                   onWipe: widget.onWipe == null ? null : _doWipe,
                   onInfo: widget.onGroupInfo,
                 ),
@@ -477,6 +491,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       itemBuilder: (_, i) {
         final index = _messages.length - 1 - i;
         final m = _messages[index];
+        if (m.call != null) {
+          return _CallRecord(
+            key: ValueKey(index),
+            message: m,
+            accent: accent,
+            onTap: _call,
+            onLongPress: () => _actions(m),
+          );
+        }
         final next = index + 1 < _messages.length ? _messages[index + 1] : null;
         // Messages from the same side within two minutes are grouped.
         final grouped = next != null && next.fromMe == m.fromMe && next.sentAt.difference(m.sentAt).inMinutes < 2;
@@ -885,12 +908,15 @@ class _RotatingImageState extends State<_RotatingImage> with SingleTickerProvide
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.card, required this.onBack, this.onWipe, this.onInfo});
+  const _Header({required this.card, required this.onBack, this.onWipe, this.onInfo, this.onCall});
 
   final ChatCard card;
   final VoidCallback onBack;
   final VoidCallback? onWipe;
   final VoidCallback? onInfo;
+
+  /// Friends' chats: a voice call.
+  final VoidCallback? onCall;
 
   @override
   Widget build(BuildContext context) {
@@ -961,6 +987,8 @@ class _Header extends StatelessWidget {
           ),
           if (onInfo != null)
             IconButton(tooltip: 'Group info', icon: const Icon(Icons.groups_rounded, size: 20), onPressed: onInfo),
+          if (onCall != null)
+            IconButton(tooltip: 'Call', icon: const Icon(Icons.call_rounded, size: 20), onPressed: onCall),
           _ShotsButton(chatKey: card.temp ? Notifier.tempKey(card.id) : Notifier.chatKey(card.id)),
           if (card.friend && !card.temp) _VerifyButton(card: card),
           if (onWipe != null)
@@ -1805,4 +1833,64 @@ class _TypingRowState extends State<_TypingRow> with SingleTickerProviderStateMi
 
   /// 0 → 1 → 0 over the first part of each cycle.
   static double _bump(double t) => t < 0.3 ? (t < 0.15 ? t / 0.15 : (0.3 - t) / 0.15) : 0;
+}
+
+/// A call's record in the chat ("Voice call · 4:12", "Missed call"),
+/// centred like a note. Tapping it calls back.
+class _CallRecord extends StatelessWidget {
+  const _CallRecord({
+    super.key,
+    required this.message,
+    required this.accent,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  final ChatMessage message;
+  final Color accent;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = message;
+    final outcome = m.call?.outcome;
+    final missed = !m.fromMe && outcome == CallOutcomeView.missed;
+    final talked = outcome == CallOutcomeView.talked || outcome == CallOutcomeView.dropped;
+    final color = missed ? Palette.danger : (talked ? accent : Palette.textMuted);
+    final icon = missed
+        ? Icons.phone_missed_rounded
+        : m.fromMe
+            ? Icons.call_made_rounded
+            : Icons.call_received_rounded;
+    final t = m.sentAt;
+    final time = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: Space.sm),
+        child: Material(
+          color: Palette.surface,
+          shape: StadiumBorder(side: BorderSide(color: Palette.outline)),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            onLongPress: onLongPress,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: Space.sm),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 16, color: color),
+                  const SizedBox(width: Space.sm),
+                  Text(m.body, style: AppText.bodyStrong.copyWith(color: missed ? Palette.danger : Palette.text)),
+                  const SizedBox(width: Space.sm),
+                  Text(time, style: AppText.micro),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

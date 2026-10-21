@@ -1,5 +1,6 @@
 //! Persistent chats, encrypted at rest. See `sanctum_core::store`.
 
+use super::call::CallOutcomeView;
 use super::poll::PollView;
 use super::session;
 use sanctum_core::media::Outgoing;
@@ -54,6 +55,31 @@ pub struct MessageView {
     pub album: Option<AlbumView>,
     /// Reactions, one entry per emoji, most used first.
     pub reactions: Vec<ReactionView>,
+    /// A call's record ("Voice call · 4:12", "Missed call"; the words are
+    /// in `body`). `from_me`: we called.
+    pub call: Option<CallLogView>,
+}
+
+pub struct CallLogView {
+    pub outcome: CallOutcomeView,
+    /// How long we talked.
+    pub seconds: u32,
+}
+
+fn call_log_view(log: sanctum_core::store::CallLog) -> CallLogView {
+    use sanctum_core::call::Outcome;
+    let outcome = match Outcome::from_wire(log.outcome) {
+        Outcome::Talked => CallOutcomeView::Talked,
+        Outcome::Missed => CallOutcomeView::Missed,
+        Outcome::Declined => CallOutcomeView::Declined,
+        Outcome::NoAnswer => CallOutcomeView::NoAnswer,
+        Outcome::Unreachable => CallOutcomeView::Unreachable,
+        Outcome::Busy => CallOutcomeView::Busy,
+        Outcome::Failed => CallOutcomeView::Failed,
+        Outcome::Dropped => CallOutcomeView::Dropped,
+        Outcome::Cancelled => CallOutcomeView::Cancelled,
+    };
+    CallLogView { outcome, seconds: log.seconds }
 }
 
 /// Everyone who reacted to a message with one emoji.
@@ -371,6 +397,7 @@ pub fn message_list(chat_id: i64, limit: Option<u32>) -> anyhow::Result<Vec<Mess
                     id: a.id.to_vec(),
                     title: a.title,
                 }),
+                call: m.call.map(call_log_view),
                 body: m.body,
             })
             .collect())

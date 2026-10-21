@@ -109,7 +109,10 @@ impl Nearby {
             loop {
                 tokio::select! {
                     accepted = listener.accept() => match accepted {
-                        Ok((stream, _)) => n.accept(Box::new(stream)),
+                        Ok((stream, _)) => {
+                            let _ = stream.set_nodelay(true);
+                            n.accept_nearby(Box::new(stream));
+                        }
                         Err(_) => tokio::time::sleep(Duration::from_millis(200)).await,
                     },
                     _ = stopped.changed() => break,
@@ -215,6 +218,9 @@ impl Nearby {
                 let new = self.book.lock().unwrap().insert(friend, (addr, Instant::now())).is_none();
                 if new || !node.connected().contains(&friend) {
                     node.dial_now(friend);
+                } else {
+                    // Linked over Tor: the nearby link is faster.
+                    node.prefer_nearby(friend, false);
                 }
             }
         }
@@ -290,25 +296,34 @@ pub struct Reach {
 #[async_trait]
 impl Transport for Reach {
     async fn dial(&self, peer: [u8; 32]) -> anyhow::Result<BoxConn> {
+        Ok(self.dial_ranked(peer).await?.0)
+    }
+
+    async fn dial_ranked(&self, peer: [u8; 32]) -> anyhow::Result<(BoxConn, bool)> {
         let nearby = self.nearby.read().unwrap().as_ref().and_then(|n| n.addr(&peer));
         if let Some(addr) = nearby {
             if let Ok(Ok(stream)) = timeout(DIAL_TIMEOUT, TcpStream::connect(addr)).await {
                 let _ = stream.set_nodelay(true);
-                return Ok(Box::new(stream));
+                return Ok((Box::new(stream), true));
             }
         }
         let bluetooth = self.bluetooth.read().unwrap().clone();
         if let Some(handle) = bluetooth.as_ref().and_then(|b| b.handle(&peer)) {
             // Bluetooth links take a few seconds to open.
             if let Ok(Ok(conn)) = timeout(Duration::from_secs(15), bluetooth.unwrap().dial(handle)).await {
-                return Ok(conn);
+                return Ok((conn, true));
             }
         }
         let tor = self.tor.read().unwrap().clone();
         match tor {
-            Some(tor) => tor.dial(peer).await,
+            Some(tor) => Ok((tor.dial(peer).await?, false)),
             None => anyhow::bail!("offline"),
         }
+    }
+
+    fn nearby(&self, peer: &[u8; 32]) -> bool {
+        self.nearby.read().unwrap().as_ref().is_some_and(|n| n.addr(peer).is_some())
+            || self.bluetooth.read().unwrap().as_ref().is_some_and(|b| b.handle(peer).is_some())
     }
 }
 

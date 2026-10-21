@@ -1,7 +1,9 @@
 //! The open session (identity + encrypted store + MLS + temp chats), and
 //! the network node that talks to friends over Tor.
 
+use super::call::CallInfo;
 use crate::frb_generated::StreamSink;
+use sanctum_core::call::{CallView, MediaHub};
 use sanctum_core::identity::{pair_fingerprint, safety_number};
 use sanctum_core::session::{Event, Paired, Session};
 use sanctum_net::nearby::{Bluetooth, Nearby, Reach};
@@ -48,8 +50,21 @@ pub fn session_open(
         .try_into()
         .map_err(|_| anyhow::anyhow!("store key must be 32 bytes"))?;
     let session = Session::open(secret, PathBuf::from(&dir).join("sanctum.db"), &key)?;
+    *MEDIA.lock().unwrap() = Some(session.media());
     *SESSION.lock().unwrap() = Some(Arc::new(Mutex::new(session)));
     Ok(())
+}
+
+/// The real profile's call media, for the phone's audio (`call_jni.rs`):
+/// reached without the session's lock, which may be busy.
+static MEDIA: LazyLock<Mutex<Option<MediaHub>>> = LazyLock::new(Default::default);
+
+pub(crate) fn media() -> Option<MediaHub> {
+    MEDIA.lock().unwrap().clone()
+}
+
+pub(crate) fn node() -> Option<Arc<Node>> {
+    NODE.lock().unwrap().clone()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -85,6 +100,11 @@ pub enum AppEventKind {
     /// pass without another, or their message arrives. Never stored, never
     /// notified, and not sent while the decoy profile shows.
     Typing,
+    /// A call rang, was answered or ended (`id`: the chat; `call`: where
+    /// it stands). Only for the real profile, never while the decoy shows.
+    Call,
+    /// A call to us went unanswered (`id`: the chat). Worth a notification.
+    MissedCall,
 }
 
 /// Where the connection to Tor stands.
@@ -106,6 +126,8 @@ pub struct AppEvent {
     /// `Typing`: who is writing, as this phone knows them (empty for other
     /// kinds).
     pub name: String,
+    /// `Call`: the call as it stands now.
+    pub call: Option<CallInfo>,
 }
 
 fn emit(kind: AppEventKind, id: i64) {
@@ -114,7 +136,17 @@ fn emit(kind: AppEventKind, id: i64) {
 
 fn emit_named(kind: AppEventKind, id: i64, name: String) {
     let net = STATUS.lock().unwrap().clone();
-    let _ = EVENTS.send(AppEvent { kind, id, net, name });
+    let _ = EVENTS.send(AppEvent { kind, id, net, name, call: None });
+}
+
+fn emit_call(view: CallView) {
+    let Ok(real) = real_session() else { return };
+    let (id, call) = {
+        let s = real.lock().unwrap();
+        (view.chat, super::call::info(view, &s))
+    };
+    let net = STATUS.lock().unwrap().clone();
+    let _ = EVENTS.send(AppEvent { kind: AppEventKind::Call, id, net, name: String::new(), call: Some(call) });
 }
 
 fn set_status(status: NetStatus, progress: u8, detail: impl Into<String>) {
@@ -273,6 +305,8 @@ pub fn bt_seen(id: Vec<u8>, handle: u64) -> anyhow::Result<()> {
     if let Some(node) = NODE.lock().unwrap().clone() {
         let _guard = RUNTIME.enter();
         node.dial_now(friend);
+        // Linked over Tor: the nearby link is faster.
+        node.prefer_nearby(friend, false);
     }
     Ok(())
 }
@@ -355,6 +389,7 @@ pub fn wipe_everything(paths: Vec<String>) -> anyhow::Result<()> {
     }
     SESSION.lock().unwrap().take();
     DECOY.lock().unwrap().take();
+    MEDIA.lock().unwrap().take();
     set_status(NetStatus::Off, 0, "Wiped");
     let mut failed = Vec::new();
     for path in paths {
@@ -415,6 +450,14 @@ fn emit_session(e: Event) {
                 emit_named(AppEventKind::Typing, chat, name);
             }
         }
+        // Likewise: the decoy never rings. A call nobody sees stops
+        // ringing by itself and becomes a missed call.
+        Event::Call(view) => {
+            if !profile_is_decoy() {
+                emit_call(view);
+            }
+        }
+        Event::MissedCall(id) => emit(AppEventKind::MissedCall, id),
     }
 }
 
@@ -635,7 +678,18 @@ pub(crate) fn session() -> anyhow::Result<Arc<Mutex<Session>>> {
 }
 
 pub(crate) fn with<T>(f: impl FnOnce(&mut Session) -> anyhow::Result<T>) -> anyhow::Result<T> {
-    let session = session()?;
+    with_session(session()?, f)
+}
+
+/// Like [`with`], on the real profile whatever the app shows (calls).
+pub(crate) fn with_real<T>(f: impl FnOnce(&mut Session) -> anyhow::Result<T>) -> anyhow::Result<T> {
+    with_session(real_session()?, f)
+}
+
+fn with_session<T>(
+    session: Arc<Mutex<Session>>,
+    f: impl FnOnce(&mut Session) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
     let mut guard = session.lock().unwrap();
     let out = f(&mut guard);
     // Pass events on, never drop them: some may be the network's (a message

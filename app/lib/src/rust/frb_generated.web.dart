@@ -6,6 +6,7 @@
 // Static analysis wrongly picks the IO variant, thus ignore this
 // ignore_for_file: argument_type_not_assignable
 
+import 'api/call.dart';
 import 'api/fedi.dart';
 import 'api/group.dart';
 import 'api/identity.dart';
@@ -55,6 +56,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AlbumView dco_decode_box_autoadd_album_view(dynamic raw);
 
   @protected
+  CallInfo dco_decode_box_autoadd_call_info(dynamic raw);
+
+  @protected
+  CallLogView dco_decode_box_autoadd_call_log_view(dynamic raw);
+
+  @protected
+  CallOutcomeView dco_decode_box_autoadd_call_outcome_view(dynamic raw);
+
+  @protected
   FediProblem dco_decode_box_autoadd_fedi_problem(dynamic raw);
 
   @protected
@@ -83,6 +93,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   UpdateInfo dco_decode_box_autoadd_update_info(dynamic raw);
+
+  @protected
+  CallInfo dco_decode_call_info(dynamic raw);
+
+  @protected
+  CallLogView dco_decode_call_log_view(dynamic raw);
+
+  @protected
+  CallOutcomeView dco_decode_call_outcome_view(dynamic raw);
+
+  @protected
+  CallPhaseView dco_decode_call_phase_view(dynamic raw);
 
   @protected
   CatchUpView dco_decode_catch_up_view(dynamic raw);
@@ -229,6 +251,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AlbumView? dco_decode_opt_box_autoadd_album_view(dynamic raw);
 
   @protected
+  CallInfo? dco_decode_opt_box_autoadd_call_info(dynamic raw);
+
+  @protected
+  CallLogView? dco_decode_opt_box_autoadd_call_log_view(dynamic raw);
+
+  @protected
+  CallOutcomeView? dco_decode_opt_box_autoadd_call_outcome_view(dynamic raw);
+
+  @protected
   FediProblem? dco_decode_opt_box_autoadd_fedi_problem(dynamic raw);
 
   @protected
@@ -351,6 +382,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AlbumView sse_decode_box_autoadd_album_view(SseDeserializer deserializer);
 
   @protected
+  CallInfo sse_decode_box_autoadd_call_info(SseDeserializer deserializer);
+
+  @protected
+  CallLogView sse_decode_box_autoadd_call_log_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  CallOutcomeView sse_decode_box_autoadd_call_outcome_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   FediProblem sse_decode_box_autoadd_fedi_problem(SseDeserializer deserializer);
 
   @protected
@@ -379,6 +423,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   UpdateInfo sse_decode_box_autoadd_update_info(SseDeserializer deserializer);
+
+  @protected
+  CallInfo sse_decode_call_info(SseDeserializer deserializer);
+
+  @protected
+  CallLogView sse_decode_call_log_view(SseDeserializer deserializer);
+
+  @protected
+  CallOutcomeView sse_decode_call_outcome_view(SseDeserializer deserializer);
+
+  @protected
+  CallPhaseView sse_decode_call_phase_view(SseDeserializer deserializer);
 
   @protected
   CatchUpView sse_decode_catch_up_view(SseDeserializer deserializer);
@@ -545,6 +601,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  CallInfo? sse_decode_opt_box_autoadd_call_info(SseDeserializer deserializer);
+
+  @protected
+  CallLogView? sse_decode_opt_box_autoadd_call_log_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  CallOutcomeView? sse_decode_opt_box_autoadd_call_outcome_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   FediProblem? sse_decode_opt_box_autoadd_fedi_problem(
     SseDeserializer deserializer,
   );
@@ -682,6 +751,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_call_info(
+    CallInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_call_log_view(
+    CallLogView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_call_outcome_view(
+    CallOutcomeView self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_fedi_problem(
     FediProblem self,
     SseSerializer serializer,
@@ -731,6 +818,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     UpdateInfo self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_call_info(CallInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_call_log_view(CallLogView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_call_outcome_view(
+    CallOutcomeView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_call_phase_view(CallPhaseView self, SseSerializer serializer);
 
   @protected
   void sse_encode_catch_up_view(CatchUpView self, SseSerializer serializer);
@@ -936,6 +1038,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_album_view(
     AlbumView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_call_info(
+    CallInfo? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_call_log_view(
+    CallLogView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_call_outcome_view(
+    CallOutcomeView? self,
     SseSerializer serializer,
   );
 

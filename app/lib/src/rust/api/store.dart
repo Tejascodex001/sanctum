@@ -4,10 +4,11 @@
 // ignore_for_file: invalid_use_of_internal_member, unused_import, unnecessary_import
 
 import '../frb_generated.dart';
+import 'call.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'poll.dart';
 
-// These functions are ignored because they are not marked as `pub`: `media_kind`, `now`, `reach`, `reaction_views`, `with`
+// These functions are ignored because they are not marked as `pub`: `call_log_view`, `media_kind`, `now`, `reach`, `reaction_views`, `with`
 
 /// Reacts to the message at `seq` with `emoji`, replacing our earlier
 /// reaction; an empty `emoji` takes it back. Shows on every phone in the
@@ -169,6 +170,26 @@ class AlbumView {
           title == other.title;
 }
 
+class CallLogView {
+  final CallOutcomeView outcome;
+
+  /// How long we talked.
+  final int seconds;
+
+  const CallLogView({required this.outcome, required this.seconds});
+
+  @override
+  int get hashCode => outcome.hashCode ^ seconds.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CallLogView &&
+          runtimeType == other.runtimeType &&
+          outcome == other.outcome &&
+          seconds == other.seconds;
+}
+
 enum ChatKindView { notes, direct, group }
 
 enum MediaKindView { image, video, audio, file }
@@ -256,6 +277,10 @@ class MessageView {
   /// Reactions, one entry per emoji, most used first.
   final List<ReactionView> reactions;
 
+  /// A call's record ("Voice call · 4:12", "Missed call"; the words are
+  /// in `body`). `from_me`: we called.
+  final CallLogView? call;
+
   const MessageView({
     required this.seq,
     required this.fromMe,
@@ -268,6 +293,7 @@ class MessageView {
     this.poll,
     this.album,
     required this.reactions,
+    this.call,
   });
 
   @override
@@ -282,7 +308,8 @@ class MessageView {
       media.hashCode ^
       poll.hashCode ^
       album.hashCode ^
-      reactions.hashCode;
+      reactions.hashCode ^
+      call.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -299,7 +326,8 @@ class MessageView {
           media == other.media &&
           poll == other.poll &&
           album == other.album &&
-          reactions == other.reactions;
+          reactions == other.reactions &&
+          call == other.call;
 }
 
 /// Everyone who reacted to a message with one emoji.

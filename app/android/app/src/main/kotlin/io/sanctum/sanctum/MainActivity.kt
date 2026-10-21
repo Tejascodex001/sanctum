@@ -137,6 +137,8 @@ class MainActivity : FlutterFragmentActivity() {
         if (intent == null) return
         val open = intent.getStringExtra(SanctumApplication.EXTRA_OPEN) ?: return
         intent.removeExtra(SanctumApplication.EXTRA_OPEN)
+        // A call ringing: answerable from the lock screen.
+        if (open.startsWith("call")) showOverLock(true)
         pendingOpen = open
         // Dart may already be listening; if not, it asks on resume.
         appChannel?.invokeMethod("open", open, object : MethodChannel.Result {
@@ -255,6 +257,10 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                         result.success(null)
                     }
+                    "callShowOverLock" -> {
+                        showOverLock(call.argument<Boolean>("on") == true)
+                        result.success(null)
+                    }
                     "installApk" -> result.success(installApk(call.argument<String>("path")!!))
                     "backgroundBrand" -> result.success(
                         mapOf("brand" to BackgroundSettings.brand(), "aggressive" to BackgroundSettings.aggressive()),
@@ -283,6 +289,18 @@ class MainActivity : FlutterFragmentActivity() {
                     else -> result.notImplemented()
                 }
             }
+        }
+    }
+
+    /** While a call rings or goes on: shown over the lock screen, waking it. */
+    private fun showOverLock(on: Boolean) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(on)
+            setTurnScreenOn(on)
+        } else {
+            @Suppress("DEPRECATION")
+            val flags = WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+            if (on) window.addFlags(flags) else window.clearFlags(flags)
         }
     }
 

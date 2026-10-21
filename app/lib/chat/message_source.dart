@@ -16,6 +16,7 @@ class ChatMessage {
     this.poll,
     this.album,
     this.reactions = const [],
+    this.call,
   });
 
   final String body;
@@ -46,6 +47,9 @@ class ChatMessage {
 
   /// Emoji reactions, most used first.
   final List<ReactionView> reactions;
+
+  /// A call's record (the words are in [body]); [fromMe]: we called.
+  final CallLogView? call;
 }
 
 /// The part of a message a reply shows.
@@ -93,6 +97,7 @@ class StoreSource implements MessageSource {
             poll: m.poll,
             album: m.album,
             reactions: m.reactions,
+            call: m.call,
             reply: m.reply == null
                 ? null
                 : ChatQuote(
