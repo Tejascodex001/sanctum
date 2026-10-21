@@ -80,6 +80,8 @@ cd app && flutter analyze && flutter test   # analyze must report no issues (CI 
   - Run timing-sensitive network tests several times; they must not be flaky.
 - **No Android SDK locally:** CI compiles the Kotlin and the APK, so review Kotlin changes carefully and check the CI run after pushing.
 - `net/src/https.rs` has an ignored live test against GitHub: `cargo test -p sanctum-net live -- --ignored`. Behind a TLS-inspecting proxy, set `EXTRA_CA`.
+- **Screenshots:** `cd app && SCREENSHOT_DIR=<dir> flutter test` saves PNGs of the main screens (dark and light, and the call screens). Look at them after UI changes.
+- **Sites you can't reach:** dev sandboxes often can't reach Fediverse sites. Parsers get fixture tests (see `net/src/fedi.rs`); describe anything unverified when you hand over.
 
 ## Product notes
 

@@ -16,7 +16,7 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 
 ✅ done · 🚧 partly done · ⏳ planned
 
-### Milestone v1: private messaging (current)
+### Milestone v1: private messaging
 
 | | Feature | Notes |
 |---|---|---|
@@ -51,7 +51,6 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Polls, date polls and plans** | Ask a question, find a day that works for everyone, or plan something (when and where) and see who's going. In friends' chats and groups |
 | ✅ | **Shared albums** | Albums in any chat or group. Everyone can add photos and videos, up to 30 at a time |
 | ✅ | **Daily moments** | One photo a day for all your friends, gone after 24 hours. Take it on the spot or pick one, and see friends' moments above your chats |
-| ✅ | **Voice calls** | Call a friend from their chat. Private through Tor by default (nobody learns who calls whom), faster on the same Wi-Fi, and nobody in between can listen. Rings like a phone call, works from the lock screen without saying who's calling, and leaves a record in the chat ("Voice call · 4:12", "Missed call") |
 | ✅ | **Reactions** | Hold a message for ❤️ 😂 😮 😢 🙏 👍 or any emoji, or double-tap for ❤️. Tap a reaction to add or take back yours; hold it to see who. Friends' chats and groups |
 | ✅ | **Typing** | "Asha is typing…" in friends' chats and groups. Sent only while you're both connected, never stored, and never what you type |
 | ✅ | **Settings** | Tap your sigil: your name, light or dark theme (or like the phone), accent colour (your sigil's or your pick), lock, staying connected, nearby, updates and panic wipe |
@@ -59,15 +58,21 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Search** | Type in the home search box to find any message, poll, plan or file name across your chats. Done on the phone; hidden chats only while revealed |
 | ✅ | **Catch-up** | "While you were away": who wrote, who mentioned you, plans to answer and polls waiting for you |
 
-### Milestone v3: calls
-🚧 Voice calls are in (through Tor, or the same Wi-Fi). Next: video calls and opt-in "Faster calls"
+### Milestone v3: calls (current)
+
+| | Feature | Notes |
+|---|---|---|
+| ✅ | **Voice calls** | Call a friend from their chat. Private through Tor by default (nobody learns who calls whom), faster on the same Wi-Fi, and nobody in between can listen. Rings like a phone call, works from the lock screen without saying who's calling, and leaves a record in the chat ("Voice call · 4:12", "Missed call") |
+| 🚧 | **Video calls** | Being built: start a call with video or turn it on during a call, switch cameras. Low quality through Tor, better on the same Wi-Fi or with Faster calls |
+| 🚧 | **Faster calls** | Being built: an opt-in Settings switch to connect calls straight between your phones when possible (less delay, but your friend's phone learns your internet address). Used only if both of you turn it on |
 
 ## How it works
 
 - **`core/` (Rust):** the identity (Ed25519; the same key is your Tor onion address), MLS (OpenMLS), the encrypted store, the protocol engine, groups, temp chats and sigils. It does no I/O, so whole conversations between phones are tested in-process.
 - **`net/` (Rust):** connections. Tor through Arti (onion services, plus HTTPS for updates), nearby Wi-Fi discovery, and the node that keeps live links to friends.
-- **`app/` (Flutter):** the UI. `app/rust/` is the bridge to Dart (flutter_rust_bridge). Android-specific code is in `app/android/` (scanner, background service, notifications, installer).
-- **`docs/DESIGN.md`:** the full design: architecture, encryption, protocol, groups, nearby, updates and the UI system.
+- **`app/` (Flutter):** the UI. `app/rust/` is the bridge to Dart (flutter_rust_bridge). Android-specific code is in `app/android/` (scanner, background service, notifications, installer, Bluetooth nearby, and call audio, which talks to Rust directly rather than through Dart).
+- **Reels** read public Fediverse sites (`net/src/fedi.rs`) and are ranked on the phone (`core/src/taste.rs`); nothing about what you watch leaves the phone.
+- **`docs/DESIGN.md`:** the full design: architecture, encryption, protocol, groups, nearby, calls, Reels, updates and the UI system.
 
 ## Build and test
 
