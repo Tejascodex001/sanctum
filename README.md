@@ -60,7 +60,7 @@ The UI is the **Sigil + Deck** design: every person and chat gets its own genera
 | ✅ | **Catch-up** | "While you were away": who wrote, who mentioned you, plans to answer and polls waiting for you |
 
 ### Milestone v3: calls
-⏳ Voice and video calls, with no IP exposure
+🚧 Voice calls are in (through Tor, or the same Wi-Fi). Next: video calls and opt-in "Faster calls"
 
 ## How it works
 
