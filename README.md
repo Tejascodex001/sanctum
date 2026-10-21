@@ -43,7 +43,7 @@ Each person and each chat gets its own **sigil**: a unique piece of artwork made
 
 Each release is told apart by its build number.
 
-1. Download `app-release.apk` from the latest [release](../../releases/latest) (`build-N`).
+1. Download `sanctum.apk` from the latest [release](../../releases/latest) (`build-N`).
 2. Install it. Android asks once to allow installs from your browser or file manager.
 3. **After that, update from inside the app.** When a new build is out, Sanctum shows "Build N is available". **What's new** lists the changes since your build, and **Update** downloads it through Tor and opens Android's installer. Android accepts only builds signed with the same key, so a tampered APK can't be installed.
 
