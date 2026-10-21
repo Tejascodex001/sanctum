@@ -239,6 +239,9 @@ enum AppEventKind {
 
   /// A call to us went unanswered (`id`: the chat). Worth a notification.
   missedCall,
+
+  /// Feedback arrived in the developer's inbox (see `feedback`).
+  feedback,
 }
 
 class FriendView {

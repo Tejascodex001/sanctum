@@ -39,7 +39,7 @@ class Notifier with WidgetsBindingObserver {
 
   static int _notificationId(String key) {
     final id = int.parse(key.substring(2));
-    // 1: the connection notice, 2: friend requests.
+    // 1: the connection notice, 2: friend requests, 3: feedback.
     return key.startsWith('c:') ? 1000 + id : 1000000 + id;
   }
 
@@ -104,6 +104,8 @@ class Notifier with WidgetsBindingObserver {
         if (!_foreground && !Profile.decoy.value) await _notifyRequest();
       case AppEventKind.missedCall:
         await _missedCall(e.id.toInt());
+      case AppEventKind.feedback:
+        if (!Profile.decoy.value) await _notifyFeedback();
       default:
         break;
     }
@@ -161,6 +163,28 @@ class Notifier with WidgetsBindingObserver {
       open: key,
       count: count,
     );
+  }
+
+  /// Feedback reached the developer's inbox. Never says what it says.
+  Future<void> _notifyFeedback() async {
+    _feedback++;
+    await Background.notify(
+      id: 3,
+      channel: Background.requests,
+      title: 'New feedback',
+      body: _feedback == 1 ? 'Someone sent you feedback' : '$_feedback new pieces of feedback',
+      open: 'feedback',
+      count: _feedback,
+    );
+  }
+
+  /// Feedback that arrived since the inbox was last opened.
+  int _feedback = 0;
+
+  /// The inbox is on screen: the feedback notification goes.
+  void feedbackSeen() {
+    _feedback = 0;
+    Background.cancel(3);
   }
 
   Future<void> _notifyRequest() async {

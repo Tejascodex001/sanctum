@@ -5,7 +5,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 ## Non-negotiables
 
 - **Privacy:**
-  - The app connects to friends, update servers and the Fediverse sites Reels reads **only through Tor**. Three opt-in exceptions, all off by default: Nearby (the local Wi-Fi and Bluetooth); "Faster reels", which fetches Reels (and only Reels) directly so the video sites see the phone's address; and "Faster calls", which sends a call's sealed audio and video straight between the two phones (UDP) only when **both** have it on, so each learns the other's address. With Faster reels off, video plays through the on-phone relay (`net/src/relay.rs`); never hand a player or WebView a remote URL then.
+  - The app connects to friends, update servers, the Fediverse sites Reels reads and the developer's feedback inbox **only through Tor**. Three opt-in exceptions, all off by default: Nearby (the local Wi-Fi and Bluetooth); "Faster reels", which fetches Reels (and only Reels) directly so the video sites see the phone's address; and "Faster calls", which sends a call's sealed audio and video straight between the two phones (UDP) only when **both** have it on, so each learns the other's address. With Faster reels off, video plays through the on-phone relay (`net/src/relay.rs`); never hand a player or WebView a remote URL then.
   - No analytics, no crash reporting, no Google services (no ML Kit, no Firebase, no Play Services). Notifications are posted on the phone itself.
   - Message content never leaves the encrypted store or MLS: not in notifications, logs or URLs.
 - **Strictly on-device:** no backups (`allowBackup` stays off), no cloud.
@@ -38,6 +38,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `core/src/call.rs` | 1:1 voice and video calls: signaling inside MLS, sealed media packets (`MediaHub`), replay window, jitter buffer |
 | `core/src/video.rs` | Video in calls: fragments and reassembly, rate control, sound before pictures |
 | `core/src/direct.rs` | Faster calls: direct routes, the address filter, probing and falling back to the link |
+| `core/src/feedback.rs` | Feedback to the developer: the form's contents, the wire format, the sender's queue and the developer's inbox. `net/src/feedback.rs` delivers it over its own onion service; the address builds send to is `DEVELOPER` in `app/rust/src/api/feedback.rs` |
 | `core/src/moment.rs` | Daily moments: one photo a day for every friend, gone after 24 hours |
 | `core/src/store.rs` | The encrypted SQLite store. Every row is sealed; index columns are keyed hashes |
 | `core/src/protocol.rs` | Wire types: `Frame` (link level) and `Content` (inside MLS) |

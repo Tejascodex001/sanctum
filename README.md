@@ -75,6 +75,7 @@ Each release is told apart by its build number.
 | ✅ | **Panic wipe** | Hold 2 seconds, even from the lock screen. Destroys the keys and data, then closes the app |
 | ✅ | **Encrypted storage** | SQLite with every row sealed (XChaCha20-Poly1305), keys in Android Keystore, no backups |
 | ✅ | **Over-the-air updates** | Checked and downloaded through Tor, with changelogs |
+| ✅ | **Send feedback** | Stars, what you think, and (if you like) your phone's model and Android version, sent straight to the developer's own Sanctum through Tor. Nobody sees who sent it. Opens once the developer's feedback address is in a release |
 | ✅ | **Media** | Photos up to 10 MB, videos up to 20 MB, files up to 50 MB, end-to-end encrypted and stored encrypted. Photos are resized and lose hidden metadata like location |
 | ✅ | **Voice notes** | Hold the mic to record, release to send, slide left to cancel. Encrypted like any attachment |
 | ✅ | **Sanctum PIN & decoy PIN** | An optional PIN of its own (fingerprint still works). A decoy PIN opens an empty-looking Sanctum with its own data, while your real chats stay hidden and silent |

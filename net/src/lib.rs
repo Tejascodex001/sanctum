@@ -6,6 +6,7 @@
 
 pub mod direct;
 pub mod engine;
+pub mod feedback;
 pub mod fedi;
 pub mod https;
 pub mod nearby;

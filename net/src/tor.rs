@@ -13,7 +13,8 @@ use std::sync::Arc;
 use tor_cell::relaycell::msg::Connected;
 use tor_hscrypto::pk::HsIdKeypair;
 use tor_hsservice::config::OnionServiceConfigBuilder;
-use tor_hsservice::{handle_rend_requests, RunningOnionService};
+use tor_hsservice::handle_rend_requests;
+pub use tor_hsservice::RunningOnionService;
 use tor_llcrypto::pk::ed25519;
 
 /// The virtual port Sanctum listens on inside its onion service.
@@ -87,34 +88,8 @@ impl Tor {
             client: client.isolated_client(),
         }));
 
-        let service_config = OnionServiceConfigBuilder::default()
-            .nickname("sanctum".parse()?)
-            .build()?;
-        let keypair: HsIdKeypair =
-            ed25519::ExpandedKeypair::from(&ed25519::Keypair::from_bytes(&identity_secret)).into();
-        // The key is stored by Arti on first launch; later launches load it.
-        let launched = match client.launch_onion_service_with_hsid(service_config.clone(), keypair)
-        {
-            Ok(launched) => launched.map(|(service, requests)| (service, requests.boxed())),
-            Err(_) => client
-                .launch_onion_service(service_config)?
-                .map(|(service, requests)| (service, requests.boxed())),
-        };
-        let (service, requests) =
-            launched.ok_or_else(|| anyhow::anyhow!("onion service disabled"))?;
-
         let accepting = Arc::clone(&node);
-        tokio::spawn(async move {
-            let mut streams = handle_rend_requests(requests);
-            while let Some(request) = streams.next().await {
-                let node = Arc::clone(&accepting);
-                tokio::spawn(async move {
-                    if let Ok(stream) = request.accept(Connected::new_empty()).await {
-                        node.accept(Box::new(stream));
-                    }
-                });
-            }
-        });
+        let service = launch(&client, "sanctum", &identity_secret, move |conn| accepting.accept(conn))?;
         node.set_online(true);
         Ok((
             Arc::new(Self {
@@ -143,6 +118,64 @@ impl Tor {
     pub fn client(&self) -> &Arc<TorClient<Runtime>> {
         &self.client
     }
+
+    /// Starts the feedback onion service (see `sanctum_core::feedback`)
+    /// for the feedback key `secret`; every connection to it goes to
+    /// `accept`. It runs until the returned service is dropped.
+    pub fn serve_feedback(
+        &self,
+        secret: &[u8; 32],
+        accept: impl Fn(BoxConn) + Send + Sync + 'static,
+    ) -> anyhow::Result<Arc<RunningOnionService>> {
+        launch(&self.client, "feedback", secret, accept)
+    }
+
+    /// Connects to `peer`'s onion service on circuits of its own, shared
+    /// with nothing else (for sending feedback).
+    pub async fn dial_alone(&self, peer: &[u8; 32]) -> anyhow::Result<BoxConn> {
+        let stream = self
+            .client
+            .isolated_client()
+            .connect((onion_address(peer).as_str(), PORT))
+            .await?;
+        Ok(Box::new(stream))
+    }
+}
+
+/// Launches an onion service named `nickname` whose key is `secret`, and
+/// hands each connection made to it to `accept`.
+fn launch(
+    client: &TorClient<Runtime>,
+    nickname: &str,
+    secret: &[u8; 32],
+    accept: impl Fn(BoxConn) + Send + Sync + 'static,
+) -> anyhow::Result<Arc<RunningOnionService>> {
+    let service_config = OnionServiceConfigBuilder::default()
+        .nickname(nickname.parse()?)
+        .build()?;
+    let keypair: HsIdKeypair =
+        ed25519::ExpandedKeypair::from(&ed25519::Keypair::from_bytes(secret)).into();
+    // The key is stored by Arti on first launch; later launches load it.
+    let launched = match client.launch_onion_service_with_hsid(service_config.clone(), keypair) {
+        Ok(launched) => launched.map(|(service, requests)| (service, requests.boxed())),
+        Err(_) => client
+            .launch_onion_service(service_config)?
+            .map(|(service, requests)| (service, requests.boxed())),
+    };
+    let (service, requests) = launched.ok_or_else(|| anyhow::anyhow!("onion service disabled"))?;
+    let accept = Arc::new(accept);
+    tokio::spawn(async move {
+        let mut streams = handle_rend_requests(requests);
+        while let Some(request) = streams.next().await {
+            let accept = Arc::clone(&accept);
+            tokio::spawn(async move {
+                if let Ok(stream) = request.accept(Connected::new_empty()).await {
+                    accept(Box::new(stream));
+                }
+            });
+        }
+    });
+    Ok(service)
 }
 
 #[cfg(test)]

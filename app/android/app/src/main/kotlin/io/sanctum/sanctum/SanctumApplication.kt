@@ -99,6 +99,10 @@ class SanctumApplication : Application() {
                     "buildNumber" -> result.success(
                         PackageInfoCompat.getLongVersionCode(packageManager.getPackageInfo(packageName, 0)),
                     )
+                    // For feedback, if the person chooses to include it.
+                    "deviceInfo" -> result.success(
+                        mapOf("maker" to Build.MANUFACTURER, "model" to Build.MODEL, "android" to Build.VERSION.RELEASE),
+                    )
                     "nearbyLock" -> {
                         // Some phones drop local broadcasts (the nearby
                         // beacons) unless an app asks to hear them.

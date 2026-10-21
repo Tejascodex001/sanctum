@@ -5,6 +5,7 @@
 
 import 'api/call.dart';
 import 'api/fedi.dart';
+import 'api/feedback.dart';
 import 'api/group.dart';
 import 'api/identity.dart';
 import 'api/moment.dart';
@@ -67,6 +68,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   FediProblem dco_decode_box_autoadd_fedi_problem(dynamic raw);
+
+  @protected
+  FeedbackForm dco_decode_box_autoadd_feedback_form(dynamic raw);
+
+  @protected
+  FeedbackItem dco_decode_box_autoadd_feedback_item(dynamic raw);
 
   @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
@@ -153,6 +160,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FediSourceProblem dco_decode_fedi_source_problem(dynamic raw);
 
   @protected
+  FeedbackForm dco_decode_feedback_form(dynamic raw);
+
+  @protected
+  FeedbackItem dco_decode_feedback_item(dynamic raw);
+
+  @protected
+  FeedbackSent dco_decode_feedback_sent(dynamic raw);
+
+  @protected
   FriendView dco_decode_friend_view(dynamic raw);
 
   @protected
@@ -187,6 +203,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FediSourceProblem> dco_decode_list_fedi_source_problem(dynamic raw);
+
+  @protected
+  List<FeedbackItem> dco_decode_list_feedback_item(dynamic raw);
 
   @protected
   List<FriendView> dco_decode_list_friend_view(dynamic raw);
@@ -440,6 +459,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   FediProblem sse_decode_box_autoadd_fedi_problem(SseDeserializer deserializer);
 
   @protected
+  FeedbackForm sse_decode_box_autoadd_feedback_form(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  FeedbackItem sse_decode_box_autoadd_feedback_item(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
@@ -526,6 +555,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  FeedbackForm sse_decode_feedback_form(SseDeserializer deserializer);
+
+  @protected
+  FeedbackItem sse_decode_feedback_item(SseDeserializer deserializer);
+
+  @protected
+  FeedbackSent sse_decode_feedback_sent(SseDeserializer deserializer);
+
+  @protected
   FriendView sse_decode_friend_view(SseDeserializer deserializer);
 
   @protected
@@ -562,6 +600,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<FediSourceProblem> sse_decode_list_fedi_source_problem(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<FeedbackItem> sse_decode_list_feedback_item(
     SseDeserializer deserializer,
   );
 
@@ -867,6 +910,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_feedback_form(
+    FeedbackForm self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_feedback_item(
+    FeedbackItem self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
     SseSerializer serializer,
@@ -978,6 +1033,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_feedback_form(FeedbackForm self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_feedback_item(FeedbackItem self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_feedback_sent(FeedbackSent self, SseSerializer serializer);
+
+  @protected
   void sse_encode_friend_view(FriendView self, SseSerializer serializer);
 
   @protected
@@ -1022,6 +1086,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_fedi_source_problem(
     List<FediSourceProblem> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_feedback_item(
+    List<FeedbackItem> self,
     SseSerializer serializer,
   );
 

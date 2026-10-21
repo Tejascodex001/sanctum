@@ -20,6 +20,8 @@ static SESSION: LazyLock<Mutex<Option<Arc<Mutex<Session>>>>> = LazyLock::new(Def
 static DECOY: LazyLock<Mutex<Option<Arc<Mutex<Session>>>>> = LazyLock::new(Default::default);
 static USE_DECOY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static NODE: LazyLock<Mutex<Option<Arc<Node>>>> = LazyLock::new(Default::default);
+/// Tor, once it's up.
+pub(crate) static TOR: LazyLock<Mutex<Option<Arc<sanctum_net::tor::Tor>>>> = LazyLock::new(Default::default);
 /// How friends are reached: directly when nearby, else over Tor once it's up.
 static REACH: LazyLock<Arc<Reach>> = LazyLock::new(Default::default);
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
@@ -105,6 +107,8 @@ pub enum AppEventKind {
     Call,
     /// A call to us went unanswered (`id`: the chat). Worth a notification.
     MissedCall,
+    /// Feedback arrived in the developer's inbox (see `feedback`).
+    Feedback,
 }
 
 /// Where the connection to Tor stands.
@@ -130,7 +134,7 @@ pub struct AppEvent {
     pub call: Option<CallInfo>,
 }
 
-fn emit(kind: AppEventKind, id: i64) {
+pub(crate) fn emit(kind: AppEventKind, id: i64) {
     emit_named(kind, id, String::new());
 }
 
@@ -227,10 +231,11 @@ pub fn net_start(
         match started {
             Ok((tor, _)) => {
                 *super::update::CONNECT.lock().unwrap() = Some(tor.connector());
-                // Keep Tor running for the life of the app.
-                std::mem::forget(tor);
+                // Kept for the life of the app, which keeps Tor running.
+                *TOR.lock().unwrap() = Some(tor);
                 node.reconnect_now();
                 set_status(NetStatus::Online, 100, "Connected");
+                super::feedback::tor_up();
             }
             Err(e) => set_status(NetStatus::Failed, 0, format!("{e:#}")),
         }
@@ -387,6 +392,7 @@ pub fn wipe_everything(paths: Vec<String>) -> anyhow::Result<()> {
     if let Some(node) = NODE.lock().unwrap().take() {
         node.shutdown_links();
     }
+    super::feedback::stop();
     SESSION.lock().unwrap().take();
     DECOY.lock().unwrap().take();
     MEDIA.lock().unwrap().take();
