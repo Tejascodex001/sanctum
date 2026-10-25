@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -18,12 +19,15 @@ import '../sigil/sigil_look.dart';
 /// The app stays mounted underneath, so unlocking returns you to exactly
 /// where you were.
 class AppLock extends StatefulWidget {
-  const AppLock({super.key, required this.child, required this.sigil});
+  const AppLock({super.key, required this.child, required this.sigil, @visibleForTesting this.auth});
 
   final Widget child;
 
   /// The user's own sigil, shown on the lock screen.
   final SigilSpec sigil;
+
+  /// The system fingerprint / screen-lock check (tests pass a fake).
+  final LocalAuthentication? auth;
 
   @override
   State<AppLock> createState() => _AppLockState();
@@ -55,8 +59,26 @@ class AppLock extends StatefulWidget {
 }
 
 class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerProviderStateMixin {
-  final _auth = LocalAuthentication();
+  late final LocalAuthentication _auth = widget.auth ?? LocalAuthentication();
   bool _authenticating = false;
+
+  /// Which attempt is current. A stuck attempt that the system never
+  /// finished (some phones restart the screen around the fingerprint
+  /// sheet) is replaced, and the old one's late answer is ignored.
+  int _run = 0;
+
+  /// The current attempt has gone on for a few seconds, so a tap may replace it.
+  bool _hung = false;
+  Timer? _hungTimer;
+
+  /// Short identifier of the last failed check (null: none, or just
+  /// cancelled). Shown small so a tester can report it.
+  String? _failure;
+
+  /// Automatic tries since the last tap, and when the next may start:
+  /// keeps a failing phone from flashing the sheet again and again.
+  int _autoRetries = 0;
+  DateTime _retryNotBefore = DateTime.fromMillisecondsSinceEpoch(0);
 
   /// Ask for unlock as soon as the app is on screen. The engine can start
   /// before any screen exists (it outlives the activity, see
@@ -86,8 +108,12 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
   }
 
   Future<void> _refreshPinMode() async {
-    final pin = await hasPin();
-    if (mounted) setState(() => _pinMode = pin);
+    try {
+      final pin = await hasPin();
+      if (mounted) setState(() => _pinMode = pin);
+    } catch (_) {
+      // Unreadable storage: keep what the screen shows now.
+    }
   }
 
   /// Unlocks into the real profile or the decoy.
@@ -105,7 +131,13 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
     final wait = _waitUntil;
     if (wait != null && DateTime.now().isBefore(wait)) return;
     setState(() => _checking = true);
-    final match = await checkPin(_entered);
+    PinMatch match;
+    try {
+      match = await checkPin(_entered);
+    } catch (_) {
+      // Storage couldn't be read: never let the PIN screen hang.
+      match = PinMatch.wrong;
+    }
     if (!mounted) return;
     setState(() => _checking = false);
     if (match == PinMatch.wrong) {
@@ -131,6 +163,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _hungTimer?.cancel();
     _lock.dispose();
     _pulse.dispose();
     _shake.dispose();
@@ -144,6 +177,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
       _lock.value = 1;
       _promptWhenVisible = true;
       _entered = '';
+      _failure = null;
       _refreshPinMode();
     }
     if (state == AppLifecycleState.resumed) _maybePrompt();
@@ -154,27 +188,100 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
     if (!_promptWhenVisible || _lock.value < 1) return;
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) return;
     if (AppLock.holdPrompt.value) return;
+    if (DateTime.now().isBefore(_retryNotBefore)) return;
     _promptWhenVisible = false;
     _unlock();
   }
 
-  Future<void> _unlock() async {
-    if (_authenticating) return;
+  /// [manual]: the person tapped. A check that has hung for a few seconds
+  /// is then cancelled and started afresh.
+  Future<void> _unlock({bool manual = false}) async {
+    if (_authenticating) {
+      if (!manual || !_hung) return;
+      unawaited(_stopAuth());
+    }
+    if (manual) _autoRetries = 0;
+    final run = ++_run;
     _authenticating = true;
+    _hung = false;
+    _hungTimer?.cancel();
+    _hungTimer = Timer(const Duration(seconds: 3), () => _hung = true);
+    if (_failure != null && mounted) setState(() => _failure = null);
+    var ok = false;
+    String? failure;
     try {
-      final supported = await _auth.isDeviceSupported();
-      // Without a screen lock there is nothing to check against (with a
-      // Sanctum PIN, the PIN is).
-      if (!supported && _pinMode) return;
-      final ok = !supported || await _auth.authenticate(localizedReason: 'Unlock Sanctum');
-      // Biometrics always open the real profile.
-      if (ok) await _open(decoy: false);
-    } on LocalAuthException {
-      // Cancelled or locked out; stay locked and let the user retry.
-    } finally {
-      _authenticating = false;
+      ok = await _check();
+    } catch (e) {
+      failure = _failureCode(e);
+      // Whatever the system left half-open must not block the next try.
+      if (run == _run) await _stopAuth();
+    }
+    if (run != _run) return; // replaced by a newer attempt
+    _authenticating = false;
+    _hungTimer?.cancel();
+    if (failure != null) {
+      // A cancel is the person's choice; anything else is worth a try
+      // again later (a couple of times) and a visible way to retry.
+      if (failure != _cancelled && _autoRetries < 2) {
+        _autoRetries++;
+        _promptWhenVisible = true;
+        _retryNotBefore = DateTime.now().add(const Duration(seconds: 2));
+      }
+      if (mounted) setState(() => _failure = failure == _cancelled ? null : failure);
+      return;
+    }
+    // Biometrics always open the real profile.
+    if (ok) {
+      _autoRetries = 0;
+      await _open(decoy: false);
     }
   }
+
+  static const _cancelled = 'userCanceled';
+
+  /// Asks the system for the unlock; throws if it fails or hangs.
+  Future<bool> _check() async {
+    for (var attempt = 0;; attempt++) {
+      try {
+        final supported = await _auth.isDeviceSupported().timeout(const Duration(seconds: 10));
+        // Without a screen lock there is nothing to check against (with a
+        // Sanctum PIN, the PIN is).
+        if (!supported && _pinMode) return false;
+        if (!supported) return true;
+        return await _auth.authenticate(localizedReason: 'Unlock Sanctum').timeout(const Duration(seconds: 30));
+      } on LocalAuthException catch (e) {
+        // An earlier sheet the system never closed: cancel it, try once more.
+        if (e.code != LocalAuthExceptionCode.authInProgress || attempt > 0) rethrow;
+        await _stopAuth();
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
+    }
+  }
+
+  Future<void> _stopAuth() async {
+    try {
+      await _auth.stopAuthentication().timeout(const Duration(seconds: 3));
+    } catch (_) {}
+  }
+
+  /// A short, harmless identifier of what went wrong (never any user data).
+  static String _failureCode(Object e) {
+    if (e is LocalAuthException) return e.code.name;
+    if (e is PlatformException) return e.code;
+    if (e is TimeoutException) return 'timeout';
+    return 'unknown';
+  }
+
+  /// What the lock screen says when the check failed, with the small
+  /// identifier under it.
+  Widget _failureNote({required String message}) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(message, textAlign: TextAlign.center, style: AppText.caption.copyWith(color: Palette.danger)),
+          const SizedBox(height: Space.xs),
+          Text('Error: $_failure', textAlign: TextAlign.center, style: AppText.micro),
+        ],
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -249,11 +356,15 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
               ),
             ),
             SizedBox(
-              height: 28,
-              child: Center(
-                child: Text(
-                  waiting ? 'Too many tries: wait a moment' : '',
-                  style: AppText.caption.copyWith(color: Palette.danger),
+              height: 56,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: Space.xl),
+                child: Center(
+                  child: waiting
+                      ? Text('Too many tries: wait a moment', style: AppText.caption.copyWith(color: Palette.danger))
+                      : _failure == null
+                          ? const SizedBox.shrink()
+                          : _failureNote(message: 'Couldn\'t check your fingerprint. Enter your PIN or try again.'),
                 ),
               ),
             ),
@@ -266,7 +377,8 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                key(const Icon(Icons.fingerprint_rounded, size: 30), _unlock, tooltip: 'Fingerprint or face'),
+                key(const Icon(Icons.fingerprint_rounded, size: 30), () => _unlock(manual: true),
+                    tooltip: 'Fingerprint or face'),
                 digit('0'),
                 key(
                   const Icon(Icons.backspace_outlined),
@@ -302,7 +414,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
       color: widget.sigil.look.background.color,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: _unlock,
+        onTap: () => _unlock(manual: true),
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -320,11 +432,23 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver, TickerPr
               child: Text('Sanctum', style: AppText.display),
             ),
             Align(
-              alignment: const Alignment(0, 0.8),
-              child: FadeTransition(
-                opacity: Tween(begin: 0.35, end: 0.9).animate(_pulse),
-                child: Text('TAP TO UNLOCK', style: AppText.overline),
-              ),
+              alignment: Alignment(0, _failure != null ? 0.6 : 0.8),
+              child: _failure != null
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: Space.xl),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _failureNote(message: 'Couldn\'t check your fingerprint. Tap to try again.'),
+                          const SizedBox(height: Space.md),
+                          FilledButton.tonal(onPressed: () => _unlock(manual: true), child: const Text('Try again')),
+                        ],
+                      ),
+                    )
+                  : FadeTransition(
+                      opacity: Tween(begin: 0.35, end: 0.9).animate(_pulse),
+                      child: Text('TAP TO UNLOCK', style: AppText.overline),
+                    ),
             ),
             // In an emergency, wiping mustn't need unlocking first.
             Align(

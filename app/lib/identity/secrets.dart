@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../src/rust/api/identity.dart';
@@ -10,8 +11,21 @@ import '../src/rust/api/store.dart';
 
 /// Device secrets and profile, kept in Keystore-backed storage. They never
 /// leave the device and are lost if the app is uninstalled.
-const _storage = FlutterSecureStorage();
+///
+/// `resetOnError: false`: if the phone's key store can't decrypt something
+/// (some phones' system software is flaky about it), the storage must
+/// report an error and keep what it has. The default would silently erase
+/// everything, and the keys below would then be made afresh, locking you
+/// out of your own chats.
+FlutterSecureStorage _storage = const FlutterSecureStorage(aOptions: AndroidOptions(resetOnError: false));
 
+/// Tests swap in a storage that fails on demand.
+@visibleForTesting
+set secretsStorage(FlutterSecureStorage s) => _storage = s;
+
+/// A key that isn't stored yet (`read` gives null: first run) is made and
+/// saved. If the read itself fails, the error is passed on: a key is never
+/// made afresh over one that exists but can't be read right now.
 Future<Uint8List> _loadOrCreate(String key, Future<Uint8List> Function() create) async {
   final stored = await _storage.read(key: key);
   if (stored != null) return base64Decode(stored);
@@ -33,14 +47,24 @@ Future<void> saveDisplayName(String name) => _storage.write(key: 'display_name',
 
 /// On/off settings, kept with the rest of the profile.
 Future<bool> loadFlag(String key, {required bool fallback}) async {
-  final v = await _storage.read(key: 'flag_$key');
-  return v == null ? fallback : v == '1';
+  try {
+    final v = await _storage.read(key: 'flag_$key');
+    return v == null ? fallback : v == '1';
+  } catch (_) {
+    return fallback;
+  }
 }
 
 Future<void> saveFlag(String key, bool on) => _storage.write(key: 'flag_$key', value: on ? '1' : '0');
 
 /// Other settings, as text (null: not set).
-Future<String?> loadSetting(String key) => _storage.read(key: 'setting_$key');
+Future<String?> loadSetting(String key) async {
+  try {
+    return await _storage.read(key: 'setting_$key');
+  } catch (_) {
+    return null;
+  }
+}
 
 Future<void> saveSetting(String key, String? value) =>
     value == null ? _storage.delete(key: 'setting_$key') : _storage.write(key: 'setting_$key', value: value);
