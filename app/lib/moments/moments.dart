@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../background/background.dart';
+import '../app_visible.dart';
 import '../net/net_bus.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/moment.dart';
@@ -47,7 +48,9 @@ class _MomentsStripState extends State<MomentsStrip> {
     _load();
     _events = NetBus.instance.events.where((e) => e.kind == AppEventKind.moments).listen((_) => _load());
     // Moments expire on their own; look again now and then.
-    _tick = Timer.periodic(const Duration(minutes: 5), (_) => _load());
+    _tick = Timer.periodic(const Duration(minutes: 5), (_) {
+      if (appVisible) _load();
+    });
   }
 
   @override
@@ -240,7 +243,8 @@ class _Bubble extends StatelessWidget {
                       padding: const EdgeInsets.all(2),
                       decoration: BoxDecoration(color: Palette.bg, shape: BoxShape.circle),
                       child: Container(
-                        decoration: BoxDecoration(color: sigil?.look.accent.color ?? Palette.text, shape: BoxShape.circle),
+                        decoration:
+                            BoxDecoration(color: sigil?.look.accent.color ?? Palette.text, shape: BoxShape.circle),
                         child: Icon(Icons.add_rounded,
                             size: 18, color: Palette.onColor(sigil?.look.accent.color ?? Palette.text)),
                       ),

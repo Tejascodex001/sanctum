@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../app_visible.dart';
 import '../background/background.dart';
 import '../update/updater.dart';
 import '../src/rust/api/session.dart';
@@ -16,6 +17,7 @@ class NetBus {
   final status = ValueNotifier<NetInfo>(
     const NetInfo(status: NetStatus.off, progress: 0, detail: ''),
   );
+
   /// Friends' chats whose friend is connected right now.
   final online = ValueNotifier<Set<int>>(const {});
 
@@ -59,7 +61,11 @@ class NetBus {
     await _setBluetooth(on);
     _nearbyPoll?.cancel();
     // Beacons come and go without events; look every few seconds.
-    _nearbyPoll = on ? Timer.periodic(const Duration(seconds: 5), (_) => refreshOnline()) : null;
+    _nearbyPoll = on
+        ? Timer.periodic(const Duration(seconds: 5), (_) {
+            if (appVisible) refreshOnline();
+          })
+        : null;
     await refreshOnline();
   }
 

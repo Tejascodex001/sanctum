@@ -136,6 +136,8 @@ Photos, videos and files (`core/src/media.rs`).
 - **Viewing:** photos are decrypted in memory. Videos play in the app from a temporary decrypted copy, which is deleted when the player closes and on every start. Files open in another app through a read-only link.
 - **Voice notes** are attachments too: AAC in .m4a, mono at 48 kbps, recorded only while the mic is held. They play in the app from a temporary decrypted copy.
 - **Limits:** photos 10 MB, videos 20 MB, voice notes 10 MB (about 25 minutes), files 50 MB. Enforced when sending and when receiving: a bigger attachment is refused. Temp chats have none, because they're memory-only.
+- **Save to phone:** attachments are never written to the gallery or shared storage by themselves; the only copies outside the encrypted media folder are temporary and private to the app (`open/` for decrypted viewing, `outgoing/` for what's being sent), both emptied on every start. An explicit "Save to phone" (photo, video, voice note, file) writes one copy: Android 10+ through MediaStore into `Pictures`, `Movies`, `Music` or `Downloads` under `Sanctum/` (no permission), Android 9 and older through the system "save as" screen.
+- **Opening files:** the type comes from the stored type, or from the file name when it is missing (`application/octet-stream`); the read grant travels with the intent (`ClipData`); a failure says which of "no app can open it", "couldn't share it" or "file missing" happened. Photos the phone can't decode (HEIC on old phones) go as plain files; videos the phone can't play say so and offer Save to phone.
 - Deleting a message or chat deletes its files; panic wipe deletes the media folder.
 
 ## Polls and plans
@@ -256,6 +258,8 @@ On the phone, over the sealed store (`core/src/recall.rs`). Nothing is indexed i
 
 ## Security features
 - **App lock** with biometrics or the device PIN. It locks again when the app goes to the background and prompts as soon as the app is back on screen.
+  - Some phones close the app's screen around the fingerprint prompt and leave Android's "check in progress" flag set, which used to block every later try. The check has a timeout; on any failure the pending check is cancelled and retried (at most twice by itself), a tap on "Try again" can replace a hung check, and the screen shows a short error code testers can report.
+  - **Secure storage never makes new keys by accident.** The keys are read from Android's Keystore-backed storage with `resetOnError: false`. Only a read that returns *nothing* (first run) creates keys; a read that fails stops startup with a "Try again" screen instead of minting a new identity that couldn't open the old database.
 - **Screenshots** are blocked by default (`FLAG_SECURE`, which also blanks the recents preview). A chat can allow them from the camera icon in its header, after a biometric check, and only while that chat is open.
 - **Hidden chats.** Long-press a chat to hide it.
   - Long-press the "Sanctum" wordmark and pass a biometric check to show hidden chats until the app leaves the screen.
@@ -270,6 +274,8 @@ On the phone, over the sealed store (`core/src/recall.rs`). Nothing is indexed i
   - The network keeps serving the real profile in the background. Its notifications are muted until a real unlock.
   - In the decoy, the settings don't show that a decoy PIN exists.
 - Verification: both people see the same sigil for their chat. If the sigils match, the chat is secure.
+- **Verification belongs to people, not groups.** A group has no verify button; a member we verified in a direct chat stays verified when we meet them in a group, and updates to a group's member list (someone joins, a rename) keep what we know about everyone already there.
+- **Battery:** while the app isn't on screen (and no call is going) upkeep runs every 15 s instead of 3 s, housekeeping once a minute, unreachable friends are retried every 30 minutes at most (2 minutes when messages wait), and timers that only refresh what's drawn do nothing. Link pings stay at 40 s: a phone that pinged less often would look dead to older builds and to phones with the app open.
 
 ## UI: Sigil design system
 Flutter with **Material 3** as the foundation (accessibility, text input, platform behaviour such as predictive back), restyled with our own tokens in `app/lib/theme/tokens.dart`; screens use only these.

@@ -1056,7 +1056,8 @@ class _Header extends StatelessWidget {
           if (onCall != null)
             IconButton(tooltip: 'Call', icon: const Icon(Icons.call_rounded, size: 20), onPressed: onCall),
           _ShotsButton(chatKey: card.temp ? Notifier.tempKey(card.id) : Notifier.chatKey(card.id)),
-          if (card.friend && !card.temp) _VerifyButton(card: card),
+          // Verifying is about a person, not a group: the sheet is for friends' chats.
+          if (card.friend && !card.temp && !card.group) _VerifyButton(card: card),
           if (onWipe != null)
             TextButton.icon(
               onPressed: onWipe,

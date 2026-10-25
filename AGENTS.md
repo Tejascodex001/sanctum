@@ -49,6 +49,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `net/src/direct.rs` | The UDP socket for Faster calls |
 | `app/rust/src/api/` | The Dart-facing API (flutter_rust_bridge). Keep it thin; logic belongs in `core` |
 | `app/rust/src/call_jni.rs` | JNI functions Kotlin calls directly for call audio (`CallNative.kt`), bypassing Dart |
+| `app/lib/chat/media.dart` | Photos, videos, voice notes and files in chats: viewing, opening in other apps, and "Save to phone" (with `MainActivity.kt` and `MediaPrep.kt`) |
 | `app/lib/call/` | The call controller (ring, audio, service) and the call screen, shown above the app lock |
 | `app/lib/settings/` | The Settings screen (opened from your sigil) |
 | `app/lib/theme/appearance.dart` | Light, dark or like the phone, and the accent colour. `Palette` is read at build time, so `Restyler` redraws every screen when it changes: don't make widgets using `Palette` colours `const`. Sigils are shown through `SigilLook` (`spec.look`): in the picked accent and light in light mode. Use `spec.look.accent.color` for UI colours taken from a sigil; only comparing sigils with a friend uses `exact: true` |
@@ -65,6 +66,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
   - Add a test that writes the old format and reads it back (see `chats_from_before_hidden_chats_upgrade`).
 - **Wire enums (`Frame`, `Content`, `OutboxState`): add variants at the end only.**
 - **A `Frame` an older build doesn't know drops its link.** Send a new frame only to phones whose handshake said they understand it: add a bit to `protocol::FEATURES` and check what `Session::link_features` was told (see `group_sync`).
+- **Secure storage:** `resetOnError` stays `false` in `app/lib/identity/secrets.dart`, and keys are created only when a read returns nothing. A failed read must stop startup, never make new keys: that would orphan the user's database.
 - **Message sequence numbers are never reused** (`chat_seq`), because pending delivery receipts point at them.
 
 ## Building and testing

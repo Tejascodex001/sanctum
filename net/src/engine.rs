@@ -65,10 +65,16 @@ const BACKOFF_MAX: Duration = Duration::from_secs(120);
 const BACKOFF_MAX_PENDING: Duration = Duration::from_secs(20);
 /// While the app is closed, unreachable friends are retried less often to
 /// save battery. A friend coming online dials us anyway.
-const BACKOFF_MAX_BACKGROUND: Duration = Duration::from_secs(600);
+const BACKOFF_MAX_BACKGROUND: Duration = Duration::from_secs(1800);
 const BACKOFF_MAX_PENDING_BACKGROUND: Duration = Duration::from_secs(120);
-/// Every this many upkeep ticks, unacknowledged frames are resent.
+/// Every this many upkeep ticks, unacknowledged frames are resent (so about
+/// every 30 seconds while the app is open, and every few minutes otherwise).
 const RESEND_EVERY: u64 = 10;
+/// While the app isn't on screen (and no call is going), upkeep runs this
+/// many times less often, and housekeeping (burning expired messages) only
+/// every [`BACKGROUND_PURGE_EVERY`] rounds: every wake-up costs battery.
+const BACKGROUND_SLOWDOWN: u32 = 5;
+const BACKGROUND_PURGE_EVERY: u32 = 4;
 /// Tor circuits are expensive; don't build too many at once.
 const MAX_DIALS: usize = 6;
 /// While a call goes on, its media's housekeeping (direct-path probes,
@@ -493,11 +499,17 @@ impl Node {
     pub fn spawn_retry_loop(self: &Arc<Self>, every: Duration) {
         let node = Arc::downgrade(self);
         tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(every).await;
+            let mut round = 0u32;
+            // The flag is read before sleeping, so a node nobody holds any
+            // more isn't kept alive by this loop.
+            while let Some(slow) = node.upgrade().map(|n| n.background.load(Ordering::Relaxed) && !n.media.active()) {
+                tokio::time::sleep(if slow { every * BACKGROUND_SLOWDOWN } else { every }).await;
                 let Some(node) = node.upgrade() else { break };
-                node.session.lock().unwrap().purge();
-                node.emit_session_events();
+                round = round.wrapping_add(1);
+                if !slow || round.is_multiple_of(BACKGROUND_PURGE_EVERY) {
+                    node.session.lock().unwrap().purge();
+                    node.emit_session_events();
+                }
                 node.maintain();
             }
         });

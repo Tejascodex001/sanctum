@@ -645,7 +645,8 @@ impl Session {
             }
             for p in meta.peers {
                 if !out.iter().any(|o| o.identity == p.identity) {
-                    out.push(new_peer(p.identity, &meta.title));
+                    // A friend we've verified stays verified in the group.
+                    out.push(Peer { verified: p.verified, ..new_peer(p.identity, &meta.title) });
                 }
             }
         }
@@ -653,15 +654,22 @@ impl Session {
     }
 }
 
-/// Names from the admin's member list; our own entry is left out.
+/// Names from the admin's member list; our own entry is left out. People
+/// we already knew keep what we know about them (verified, address): every
+/// update to the list (someone joins, a rename) must not undo that.
 fn apply_info(meta: &mut ChatMeta, info: &GroupInfo, me: &[u8; 32]) {
+    let known = std::mem::take(&mut meta.peers);
     meta.peers = info
         .members
         .iter()
         .filter(|m| &m.identity != me)
         .map(|m| {
             let name = clip(m.name.trim(), 64);
-            new_peer(m.identity, if name.is_empty() { "Member" } else { &name })
+            let name = if name.is_empty() { "Member" } else { &name };
+            match known.iter().find(|p| p.identity == m.identity) {
+                Some(p) => Peer { name: name.into(), ..p.clone() },
+                None => new_peer(m.identity, name),
+            }
         })
         .collect();
 }
@@ -689,5 +697,48 @@ mod size_tests {
     fn groups_stop_at_the_limit() {
         assert!(fits_group(MAX_GROUP).is_ok());
         assert!(matches!(fits_group(MAX_GROUP + 1), Err(SessionError::GroupFull(n)) if n == MAX_GROUP));
+    }
+}
+
+#[cfg(test)]
+mod info_tests {
+    use super::*;
+
+    fn meta(peers: Vec<Peer>) -> ChatMeta {
+        ChatMeta {
+            kind: ChatKind::Group,
+            title: "Crew".into(),
+            sigil_key: vec![1],
+            pinned: false,
+            created_at: 0,
+            group_id: vec![9],
+            peers,
+            hidden: false,
+            admin: None,
+        }
+    }
+
+    #[test]
+    fn a_new_member_list_keeps_who_we_verified() {
+        let (me, dana, asha, newcomer) = ([1; 32], [2; 32], [3; 32], [4; 32]);
+        let mut known = new_peer(dana, "Dana");
+        known.verified = true;
+        known.onion = Some("dana.onion".into());
+        let mut meta = meta(vec![known, new_peer(asha, "Asha")]);
+        let member = |identity, name: &str| GroupMember { identity, name: name.into() };
+        let info = GroupInfo {
+            title: "Crew".into(),
+            sigil_key: vec![1],
+            admin: me,
+            members: vec![member(me, "Me"), member(dana, "Dana R."), member(asha, "Asha"), member(newcomer, "Neel")],
+        };
+        apply_info(&mut meta, &info, &me);
+        assert_eq!(meta.peers.len(), 3);
+        let dana = meta.peers.iter().find(|p| p.identity == dana).unwrap();
+        assert!(dana.verified, "Dana stays verified when someone joins");
+        assert_eq!(dana.onion.as_deref(), Some("dana.onion"));
+        assert_eq!(dana.name, "Dana R.", "names still come from the admin's list");
+        let neel = meta.peers.iter().find(|p| p.identity == newcomer).unwrap();
+        assert!(!neel.verified, "only the newcomer is unverified");
     }
 }

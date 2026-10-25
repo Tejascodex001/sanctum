@@ -38,13 +38,13 @@ Sanctum is in beta: the app says **beta-1.0.0**, and each release is told apart 
 | ✅ | **Delete & clear** | Delete a message (for me / for everyone), clear a chat (for me / for everyone), remove a friend (it's removed on both phones) |
 | ✅ | **Background delivery** | A foreground service keeps you reachable while the app is closed. A one-tap shortcut opens your phone maker's battery page |
 | ✅ | **Notifications** | For every message, even while Sanctum is open, except in the chat you're looking at. Posted on the phone itself, never through Google. They say who wrote, never what. On the lock screen they say only "New message" |
-| ✅ | **App lock** | Fingerprint, face or PIN, every time the app opens |
+| ✅ | **App lock** | Fingerprint, face or PIN, every time the app opens. If the fingerprint check gets stuck on a phone, it gives up after a moment and offers "Try again" |
 | ✅ | **Screenshot blocking** | On everywhere. Can be allowed per chat after a fingerprint check |
 | ✅ | **Hidden chats** | Long-press the wordmark and authenticate to see them; their notifications show no name |
 | ✅ | **Panic wipe** | Hold 2 seconds, even from the lock screen. Destroys the keys and data, then closes the app |
 | ✅ | **Encrypted storage** | SQLite with every row sealed (XChaCha20-Poly1305), keys in Android Keystore, no backups |
 | ✅ | **Over-the-air updates** | Checked and downloaded through Tor, with changelogs |
-| ✅ | **Media** | Photos up to 10 MB, videos up to 20 MB, files up to 50 MB, end-to-end encrypted and stored encrypted. Photos are resized and lose hidden metadata like location |
+| ✅ | **Media** | Photos up to 10 MB, videos up to 20 MB, files up to 50 MB, end-to-end encrypted and stored encrypted. Photos are resized and lose hidden metadata like location. Nothing goes to your gallery by itself: use **Save to phone** on a photo, video, voice note or file to keep a copy (a Sanctum folder, no extra permission) |
 | ✅ | **Voice notes** | Hold the mic to record, release to send, slide left to cancel. Encrypted like any attachment |
 | ✅ | **Sanctum PIN & decoy PIN** | An optional PIN of its own (fingerprint still works). A decoy PIN opens an empty-looking Sanctum with its own data, while your real chats stay hidden and silent |
 

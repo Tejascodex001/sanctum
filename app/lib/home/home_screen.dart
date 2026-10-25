@@ -15,6 +15,7 @@ import '../background/background.dart';
 import '../identity/secrets.dart';
 import '../moments/moments.dart';
 import 'recall_views.dart';
+import '../app_visible.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
 import '../security/app_lock.dart';
@@ -72,7 +73,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _pages.addListener(() => setState(() => _page = _pages.page ?? 0));
     _search.addListener(() => setState(() {}));
     // Temp messages burn on their own; refresh the countdowns.
-    _purge = Timer.periodic(const Duration(minutes: 1), (_) => _loadTemp());
+    _purge = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (appVisible) _loadTemp();
+    });
     _events = NetBus.instance.events.listen(_onEvent);
     _opens = Notifier.instance.opens.listen(_openFromNotification);
     WidgetsBinding.instance.addObserver(this);
@@ -1467,7 +1470,8 @@ class _FriendRow extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (card.verified) const Icon(Icons.verified_user_rounded, size: 16, color: OnlineDot.color),
+                if (card.verified && !card.group)
+                  const Icon(Icons.verified_user_rounded, size: 16, color: OnlineDot.color),
               ],
             ),
           ),
