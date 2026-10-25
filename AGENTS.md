@@ -5,7 +5,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 ## Non-negotiables
 
 - **Privacy:**
-  - The app connects to friends, update servers and the Fediverse sites Reels reads **only through Tor**. Three opt-in exceptions, all off by default: Nearby (the local Wi-Fi and Bluetooth); "Faster reels", which fetches Reels (and only Reels) directly so the video sites see the phone's address; and "Faster calls", which sends a call's sealed audio and video straight between the two phones (UDP) only when **both** have it on, so each learns the other's address. With Faster reels off, video plays through the on-phone relay (`net/src/relay.rs`); never hand a player or WebView a remote URL then.
+  - The app connects to friends and update servers **only through Tor**. Two opt-in exceptions, both off by default: Nearby (the local Wi-Fi and Bluetooth); and "Faster calls", which sends a call's sealed audio and video straight between the two phones (UDP) only when **both** have it on, so each learns the other's address.
   - No analytics, no crash reporting, no Google services (no ML Kit, no Firebase, no Play Services). Notifications are posted on the phone itself.
   - Message content never leaves the encrypted store or MLS: not in notifications, logs or URLs.
 - **Strictly on-device:** no backups (`allowBackup` stays off), no cloud.
@@ -34,7 +34,6 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `core/src/recall.rs` | Search across chats and the "While you were away" catch-up |
 | `core/src/reaction.rs` | Emoji reactions: one per person per message, newest wins |
 | `core/src/typing.rs` | Typing signals: link-level, never stored or queued |
-| `core/src/taste.rs` | What Reels learns you like (on the phone only) and ranking reels by it |
 | `core/src/call.rs` | 1:1 voice and video calls: signaling inside MLS, sealed media packets (`MediaHub`), replay window, jitter buffer |
 | `core/src/video.rs` | Video in calls: fragments and reassembly, rate control, sound before pictures |
 | `core/src/direct.rs` | Faster calls: direct routes, the address filter, probing and falling back to the link |
@@ -46,10 +45,8 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `net/src/tor.rs` | Arti (Tor): onion service, dialing, a connector for HTTPS |
 | `net/src/nearby.rs` | Local-network discovery (per-friend rotating tags) and the `Reach` transport |
 | `core/src/nearby.rs` | Rotating Bluetooth IDs and the friends-only nearby key exchange |
-| `net/src/https.rs` | A small HTTPS client for updates and Reels, through Tor |
-| `net/src/fedi.rs` | Reels: reading short videos from Loops, PeerTube and Mastodon sites anonymously |
+| `net/src/https.rs` | A small HTTPS client for updates, through Tor |
 | `net/src/direct.rs` | The UDP socket for Faster calls |
-| `net/src/relay.rs` | The on-phone relay that streams Reels videos through Tor |
 | `app/rust/src/api/` | The Dart-facing API (flutter_rust_bridge). Keep it thin; logic belongs in `core` |
 | `app/rust/src/call_jni.rs` | JNI functions Kotlin calls directly for call audio (`CallNative.kt`), bypassing Dart |
 | `app/lib/call/` | The call controller (ring, audio, service) and the call screen, shown above the app lock |
@@ -88,7 +85,6 @@ cd app && flutter analyze && flutter test   # analyze must report no issues (CI 
 - **No Android SDK locally:** CI compiles the Kotlin and the APK, so review Kotlin changes carefully and check the CI run after pushing.
 - `net/src/https.rs` has an ignored live test against GitHub: `cargo test -p sanctum-net live -- --ignored`. Behind a TLS-inspecting proxy, set `EXTRA_CA`.
 - **Screenshots:** `cd app && SCREENSHOT_DIR=<dir> flutter test` saves PNGs of the main screens (dark and light, and the call screens). Look at them after UI changes.
-- **Sites you can't reach:** dev sandboxes often can't reach Fediverse sites. Parsers get fixture tests (see `net/src/fedi.rs`); describe anything unverified when you hand over.
 
 ## Product notes
 

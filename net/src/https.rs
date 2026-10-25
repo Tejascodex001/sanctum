@@ -1,12 +1,9 @@
-//! A small HTTPS client for checking and downloading app updates, and for
-//! Reels, through Tor, so sites never see the phone's address. (Reels'
-//! opt-in fast mode connects directly instead: see [`direct`].) HTTP/1.1
-//! GET only, following redirects; TLS with rustls and the Mozilla root
-//! store.
+//! A small HTTPS client for checking and downloading app updates, through
+//! Tor, so sites never see the phone's address. HTTP/1.1 GET only,
+//! following redirects; TLS with rustls and the Mozilla root store.
 
 use crate::engine::BoxConn;
 use std::future::Future;
-use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -46,96 +43,6 @@ pub fn tls(connect: Connect) -> Connect {
             Ok(Box::new(stream) as BoxConn)
         })
     })
-}
-
-/// Opens plain TCP straight to a host, without Tor, so the site sees this
-/// phone's IP address. Only for Reels' opt-in fast mode: friends and
-/// updates always go through Tor. (TLS is added on top as usual.) Hosts
-/// inside the phone or on the local network are refused, so a post can't
-/// point the app at the user's router.
-pub fn direct() -> Connect {
-    Arc::new(|host: String, port: u16| {
-        Box::pin(async move {
-            let open = async {
-                let public: Vec<SocketAddr> =
-                    tokio::net::lookup_host((host.as_str(), port)).await?.filter(|a| is_public(&a.ip())).collect();
-                anyhow::ensure!(!public.is_empty(), "{host} isn't on the public internet");
-                race(&public).await
-            };
-            let stream = tokio::time::timeout(DIRECT_TIMEOUT, open).await??;
-            Ok(Box::new(stream) as BoxConn)
-        })
-    })
-}
-
-const DIRECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
-/// Head start each address gets before the next is tried too.
-const NEXT_AFTER: std::time::Duration = std::time::Duration::from_millis(300);
-
-/// Connects to whichever address answers first, trying them in turn but
-/// not waiting for one to fail first ("happy eyeballs"). Many mobile
-/// networks hand out IPv6 addresses that go nowhere: trying them one by one
-/// could hang for the whole timeout before IPv4 is tried.
-async fn race(addrs: &[SocketAddr]) -> anyhow::Result<tokio::net::TcpStream> {
-    // Alternate IPv6 and IPv4, so one family can't hold up the other.
-    let (v6, v4): (Vec<SocketAddr>, Vec<SocketAddr>) = addrs.iter().partition(|a| a.is_ipv6());
-    let mut order: Vec<SocketAddr> = Vec::new();
-    for i in 0..v6.len().max(v4.len()) {
-        order.extend(v6.get(i).copied());
-        order.extend(v4.get(i).copied());
-    }
-    let mut tries = tokio::task::JoinSet::new();
-    let mut last = anyhow::anyhow!("no address answered");
-    let mut queue = order.into_iter();
-    loop {
-        if let Some(addr) = queue.next() {
-            tries.spawn(async move { tokio::net::TcpStream::connect(addr).await });
-        } else if tries.is_empty() {
-            return Err(last);
-        }
-        let next_due = tokio::time::sleep(NEXT_AFTER);
-        tokio::select! {
-            done = tries.join_next(), if !tries.is_empty() => match done {
-                Some(Ok(Ok(stream))) => return Ok(stream),
-                Some(Ok(Err(e))) => last = e.into(),
-                Some(Err(e)) => last = e.into(),
-                None => {}
-            },
-            // Nothing yet: start the next address alongside.
-            _ = next_due, if queue.len() > 0 => {}
-        }
-    }
-}
-
-/// Somewhere on the internet, not this phone or the network it's on.
-fn is_public(ip: &IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            let [a, b, ..] = v4.octets();
-            !(v4.is_private()
-                || v4.is_loopback()
-                || v4.is_link_local()
-                || v4.is_unspecified()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.is_multicast()
-                || a == 0
-                // Carrier-grade NAT (100.64.0.0/10).
-                || (a == 100 && (b & 0xc0) == 64))
-        }
-        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
-            Some(v4) => is_public(&IpAddr::V4(v4)),
-            None => {
-                let first = v6.segments()[0];
-                !(v6.is_loopback()
-                    || v6.is_unspecified()
-                    || v6.is_multicast()
-                    // Unique local (fc00::/7) and link-local (fe80::/10).
-                    || (first & 0xfe00) == 0xfc00
-                    || (first & 0xffc0) == 0xfe80)
-            }
-        },
-    }
 }
 
 fn mozilla_roots() -> RootCertStore {
@@ -324,23 +231,6 @@ fn dechunk(mut data: &[u8]) -> anyhow::Result<Vec<u8>> {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn racing_skips_addresses_that_go_nowhere() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let live = listener.local_addr().unwrap();
-        // A documentation address (never answers) and a closed port come first.
-        let closed = {
-            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap()
-        };
-        let nowhere: SocketAddr = "192.0.2.1:9".parse().unwrap();
-        let started = std::time::Instant::now();
-        let stream = race(&[nowhere, closed, live]).await.unwrap();
-        assert_eq!(stream.peer_addr().unwrap(), live);
-        assert!(started.elapsed() < std::time::Duration::from_secs(3), "{:?}", started.elapsed());
-        assert!(race(&[closed]).await.is_err());
-    }
-
     #[test]
     fn urls() {
         assert_eq!(
@@ -349,27 +239,6 @@ mod tests {
         );
         assert_eq!(parse_url("https://h:8443").unwrap(), ("h".into(), 8443, "/".into()));
         assert!(parse_url("http://plain.example/").is_err(), "https only");
-    }
-
-    #[test]
-    fn direct_mode_reaches_only_the_public_internet() {
-        for ip in ["93.184.216.34", "2606:2800:220:1::1", "::ffff:93.184.216.34"] {
-            assert!(is_public(&ip.parse().unwrap()), "{ip}");
-        }
-        for ip in [
-            "127.0.0.1", "10.0.0.1", "192.168.1.1", "172.16.0.1", "169.254.1.1", "100.64.0.1", "0.0.0.0",
-            "255.255.255.255", "::1", "fe80::1", "fd00::1", "::ffff:192.168.1.1", "224.0.0.1",
-        ] {
-            assert!(!is_public(&ip.parse().unwrap()), "{ip}");
-        }
-    }
-
-    #[tokio::test]
-    async fn direct_mode_refuses_the_phone_itself() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        assert!(direct()("127.0.0.1".into(), port).await.is_err());
-        assert!(direct()("localhost".into(), port).await.is_err());
     }
 
     #[test]

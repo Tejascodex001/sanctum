@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -8,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sanctum/explore/share_sheet.dart';
 import 'package:sanctum/home/home_screen.dart';
 import 'package:sanctum/theme/appearance.dart';
 import 'package:sanctum/src/rust/api/identity.dart';
@@ -191,30 +189,6 @@ void main() {
     expect(find.text('Add a friend'), findsOneWidget);
     await shot(tester, '5-friends');
 
-    // Reels starts by asking what you like watching.
-    await tester.tap(find.text('Reels'));
-    await settle(tester);
-    expect(find.text('What do you love watching?'), findsOneWidget);
-    await tester.tap(find.textContaining('Animals'));
-    await tester.tap(find.textContaining('Comedy'));
-    await settle(tester, 2);
-    await shot(tester, '13-interests');
-    await tester.tap(find.text('Show my reels'));
-    await settle(tester, 12);
-    expect(find.text('What do you love watching?'), findsNothing);
-    await tester.tap(find.text('Friends'));
-    await settle(tester);
-
-    // Sending a reel: tap chats in the grid, then Send.
-    unawaited(showShareSheet(tester.element(find.byType(HomeScreen)), text: 'https://tube.example/w/abc'));
-    await settle(tester);
-    await tester.tap(find.text('Notes to self').last);
-    await settle(tester, 4);
-    await shot(tester, '12-share');
-    await tester.tap(find.text('Send'));
-    await settle(tester);
-    expect(find.text('Write a message…'), findsNothing);
-
     // Settings, from your sigil: switching to light redraws everything.
     await tester.tap(find.byTooltip('Settings'));
     await settle(tester);
@@ -234,7 +208,7 @@ void main() {
     await shot(tester, '11-chat-light');
     await tester.tap(find.byTooltip('Back'));
     await settle(tester);
-    for (final (tab, name) in [('Temp', '14-temp-light'), ('Friends', '15-friends-light'), ('Reels', '16-reels-light')]) {
+    for (final (tab, name) in [('Temp', '14-temp-light'), ('Friends', '15-friends-light')]) {
       await tester.tap(find.text(tab));
       await settle(tester);
       await shot(tester, name);
@@ -255,7 +229,6 @@ void main() {
     await tester.pumpWidget(MaterialApp(theme: sanctumTheme(accent: mine.accent.color), home: home));
     await settle(tester);
     expect(find.text('Notes to self'), findsOneWidget);
-    expect(find.textContaining('tube.example/w/abc'), findsOneWidget, reason: 'the shared link is the last message');
 
     await tester.pumpWidget(const SizedBox());
     await settle(tester, 2);

@@ -1,7 +1,6 @@
 //! The Dart-facing API. Thin wrappers over `sanctum-core`; keep logic there.
 
 pub mod call;
-pub mod fedi;
 pub mod group;
 pub mod identity;
 pub mod moment;

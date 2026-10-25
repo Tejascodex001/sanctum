@@ -6,10 +6,8 @@
 
 pub mod direct;
 pub mod engine;
-pub mod fedi;
 pub mod https;
 pub mod nearby;
-pub mod relay;
 pub mod tor;
 
 pub use engine::{NetEvent, Node, Transport};

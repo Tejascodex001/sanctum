@@ -5,7 +5,7 @@ Android first; iOS later.
 
 ## Principles
 1. **No servers, no tracking.** No accounts, phone numbers, analytics or crash reporters.
-2. **No IP addresses by default.** Peers, the UI and logs never see an IP (enforced in `core/src/transport.rs`). The only exceptions are opt-in and say so: Nearby (the local network), Faster reels (the video sites see yours) and Faster calls (the friend's phone sees yours, only if both opt in).
+2. **No IP addresses by default.** Peers, the UI and logs never see an IP (enforced in `core/src/transport.rs`). The only exceptions are opt-in and say so: Nearby (the local network) and Faster calls (the friend's phone sees yours, only if both opt in).
 3. **Encrypted everywhere.** End-to-end in transit (MLS) and at rest (SQLCipher).
 4. **Invite-only.** You join by scanning a friend's QR code in person.
 
@@ -224,33 +224,6 @@ One photo a day for all your friends, gone 24 hours after it was shared (`core/s
 - **Hidden chats:** a hidden friend's moment isn't shown, so it can't give the chat away.
 - The photo can be taken right then with the camera app (written to Sanctum's cache through a one-off link, then deleted) or picked from the gallery. Either way it's resized and stripped of hidden data such as location.
 
-## Reels (the Fediverse)
-A fourth tab of short public videos, full screen, one after another (`net/src/fedi.rs`, `net/src/relay.rs`).
-- **Anonymous and through Tor:** no account and nothing is posted. Every request (feeds, pictures, videos) goes through Tor with the HTTPS client, so sites see a Tor exit. The list of sites is kept sealed on the phone (`kv` "fedi:sources").
-- **Fast mode (opt-in, off by default):** Reels connect to the sites directly, without Tor, which is much quicker. The trade-off: **the sites see the phone's IP address**. It affects Reels only; friends, messages and updates always go through Tor.
-  - The setting is kept sealed on the phone (`kv` "fedi:direct"; `fedi_direct` / `fedi_set_direct`).
-  - Feeds and pictures use `https::direct()`: plain TCP to the site, then the same TLS checks as always. It refuses addresses on the phone or the local network (loopback, private, link-local, carrier NAT), so a post can't point the app at the user's router.
-  - Videos skip the relay: `fedi_video` returns the real `https://` address and the player streams it itself (Android still forbids plain HTTP anywhere but 127.0.0.1).
-  - Feeds don't wait for Tor: there's no "not connected" problem in fast mode.
-- **Loops** (`loops.video` by default) is the main source: short upright videos, like Reels. Read as a guest: `/api/web/feed` (its picks of popular videos), then each trending hashtag's `/api/v1/explore/tag-feed/{name}` ("t:<n>" cursors). Hashtag feeds leave out the file address, so it's looked up when played (`/api/v1/video/{id}`, "loops:" video ids). Lists saved before Loops get it added once (`kv` "fedi:loops-added").
-- **Only short videos** (3 minutes or less, `MAX_REEL_S`):
-  - PeerTube: its search with `durationMax`, newest first, including videos the site knows from others. If a site's search won't do that, its video list is read 100 at a time and the short ones kept.
-  - Mastodon-compatible sites: the local public timeline with media only, keeping short videos. Sensitive posts and live streams are left out.
-  - A call reads up to 3 pages until it has 6 reels.
-- **Picked for you, on the phone** (`core/src/taste.rs`, `reels_next`):
-  - Each reel has features: who posted it, the site, its hashtags (and #words in its text), topic and language.
-  - A taste (`kv` "fedi:taste", sealed, never sent) holds a weight per feature. A heart adds 2, a share 2.5, watching to the end and again up to about 2, half-watching nearly nothing, a skip (swiped away within 2 seconds) takes off 0.6. Who posted counts fully; hashtags share the rest. Old weights fade a little with each signal, and each is capped so one signal can't take over.
-  - Reels fetched but not shown wait in a pool (the next pages of every site are fetched in parallel until there are 3 times as many as asked for). Each is scored: taste fit + a little for likes on the site + 1.2 for upright + freshness, plus some chance. 1 in 5 picks is random, to find new things, and the same person never comes twice in a row from taste picks.
-  - **Interests:** before the first reels, Reels asks what you love watching (`INTERESTS` in `core/src/taste.rs`, kept in `kv` "fedi:interests"; an empty list means skipped). With interests picked, **only reels about them are shown** (`fits`): a word of the text or topic is one of an interest's words, or a hashtag contains one ("#kpopdance" is dance). Others stay in the pool unshown, in case the interests change. The sites are asked for them directly: PeerTube is searched for each interest's first four words, then their categories; Loops' hashtag page for each word is tried first (a guest only gets trending hashtags' pages, so others come back empty), then its picks and only the trending hashtags about the interests; Mastodon reads the hashtags' timelines. Without an account the sites share only part of what they have, so a narrow pick can run out: Reels then says so and offers to add interests.
-  - **Fast first reels:** sites are read in the background (`refill`), each landing in the pool as it answers, so a slow site never holds up the rest. `reels_next` returns as soon as 3 reels are ready (or after 8 s with Faster reels, 25 s through Tor), and the pool keeps filling while they're watched. The first reels' video files are looked up ahead (`files`), and the app loads one reel ahead (two with Faster reels).
-  - Reels shown in the last two days aren't shown again. Hearts are remembered so a reel shown again keeps its heart. "Start Reels afresh" in Settings forgets the taste.
-- **Videos are shown on black** in light mode too, like any video player (the tab bar goes black with them); picking interests, loading and empty states follow the theme.
-- **Never in the background:** reels play only while the Reels tab is on screen, the app is open and no other screen covers it.
-- **Faster reels connections** race the site's addresses (IPv6 and IPv4 alternately, a new try every 300 ms) and keep the first that answers, since many mobile networks give out IPv6 addresses that go nowhere.
-- **Pixelfed can't be used:** it shows its feeds only to signed-in people. Pixelfed sites saved before are dropped from the list.
-- **Videos:** the player only speaks plain HTTP, so it's given `http://127.0.0.1:port/<token>`. A relay on the phone forwards each request, ranges included, to the real `https://` address through Tor, and follows redirects itself, so the player never connects anywhere else. It listens on loopback only and answers only for random tokens it handed out. Android's network security config allows plain HTTP to 127.0.0.1 and nothing else. PeerTube videos play at up to 480p. The next reel starts loading while the current one plays, so at most two stream at once.
-- Sending a reel to a chat sends its link as a message. Nothing is fetched from the link for a preview.
-
 ## Search and catch-up
 On the phone, over the sealed store (`core/src/recall.rs`). Nothing is indexed in the clear: messages are opened and checked in memory.
 - **Search** finds messages with all the typed words in any case, looking at text, poll questions and choices, plan places, file names and album names. It returns up to 100, newest first, and opens the chat scrolled to the message. Hidden chats are searched only while revealed.
@@ -310,5 +283,5 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 ## Roadmap
 Status per feature is tracked in the README's feature table. In short:
 - **v1, private messaging:** done. Only nearby over Wi-Fi Direct remains, and hotspot mode mostly covers it.
-- **v2:** plans and date polls, shared albums, daily moments, Reels from the Fediverse, search and catch-up (done). On-device AI was dropped.
+- **v2:** plans and date polls, shared albums, daily moments, search and catch-up (done). On-device AI was dropped.
 - **v3:** voice and video calls, with no IP exposure. 1:1 voice and video calls over Tor (or nearby) are in, with an opt-in direct mode ("Faster calls").

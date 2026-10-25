@@ -7,7 +7,6 @@
 // ignore_for_file: argument_type_not_assignable
 
 import 'api/call.dart';
-import 'api/fedi.dart';
 import 'api/group.dart';
 import 'api/identity.dart';
 import 'api/moment.dart';
@@ -18,9 +17,12 @@ import 'api/sigil.dart';
 import 'api/store.dart';
 import 'api/temp_chat.dart';
 import 'api/update.dart';
+
 import 'dart:async';
 import 'dart:convert';
+
 import 'frb_generated.dart';
+
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated_web.dart';
 
 abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
@@ -66,9 +68,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CallOutcomeView dco_decode_box_autoadd_call_outcome_view(dynamic raw);
-
-  @protected
-  FediProblem dco_decode_box_autoadd_fedi_problem(dynamic raw);
 
   @protected
   PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw);
@@ -128,31 +127,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ChatKindView dco_decode_chat_kind_view(dynamic raw);
 
   @protected
-  double dco_decode_f_32(dynamic raw);
-
-  @protected
   double dco_decode_f_64(dynamic raw);
-
-  @protected
-  FediItem dco_decode_fedi_item(dynamic raw);
-
-  @protected
-  FediKind dco_decode_fedi_kind(dynamic raw);
-
-  @protected
-  FediPage dco_decode_fedi_page(dynamic raw);
-
-  @protected
-  FediPost dco_decode_fedi_post(dynamic raw);
-
-  @protected
-  FediProblem dco_decode_fedi_problem(dynamic raw);
-
-  @protected
-  FediSource dco_decode_fedi_source(dynamic raw);
-
-  @protected
-  FediSourceProblem dco_decode_fedi_source_problem(dynamic raw);
 
   @protected
   FriendView dco_decode_friend_view(dynamic raw);
@@ -177,18 +152,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ChatCatchUpView> dco_decode_list_chat_catch_up_view(dynamic raw);
-
-  @protected
-  List<FediItem> dco_decode_list_fedi_item(dynamic raw);
-
-  @protected
-  List<FediPost> dco_decode_list_fedi_post(dynamic raw);
-
-  @protected
-  List<FediSource> dco_decode_list_fedi_source(dynamic raw);
-
-  @protected
-  List<FediSourceProblem> dco_decode_list_fedi_source_problem(dynamic raw);
 
   @protected
   List<FriendView> dco_decode_list_friend_view(dynamic raw);
@@ -225,9 +188,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ReactionView> dco_decode_list_reaction_view(dynamic raw);
-
-  @protected
-  List<ReelInterest> dco_decode_list_reel_interest(dynamic raw);
 
   @protected
   List<ReleaseNotes> dco_decode_list_release_notes(dynamic raw);
@@ -287,9 +247,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallOutcomeView? dco_decode_opt_box_autoadd_call_outcome_view(dynamic raw);
 
   @protected
-  FediProblem? dco_decode_opt_box_autoadd_fedi_problem(dynamic raw);
-
-  @protected
   PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw);
 
   @protected
@@ -336,18 +293,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ReactionView dco_decode_reaction_view(dynamic raw);
-
-  @protected
-  ReelInterest dco_decode_reel_interest(dynamic raw);
-
-  @protected
-  ReelInterests dco_decode_reel_interests(dynamic raw);
-
-  @protected
-  ReelSignal dco_decode_reel_signal(dynamic raw);
-
-  @protected
-  ReelsPage dco_decode_reels_page(dynamic raw);
 
   @protected
   ReleaseNotes dco_decode_release_notes(dynamic raw);
@@ -439,9 +384,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  FediProblem sse_decode_box_autoadd_fedi_problem(SseDeserializer deserializer);
-
-  @protected
   PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
@@ -499,33 +441,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ChatKindView sse_decode_chat_kind_view(SseDeserializer deserializer);
 
   @protected
-  double sse_decode_f_32(SseDeserializer deserializer);
-
-  @protected
   double sse_decode_f_64(SseDeserializer deserializer);
-
-  @protected
-  FediItem sse_decode_fedi_item(SseDeserializer deserializer);
-
-  @protected
-  FediKind sse_decode_fedi_kind(SseDeserializer deserializer);
-
-  @protected
-  FediPage sse_decode_fedi_page(SseDeserializer deserializer);
-
-  @protected
-  FediPost sse_decode_fedi_post(SseDeserializer deserializer);
-
-  @protected
-  FediProblem sse_decode_fedi_problem(SseDeserializer deserializer);
-
-  @protected
-  FediSource sse_decode_fedi_source(SseDeserializer deserializer);
-
-  @protected
-  FediSourceProblem sse_decode_fedi_source_problem(
-    SseDeserializer deserializer,
-  );
 
   @protected
   FriendView sse_decode_friend_view(SseDeserializer deserializer);
@@ -550,20 +466,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ChatCatchUpView> sse_decode_list_chat_catch_up_view(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  List<FediItem> sse_decode_list_fedi_item(SseDeserializer deserializer);
-
-  @protected
-  List<FediPost> sse_decode_list_fedi_post(SseDeserializer deserializer);
-
-  @protected
-  List<FediSource> sse_decode_list_fedi_source(SseDeserializer deserializer);
-
-  @protected
-  List<FediSourceProblem> sse_decode_list_fedi_source_problem(
     SseDeserializer deserializer,
   );
 
@@ -610,11 +512,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ReactionView> sse_decode_list_reaction_view(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  List<ReelInterest> sse_decode_list_reel_interest(
     SseDeserializer deserializer,
   );
 
@@ -690,11 +587,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  FediProblem? sse_decode_opt_box_autoadd_fedi_problem(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer);
 
   @protected
@@ -747,18 +639,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ReactionView sse_decode_reaction_view(SseDeserializer deserializer);
-
-  @protected
-  ReelInterest sse_decode_reel_interest(SseDeserializer deserializer);
-
-  @protected
-  ReelInterests sse_decode_reel_interests(SseDeserializer deserializer);
-
-  @protected
-  ReelSignal sse_decode_reel_signal(SseDeserializer deserializer);
-
-  @protected
-  ReelsPage sse_decode_reels_page(SseDeserializer deserializer);
 
   @protected
   ReleaseNotes sse_decode_release_notes(SseDeserializer deserializer);
@@ -863,12 +743,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_box_autoadd_fedi_problem(
-    FediProblem self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_box_autoadd_i_64(
     PlatformInt64 self,
     SseSerializer serializer,
@@ -950,34 +824,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_chat_kind_view(ChatKindView self, SseSerializer serializer);
 
   @protected
-  void sse_encode_f_32(double self, SseSerializer serializer);
-
-  @protected
   void sse_encode_f_64(double self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_fedi_item(FediItem self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_fedi_kind(FediKind self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_fedi_page(FediPage self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_fedi_post(FediPost self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_fedi_problem(FediProblem self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_fedi_source(FediSource self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_fedi_source_problem(
-    FediSourceProblem self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_friend_view(FriendView self, SseSerializer serializer);
@@ -1006,24 +853,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_chat_catch_up_view(
     List<ChatCatchUpView> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_fedi_item(List<FediItem> self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_list_fedi_post(List<FediPost> self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_list_fedi_source(
-    List<FediSource> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_fedi_source_problem(
-    List<FediSourceProblem> self,
     SseSerializer serializer,
   );
 
@@ -1090,12 +919,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_reaction_view(
     List<ReactionView> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_reel_interest(
-    List<ReelInterest> self,
     SseSerializer serializer,
   );
 
@@ -1190,12 +1013,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_opt_box_autoadd_fedi_problem(
-    FediProblem? self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_opt_box_autoadd_i_64(
     PlatformInt64? self,
     SseSerializer serializer,
@@ -1266,18 +1083,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_reaction_view(ReactionView self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_reel_interest(ReelInterest self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_reel_interests(ReelInterests self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_reel_signal(ReelSignal self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_reels_page(ReelsPage self, SseSerializer serializer);
 
   @protected
   void sse_encode_release_notes(ReleaseNotes self, SseSerializer serializer);

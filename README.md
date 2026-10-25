@@ -4,7 +4,7 @@
 
 Private chat for close friends (a circle of 100–200 people at most), on Android.
 
-There are **no servers and no accounts**, and nothing is tracked. Phones talk directly to each other over **Tor**, so nobody, including your friends, sees your IP address (unless you turn on an opt-in faster mode for Reels or calls, which says what it shares). Everything stays on your phone, encrypted, and there are no cloud backups.
+There are **no servers and no accounts**, and nothing is tracked. Phones talk directly to each other over **Tor**, so nobody, including your friends, sees your IP address (unless you turn on an opt-in faster mode for calls, which says what it shares). Everything stays on your phone, encrypted, and there are no cloud backups.
 
 The UI is the **Sigil + Deck** design: every person and chat gets its own generated sigil, and chats are stacked cards.
 
@@ -58,7 +58,6 @@ Sanctum is in beta: the app says **beta-1.0.0**, and each release is told apart 
 | ✅ | **Reactions** | Hold a message for ❤️ 😂 😮 😢 🙏 👍 or any emoji, or double-tap for ❤️. Tap a reaction to add or take back yours; hold it to see who. Friends' chats and groups |
 | ✅ | **Typing** | "Asha is typing…" in friends' chats and groups. Sent only while you're both connected, never stored, and never what you type |
 | ✅ | **Settings** | Tap your sigil: your name, light or dark theme (or like the phone), accent colour (your sigil's or your pick), lock, staying connected, nearby, updates and panic wipe |
-| ✅ | **Reels** | Short upright videos from Loops (plus PeerTube and Mastodon sites), full screen; swipe for the next. Pick what you love watching first (Comedy, Music, Dance, Animals…) and Reels shows only those. Heart them (or double-tap); Reels learns what you like from hearts, shares, what you watch to the end and what you skip, all on your phone, and picks the next ones for you. Watched anonymously through Tor, with no account; or turn on Faster reels in Settings to load them directly (faster, but the sites see your internet address). Pick your own sites, and send a reel's link to several chats at once from a grid of sigils, with a message. (Pixelfed can't be shown: it needs an account) |
 | ✅ | **Search** | Type in the home search box to find any message, poll, plan or file name across your chats. Done on the phone; hidden chats only while revealed |
 | ✅ | **Catch-up** | "While you were away": who wrote, who mentioned you, plans to answer and polls waiting for you |
 
@@ -75,8 +74,7 @@ Sanctum is in beta: the app says **beta-1.0.0**, and each release is told apart 
 - **`core/` (Rust):** the identity (Ed25519; the same key is your Tor onion address), MLS (OpenMLS), the encrypted store, the protocol engine, groups, temp chats and sigils. It does no I/O, so whole conversations between phones are tested in-process.
 - **`net/` (Rust):** connections. Tor through Arti (onion services, plus HTTPS for updates), nearby Wi-Fi discovery, and the node that keeps live links to friends.
 - **`app/` (Flutter):** the UI. `app/rust/` is the bridge to Dart (flutter_rust_bridge). Android-specific code is in `app/android/` (scanner, background service, notifications, installer, Bluetooth nearby, and call audio, which talks to Rust directly rather than through Dart).
-- **Reels** read public Fediverse sites (`net/src/fedi.rs`) and are ranked on the phone (`core/src/taste.rs`); nothing about what you watch leaves the phone.
-- **`docs/DESIGN.md`:** the full design: architecture, encryption, protocol, groups, nearby, calls, Reels, updates and the UI system.
+- **`docs/DESIGN.md`:** the full design: architecture, encryption, protocol, groups, nearby, calls, updates and the UI system.
 
 ## Build and test
 
