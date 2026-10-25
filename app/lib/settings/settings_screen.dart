@@ -6,7 +6,6 @@ import '../security/panic.dart';
 import '../security/pin_settings.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/call.dart';
-import '../src/rust/api/fedi.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
 import '../theme/appearance.dart';
@@ -15,7 +14,7 @@ import 'connection_settings.dart';
 import '../sigil/sigil_look.dart';
 
 /// Everything you can change, opened from your sigil: your name, how the
-/// app looks, calls, Reels, the lock, staying connected, nearby, updates and
+/// app looks, calls, the lock, staying connected, nearby, updates and
 /// the panic wipe.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, required this.mySigil});
@@ -122,8 +121,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _Group(children: [_AppearanceSettings(sigilAccent: sigil.accent.color)]),
           const _Section('CALLS'),
           const _Group(children: [CallsSettings()]),
-          const _Section('REELS'),
-          const _Group(children: [_ReelsSettings()]),
           const _Section('LOCK'),
           const PinSettings(),
           const _Section('STAYING CONNECTED'),
@@ -330,81 +327,6 @@ class _CallsSettingsState extends State<CallsSettings> {
         HapticFeedback.selectionClick();
         setState(() => _direct = v);
         await callsSetDirect(enabled: v);
-      },
-    );
-  }
-}
-
-/// Reels through Tor (private, slower) or straight from the sites (fast).
-class _ReelsSettings extends StatefulWidget {
-  const _ReelsSettings();
-
-  @override
-  State<_ReelsSettings> createState() => _ReelsSettingsState();
-}
-
-class _ReelsSettingsState extends State<_ReelsSettings> {
-  bool? _direct;
-
-  @override
-  void initState() {
-    super.initState();
-    fediDirect().then((on) {
-      if (mounted) setState(() => _direct = on);
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final direct = _direct;
-    if (direct == null) return const SizedBox(height: 64);
-    return Column(
-      children: [
-        _switch(direct),
-        ListTile(
-          leading: const Icon(Icons.restart_alt_rounded),
-          title: const Text('Start Reels afresh'),
-          subtitle: Text('Forget what Reels learned you like', style: AppText.caption),
-          onTap: _forget,
-        ),
-      ],
-    );
-  }
-
-  Future<void> _forget() async {
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: const Text('Start Reels afresh?'),
-        content: const Text('Reels forgets your hearts, what you watched and what you skipped, and starts '
-            'picking from scratch.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(dialog, true), child: const Text('Start afresh')),
-        ],
-      ),
-    );
-    if (sure != true) return;
-    await reelsForgetTaste();
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reels will start afresh.')));
-  }
-
-  Widget _switch(bool direct) {
-    return SwitchListTile(
-      value: direct,
-      title: const Text('Faster reels'),
-      subtitle: Text(
-        direct
-            ? 'Reels come straight from the video sites, so they can see your internet address. Your chats stay '
-                'private either way.'
-            : 'Reels come privately through Tor, which is slower. Turn on to load them straight from the sites: '
-                'faster, but the sites can see your internet address.',
-        style: AppText.caption,
-      ),
-      onChanged: (v) async {
-        HapticFeedback.selectionClick();
-        setState(() => _direct = v);
-        await fediSetDirect(enabled: v);
       },
     );
   }

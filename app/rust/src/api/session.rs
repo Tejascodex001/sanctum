@@ -50,9 +50,19 @@ pub fn session_open(
         .try_into()
         .map_err(|_| anyhow::anyhow!("store key must be 32 bytes"))?;
     let session = Session::open(secret, PathBuf::from(&dir).join("sanctum.db"), &key)?;
+    forget_reels(&session);
     *MEDIA.lock().unwrap() = Some(session.media());
     *SESSION.lock().unwrap() = Some(Arc::new(Mutex::new(session)));
     Ok(())
+}
+
+/// Reels was removed: wipe what it left in the store (the sites it read, the
+/// interests picked, what it learned you like). Best effort; can be removed
+/// in a few releases, once everyone has updated.
+fn forget_reels(session: &Session) {
+    for name in [&b"fedi:sources"[..], b"fedi:direct", b"fedi:taste", b"fedi:interests", b"fedi:loops-added"] {
+        let _ = session.store.kv_delete(name);
+    }
 }
 
 /// The real profile's call media, for the phone's audio (`call_jni.rs`):
@@ -635,6 +645,7 @@ pub fn decoy_open(identity_secret: Vec<u8>, dir: String, store_key: Vec<u8>) -> 
         .try_into()
         .map_err(|_| anyhow::anyhow!("store key must be 32 bytes"))?;
     let decoy = Session::open(secret, PathBuf::from(&dir).join("decoy.db"), &key)?;
+    forget_reels(&decoy);
     *DECOY.lock().unwrap() = Some(Arc::new(Mutex::new(decoy)));
     Ok(())
 }
@@ -704,4 +715,32 @@ fn with_session<T>(
         poke(Some(peer));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opening_forgets_what_reels_left_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let names: [&[u8]; 5] = [b"fedi:sources", b"fedi:direct", b"fedi:taste", b"fedi:interests", b"fedi:loops-added"];
+        for file in ["sanctum.db", "decoy.db"] {
+            let old = Session::open([7; 32], dir.path().join(file), &[9; 32]).unwrap();
+            for name in names {
+                old.store.kv_put(name, &true).unwrap();
+            }
+            old.store.kv_put(b"other", &true).unwrap();
+        }
+        let path = dir.path().to_string_lossy().into_owned();
+        session_open(vec![7; 32], path.clone(), vec![9; 32]).unwrap();
+        decoy_open(vec![7; 32], path, vec![9; 32]).unwrap();
+        for open in [SESSION.lock().unwrap().clone().unwrap(), DECOY.lock().unwrap().clone().unwrap()] {
+            let s = open.lock().unwrap();
+            for name in names {
+                assert_eq!(s.store.kv_get::<bool>(name).unwrap(), None);
+            }
+            assert_eq!(s.store.kv_get::<bool>(b"other").unwrap(), Some(true));
+        }
+    }
 }
