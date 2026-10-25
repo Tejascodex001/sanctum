@@ -100,6 +100,19 @@ abstract final class Background {
   /// This app's build number (its Android version code).
   static Future<int> buildNumber() async => await _call<int>(_bg, 'buildNumber') ?? 0;
 
+  /// The phone's maker and model ("Samsung SM-A546B") and Android's
+  /// version ("14"), for feedback.
+  static Future<({String phone, String android})> deviceInfo() async {
+    final m = await _call<Map<Object?, Object?>>(_bg, 'deviceInfo');
+    final maker = (m?['maker'] as String?)?.trim() ?? '';
+    final model = (m?['model'] as String?)?.trim() ?? '';
+    // Many models already start with the maker's name.
+    final phone = model.toLowerCase().startsWith(maker.toLowerCase()) || maker.isEmpty
+        ? model
+        : '${maker[0].toUpperCase()}${maker.substring(1)} $model';
+    return (phone: phone, android: (m?['android'] as String?) ?? '');
+  }
+
   /// Opens Android's installer for a downloaded update: "started",
   /// "permission" (the user must first allow Sanctum to install apps; the
   /// settings page was opened), or "failed".

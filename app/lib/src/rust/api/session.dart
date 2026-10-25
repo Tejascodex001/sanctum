@@ -5,7 +5,6 @@
 
 import '../frb_generated.dart';
 import 'call.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `emit_call`, `emit_named`, `emit_session`, `emit`, `ensure_node`, `forget_reels`, `forward_events`, `media`, `minute`, `node`, `panic_text`, `poke`, `real_session`, `runtime`, `session`, `set_status`, `to_key`, `with_real`, `with_session`, `with`
@@ -240,6 +239,9 @@ enum AppEventKind {
 
   /// A call to us went unanswered (`id`: the chat). Worth a notification.
   missedCall,
+
+  /// Feedback arrived in the developer's inbox (see `feedback`).
+  feedback,
 }
 
 class FriendView {

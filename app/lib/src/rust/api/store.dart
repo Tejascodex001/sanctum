@@ -5,9 +5,7 @@
 
 import '../frb_generated.dart';
 import 'call.dart';
-
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
-
 import 'poll.dart';
 
 // These functions are ignored because they are not marked as `pub`: `call_log_view`, `media_kind`, `now`, `reach`, `reaction_views`, `with`

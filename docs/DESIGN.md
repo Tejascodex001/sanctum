@@ -79,6 +79,15 @@ An opt-in feature in the sigil sheet (`net/src/nearby.rs`).
 - **Changelog:** CI writes it from commit messages (`.github/scripts/changelog.py`), as `## Build N` sections. The app shows those newer than the installed build. Release tags point at the commit that was built.
 - **When:** the app checks when Tor connects, at most every 6 hours (this can be turned off), or on demand from the sigil sheet.
 
+## Feedback to the developer
+Settings → **Send feedback** (`core/src/feedback.rs`, `net/src/feedback.rs`, `app/rust/src/api/feedback.rs`, `app/lib/settings/feedback_screen.dart`). No server: it goes to the developer's own Sanctum through Tor.
+- **The form:** 1–5 stars, text (up to 4000 characters), and the phone's maker and model, Android version and Sanctum build, which the person can leave out. The screen lists exactly what will be sent.
+- **Where it goes:** the developer's phone has a separate *feedback key* (never its identity key) and, with **Receive feedback** on, serves a second onion service for it (nickname `feedback`). Each build carries that key's onion address (`DEVELOPER` in `api/feedback.rs`); while it's empty the form says feedback isn't open yet.
+- **Anonymous:** the sender dials the feedback address on circuits of its own, writes one feedback message (`SFB1`, a length, the postcard of `Feedback`) and waits for `OK`. There's no hello and no Sanctum link, so nothing says which phone or person sent it, and it never meets `Frame`.
+- **Delivery:** queued sealed in the store's `kv` until the developer's phone answers, retried when Tor comes up and every 10 minutes; dropped after 30 days. At most 5 a day from one phone.
+- **Inbox:** sealed in `kv`, newest first, up to 500. The developer's phone takes at most 30 an hour from everyone together, ignores anything that isn't feedback, and notifies "New feedback" (never what it says). Off while the decoy profile shows.
+- **The developer's switch:** tap the version in Settings 7 times; **Feedback inbox** appears under Feedback, with the switch, the address to copy, and what arrived. Turning it off stops serving but keeps the same key.
+
 ## Groups
 Peer to peer, with no server (`core/src/group.rs`).
 - **Size:** up to 50 people (`MAX_GROUP`, counting the admin).

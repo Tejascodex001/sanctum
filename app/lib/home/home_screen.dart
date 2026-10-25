@@ -20,6 +20,7 @@ import '../net/net_bus.dart';
 import '../notify/notifier.dart';
 import '../security/app_lock.dart';
 import '../settings/connection_settings.dart';
+import '../settings/feedback_screen.dart';
 import '../settings/settings_screen.dart';
 import '../update/release_notes.dart';
 import '../update/updater.dart';
@@ -138,6 +139,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     Navigator.of(context).popUntil((route) => route.isFirst);
     if (key == 'friends') return _goTo(2);
+    if (key == 'feedback') {
+      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FeedbackInboxScreen()));
+      return;
+    }
     final temp = key.startsWith('t:');
     final id = int.tryParse(key.substring(2));
     if (temp) await _loadTemp();
@@ -209,6 +214,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             AppEventKind.typing:
         break;
       case AppEventKind.call || AppEventKind.missedCall:
+        break;
+      // The feedback inbox listens for itself.
+      case AppEventKind.feedback:
         break;
     }
   }

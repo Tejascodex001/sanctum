@@ -11,6 +11,7 @@ import '../src/rust/api/sigil.dart';
 import '../theme/appearance.dart';
 import '../theme/tokens.dart';
 import 'connection_settings.dart';
+import 'feedback_screen.dart';
 import '../sigil/sigil_look.dart';
 
 /// Everything you can change, opened from your sigil: your name, how the
@@ -129,6 +130,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const NearbySettings(),
           const _Section('UPDATES'),
           const UpdateSettings(),
+          const _Section('FEEDBACK'),
+          const FeedbackSettings(),
           const _Section('EMERGENCY'),
           _Group(
             children: [

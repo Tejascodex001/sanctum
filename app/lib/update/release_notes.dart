@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../src/rust/api/update.dart';
 import '../theme/tokens.dart';
+import '../version.dart';
 import 'updater.dart';
 
 /// What changed since the installed build, then Update.
@@ -24,13 +25,12 @@ Future<void> showReleaseNotes(BuildContext context, UpdateInfo update) => showMo
                 shrinkWrap: true,
                 padding: const EdgeInsets.fromLTRB(Space.xl, 0, Space.xl, Space.md),
                 children: [
-                  if (update.notes.isEmpty)
-                    Text('Improvements and fixes.', style: AppText.caption),
+                  if (update.notes.isEmpty) Text('Improvements and fixes.', style: AppText.caption),
                   for (final notes in update.notes) ...[
                     if (update.notes.length > 1)
                       Padding(
                         padding: const EdgeInsets.only(top: Space.md, bottom: Space.xs),
-                        child: Text('VERSION ${notes.build}', style: AppText.overline),
+                        child: Text('VERSION ${fullVersion(notes.build.toInt())}', style: AppText.overline),
                       ),
                     ..._lines(notes.text),
                   ],
@@ -60,7 +60,8 @@ List<Widget> _lines(String text) => [
       for (final line in text.split('\n'))
         if (line.trim().isNotEmpty)
           Padding(
-            padding: EdgeInsets.only(left: line.startsWith('  ') ? Space.lg : 0, top: line.startsWith('  ') ? 2 : Space.sm),
+            padding:
+                EdgeInsets.only(left: line.startsWith('  ') ? Space.lg : 0, top: line.startsWith('  ') ? 2 : Space.sm),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

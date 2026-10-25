@@ -1216,7 +1216,7 @@ pub(crate) mod tests {
         }
 
         /// A restart: everything in memory (including temp chats) is gone.
-        fn restart(&mut self) {
+        pub(crate) fn restart(&mut self) {
             self.s = Session::open(self.secret, self.dir.path().join("s.db"), &self.key).unwrap();
         }
 

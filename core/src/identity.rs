@@ -82,6 +82,32 @@ pub fn onion_address(public_key: &[u8; 32]) -> String {
     out + ".onion"
 }
 
+/// The key behind an onion address made by [`onion_address`] (with or
+/// without ".onion", any case), if its checksum holds.
+pub fn parse_onion_address(address: &str) -> Option<[u8; 32]> {
+    let text = address.trim().to_ascii_lowercase();
+    let text = text.strip_suffix(".onion").unwrap_or(&text);
+    if text.len() != 56 {
+        return None;
+    }
+    let (mut bytes, mut acc, mut bits) = (Vec::with_capacity(35), 0u64, 0u32);
+    for c in text.bytes() {
+        let v = match c {
+            b'a'..=b'z' => c - b'a',
+            b'2'..=b'7' => c - b'2' + 26,
+            _ => return None,
+        };
+        acc = (acc << 5) | v as u64;
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            bytes.push((acc >> bits) as u8);
+        }
+    }
+    let key: [u8; 32] = bytes.get(..32)?.try_into().ok()?;
+    (onion_address(&key) == format!("{text}.onion")).then_some(key)
+}
+
 /// A 12-digit number two friends read to each other (e.g. on a call) to
 /// confirm nobody swapped their codes. Derived from the pair fingerprint,
 /// so it is the same on both phones. Formatted as "1234 5678 9012".

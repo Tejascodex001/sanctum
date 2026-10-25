@@ -3,6 +3,8 @@ name: Android APK
 on:
   push:
     branches: [main]
+    # The website publishes on its own (pages.yml); it isn't an app update.
+    paths-ignore: ["website/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -22,6 +24,15 @@ jobs:
         with:
           # History and tags, for the changelog.
           fetch-depth: 0
+
+      # Build N is the last published build plus one, so a build that was
+      # cancelled or failed doesn't leave a gap in the numbers.
+      - name: Build number
+        id: number
+        run: |
+          git fetch --tags --force --quiet
+          last=$(git tag --list 'build-*' | sed 's/^build-//' | grep -E '^[0-9]+$' | sort -n | tail -1)
+          echo "n=$(( ${last:-0} + 1 ))" >> "$GITHUB_OUTPUT"
 
       - name: Rust tests
         run: |
@@ -56,7 +67,7 @@ jobs:
           flutter pub get
           flutter analyze
           flutter test
-          flutter build apk --release --target-platform android-arm64 --build-number=${{ github.run_number }}
+          flutter build apk --release --target-platform android-arm64 --build-number=${{ steps.number.outputs.n }}
 
       - name: Verify signature
         run: |
@@ -72,23 +83,30 @@ jobs:
         run: |
           # Tags made by releases since this run checked out.
           git fetch --tags --force --quiet
-          python3 .github/scripts/changelog.py ${{ github.run_number }} changelog.md release-notes.md
+          python3 .github/scripts/changelog.py ${{ steps.number.outputs.n }} changelog.md release-notes.md
 
       - name: Version
         id: version
         run: echo "name=$(sed -n "s/^const appVersion = '\(.*\)';/\1/p" app/lib/version.dart)" >> "$GITHUB_OUTPUT"
 
+      - name: Website download
+        run: cp app/build/app/outputs/flutter-apk/app-release.apk sanctum.apk
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
+          tag_name: build-${{ steps.number.outputs.n }}
           # The tag stays build-N: installed apps look for it to update.
-          name: Sanctum ${{ steps.version.outputs.name }} (build ${{ github.run_number }})
+          name: Sanctum ${{ steps.version.outputs.name }}.${{ steps.number.outputs.n }}
           # Tag the commit that was built, not whatever main is by now.
           target_commitish: ${{ github.sha }}
           make_latest: true
           body_path: release-notes.md
-          # The app reads changelog.md to show what's new before updating.
+          # sanctum.apk is what people download from the website.
+          # app-release.apk (the same file) is what installed apps look for
+          # to update, so it stays. The app reads changelog.md to show
+          # what's new before updating.
           files: |
             app/build/app/outputs/flutter-apk/app-release.apk
+            sanctum.apk
             changelog.md

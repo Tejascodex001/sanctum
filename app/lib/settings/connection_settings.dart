@@ -6,6 +6,7 @@ import '../identity/secrets.dart';
 import '../net/net_bus.dart';
 import '../update/updater.dart';
 import '../version.dart';
+import 'feedback_screen.dart';
 import '../theme/tokens.dart';
 
 class BackgroundSettings extends StatefulWidget {
@@ -210,6 +211,18 @@ class _UpdateSettingsState extends State<UpdateSettings> {
   bool _checking = false;
   bool _auto = true;
 
+  /// Taps on the version: 7 unlock the developer's feedback inbox.
+  int _taps = 0;
+
+  void _tapVersion() {
+    if (FeedbackInbox.unlocked.value || ++_taps < 7) return;
+    HapticFeedback.mediumImpact();
+    FeedbackInbox.unlock();
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('Feedback inbox is now in Settings, under Feedback.')));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -249,9 +262,10 @@ class _UpdateSettingsState extends State<UpdateSettings> {
         children: [
           ListTile(
             leading: const Icon(Icons.system_update_rounded),
-            title: Text('Sanctum $appVersion'),
-            subtitle: Text('${current == 0 ? '' : 'Build $current. '}'
-                'Updates are downloaded privately, and only genuine Sanctum updates can be installed.'),
+            onTap: _tapVersion,
+            title: Text('Sanctum ${fullVersion(current)}'),
+            subtitle:
+                const Text('Updates are downloaded privately, and only genuine Sanctum updates can be installed.'),
             trailing: _checking
                 ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
                 : TextButton(onPressed: _check, child: const Text('Check')),

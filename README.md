@@ -2,17 +2,47 @@
 
 # Sanctum
 
-Private chat for close friends (a circle of 100–200 people at most), on Android.
+**Private chat for you and your close friends. No servers, no accounts, no tracking.**
 
-There are **no servers and no accounts**, and nothing is tracked. Phones talk directly to each other over **Tor**, so nobody, including your friends, sees your IP address (unless you turn on an opt-in faster mode for calls, which says what it shares). Everything stays on your phone, encrypted, and there are no cloud backups.
+Sanctum is an Android app for a small circle of people who trust each other (about 200 friends at most). Your messages, photos, calls and plans go straight from your phone to your friends' phones, hidden by Tor. There's no company in the middle that stores them, reads them or sells anything about you.
 
-The UI is the **Sigil + Deck** design: every person and chat gets its own generated sigil, and chats are stacked cards.
+> Sanctum is in **beta** (the app says *beta-1.0.0* followed by the build number, like *beta-1.0.0.66*). It's ready to use with friends, and it updates itself from inside the app.
+
+## Why Sanctum
+
+- **No servers.** Most chat apps send everything through a company's computers. Sanctum doesn't: your phone talks to your friends' phones directly.
+- **No phone number, no email, no account.** You add a friend by scanning their QR code in person, or by typing a short code they send you.
+- **Nobody sees who you talk to.** Connections go through Tor, so not even your friends learn your internet address, and nobody watching the network can tell who is talking to whom.
+- **Everything stays on your phone, locked.** Chats are stored encrypted, behind your fingerprint, face or PIN. There are no cloud backups.
+- **Nothing is tracked.** No ads, no analytics, no crash reports, no Google services. Notifications are made on your phone and never say what a message says.
+- **Made for friends, not for the world.** No public profiles, no strangers, no follower counts.
+
+## What you can do
+
+- **Chat** one to one or in **groups** of up to 50, with replies, threads, reactions, and the "typing…" hint.
+- **Send** photos, videos, files and **voice notes**.
+- **Call** a friend, with **voice or video**.
+- **Plan together** with polls, "which day works?" polls and plans that show who's going.
+- **Share albums** in any chat, and a **daily moment**: one photo a day for your friends, gone after 24 hours.
+- **Temp chats** that live only in memory, with messages that burn after 24 hours.
+- **Chat without internet** with friends on the same Wi-Fi, a phone's hotspot or Bluetooth (Nearby, off until you turn it on).
+- **Stay safe** with hidden chats, screenshot blocking, a decoy PIN that opens an empty-looking Sanctum, and a panic wipe that erases everything in two seconds, even from the lock screen.
+
+## Every chat has a sigil
+
+Each person and each chat gets its own **sigil**: a unique piece of artwork made from their secret key. Your chat with a friend has a sigil made from both of you, and it looks the same on both phones. **If your sigils match, nobody is listening in.** That's how you check a chat is secure: no codes to read, just look.
+
+## Good to know
+
+- **Android only.** iPhones stop apps from staying connected in the background, and the usual way around that needs a server, which Sanctum doesn't have. (Briar, a similar app, is Android-only for the same reason.)
+- **Private by default, faster when you choose.** Tor makes some things slower: video calls are choppier. A switch in Settings, *Faster calls*, speeds them up, and it says plainly what it shares.
+- **Messages wait for you.** If a friend writes while you're offline, their phone keeps the message and delivers it when you're both online again. In groups, other members who already have it pass it on, so it reaches you even if the sender has gone offline.
 
 ## Install
 
-Sanctum is in beta: the app says **beta-1.0.0**, and each release is told apart by its build number.
+Each release is told apart by its build number.
 
-1. Download `app-release.apk` from the latest [release](../../releases/latest) (`build-N`).
+1. Download `sanctum.apk` from the latest [release](../../releases/latest) (`build-N`).
 2. Install it. Android asks once to allow installs from your browser or file manager.
 3. **After that, update from inside the app.** When a new build is out, Sanctum shows "Build N is available". **What's new** lists the changes since your build, and **Update** downloads it through Tor and opens Android's installer. Android accepts only builds signed with the same key, so a tampered APK can't be installed.
 
@@ -44,6 +74,7 @@ Sanctum is in beta: the app says **beta-1.0.0**, and each release is told apart 
 | ✅ | **Panic wipe** | Hold 2 seconds, even from the lock screen. Destroys the keys and data, then closes the app |
 | ✅ | **Encrypted storage** | SQLite with every row sealed (XChaCha20-Poly1305), keys in Android Keystore, no backups |
 | ✅ | **Over-the-air updates** | Checked and downloaded through Tor, with changelogs |
+| ✅ | **Send feedback** | Stars, what you think, and (if you like) your phone's model and Android version, sent straight to the developer's own Sanctum through Tor. Nobody sees who sent it |
 | ✅ | **Media** | Photos up to 10 MB, videos up to 20 MB, files up to 50 MB, end-to-end encrypted and stored encrypted. Photos are resized and lose hidden metadata like location. Nothing goes to your gallery by itself: use **Save to phone** on a photo, video, voice note or file to keep a copy (a Sanctum folder, no extra permission) |
 | ✅ | **Voice notes** | Hold the mic to record, release to send, slide left to cancel. Encrypted like any attachment |
 | ✅ | **Sanctum PIN & decoy PIN** | An optional PIN of its own (fingerprint still works). A decoy PIN opens an empty-looking Sanctum with its own data, while your real chats stay hidden and silent |
@@ -69,14 +100,18 @@ Sanctum is in beta: the app says **beta-1.0.0**, and each release is told apart 
 | ✅ | **Video calls** | Start a call with video or turn your camera on during a call; switch cameras, answer without video. Lower quality and choppier through Tor; sharp on the same Wi-Fi or with Faster calls. A hidden chat's video waits until you unlock |
 | ✅ | **Faster calls** | An opt-in Settings switch: calls connect straight between your phones when your networks allow it (less delay, sharper video), else stay private through Tor. Your friend's phone learns your internet address. Used only if both of you turn it on. The call screen says Private, Nearby or Direct |
 
-## How it works
+## For developers
+
+Everything below is for people working on the code.
+
+### How it works
 
 - **`core/` (Rust):** the identity (Ed25519; the same key is your Tor onion address), MLS (OpenMLS), the encrypted store, the protocol engine, groups, temp chats and sigils. It does no I/O, so whole conversations between phones are tested in-process.
 - **`net/` (Rust):** connections. Tor through Arti (onion services, plus HTTPS for updates), nearby Wi-Fi discovery, and the node that keeps live links to friends.
 - **`app/` (Flutter):** the UI. `app/rust/` is the bridge to Dart (flutter_rust_bridge). Android-specific code is in `app/android/` (scanner, background service, notifications, installer, Bluetooth nearby, and call audio, which talks to Rust directly rather than through Dart).
 - **`docs/DESIGN.md`:** the full design: architecture, encryption, protocol, groups, nearby, calls, updates and the UI system.
 
-## Build and test
+### Build and test
 
 ```sh
 cargo test --workspace              # core + network (Tor bootstrap needs the internet)
@@ -84,6 +119,8 @@ cargo build -p rust_lib_sanctum     # the host library the Flutter tests load
 cd app && flutter analyze && flutter test
 ```
 
-Every push to `main` runs the tests, builds a signed arm64 APK and publishes it as release `build-<run number>`, with a changelog made from the commit messages. The signing key lives only in the repository secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`).
+Every push to `main` runs the tests, builds a signed arm64 APK and publishes it as release `build-N` (the last published build plus one), with a changelog made from the commit messages. The signing key lives only in the repository secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`).
+
+The website lives in `website/` and is published to GitHub Pages on its own; changing only the website doesn't make a new app build.
 
 Contributing with an AI agent? Read [AGENTS.md](AGENTS.md).

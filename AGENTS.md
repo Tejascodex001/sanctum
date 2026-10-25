@@ -5,7 +5,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 ## Non-negotiables
 
 - **Privacy:**
-  - The app connects to friends and update servers **only through Tor**. Two opt-in exceptions, both off by default: Nearby (the local Wi-Fi and Bluetooth); and "Faster calls", which sends a call's sealed audio and video straight between the two phones (UDP) only when **both** have it on, so each learns the other's address.
+  - The app connects to friends, update servers and the developer's feedback inbox **only through Tor**. Two opt-in exceptions, both off by default: Nearby (the local Wi-Fi and Bluetooth); and "Faster calls", which sends a call's sealed audio and video straight between the two phones (UDP) only when **both** have it on, so each learns the other's address.
   - No analytics, no crash reporting, no Google services (no ML Kit, no Firebase, no Play Services). Notifications are posted on the phone itself.
   - Message content never leaves the encrypted store or MLS: not in notifications, logs or URLs.
 - **Strictly on-device:** no backups (`allowBackup` stays off), no cloud.
@@ -21,7 +21,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
   - A blank line, then `- ` bullets with details. Bullets can continue on lines indented by two spaces.
   - Use plain words: no jargon (MLS, Argon2, crate or file names, protocol details).
   - Start the subject with `Internal:`, `Docs:` or `CI:` for developer-only changes; they're left out of the changelog.
-- Every push to `main` builds and publishes release `build-<run number>`. A red build means no release; fix it before moving on.
+- Every push to `main` builds and publishes release `build-N`, where N is the last published build plus one (a cancelled or failed build leaves no gap). A red build means no release; fix it before moving on.
 
 ## Layout
 
@@ -37,6 +37,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `core/src/call.rs` | 1:1 voice and video calls: signaling inside MLS, sealed media packets (`MediaHub`), replay window, jitter buffer |
 | `core/src/video.rs` | Video in calls: fragments and reassembly, rate control, sound before pictures |
 | `core/src/direct.rs` | Faster calls: direct routes, the address filter, probing and falling back to the link |
+| `core/src/feedback.rs` | Feedback to the developer: the form's contents, the wire format, the sender's queue and the developer's inbox. `net/src/feedback.rs` delivers it over its own onion service; the address builds send to is `DEVELOPER` in `app/rust/src/api/feedback.rs` |
 | `core/src/moment.rs` | Daily moments: one photo a day for every friend, gone after 24 hours |
 | `core/src/store.rs` | The encrypted SQLite store. Every row is sealed; index columns are keyed hashes |
 | `core/src/protocol.rs` | Wire types: `Frame` (link level) and `Content` (inside MLS) |
@@ -53,7 +54,8 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `app/lib/call/` | The call controller (ring, audio, service) and the call screen, shown above the app lock |
 | `app/lib/settings/` | The Settings screen (opened from your sigil) |
 | `app/lib/theme/appearance.dart` | Light, dark or like the phone, and the accent colour. `Palette` is read at build time, so `Restyler` redraws every screen when it changes: don't make widgets using `Palette` colours `const`. Sigils are shown through `SigilLook` (`spec.look`): in the picked accent and light in light mode. Use `spec.look.accent.color` for UI colours taken from a sigil; only comparing sigils with a friend uses `exact: true` |
-| `app/lib/version.dart` | The version people see (`beta-1.0.0` while in beta; the owner decides when it leaves beta). Must match `pubspec.yaml` and the `beta-` prefix in `build.gradle.kts` (a test checks). Releases stay tagged `build-N`: installed apps look for that tag to update |
+| `app/lib/version.dart` | The version people see (`beta-1.0.0` while in beta, shown as `beta-1.0.0.<build>` via `fullVersion`; the owner decides when it leaves beta). Must match `pubspec.yaml` and the `beta-` prefix in `build.gradle.kts` (a test checks). Releases stay tagged `build-N`: installed apps look for that tag to update |
+| `website/` | The website (the open door, night and day), published to GitHub Pages by `.github/workflows/pages.yml`. Plain HTML and CSS, fonts kept beside it: no trackers, cookies or requests to other sites. Pushes that only touch it don't build the app |
 | `docs/brand/` | The logo (the Sanctuary door, gold on midnight). `make_icons.py` writes the Android icon vectors from one drawing; app icon resources are in `app/android/app/src/main/res/` |
 | `app/lib/` | The Flutter UI. Design tokens are in `app/lib/theme/tokens.dart`; use them, never one-off values |
 | `app/android/app/src/main/kotlin/` | The scanner, background service, notifications, installer, OEM battery settings, Bluetooth nearby (`BluetoothNearby.kt`) and calls (`CallAudio.kt`, `CallVideo.kt`, `CallService.kt`, `CallNative.kt`) |
