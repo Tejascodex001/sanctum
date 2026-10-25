@@ -5,7 +5,10 @@ use super::session::{self, poke};
 pub struct GroupMemberView {
     pub key: Vec<u8>,
     pub name: String,
+    /// The leader or an admin.
     pub admin: bool,
+    /// The group's leader.
+    pub leader: bool,
     pub me: bool,
     /// Invited, not joined yet.
     pub pending: bool,
@@ -14,6 +17,8 @@ pub struct GroupMemberView {
 pub struct GroupDetails {
     pub title: String,
     pub admin_is_me: bool,
+    /// We are the leader or an admin.
+    pub i_am_admin: bool,
     /// False once we've left or been removed.
     pub active: bool,
     pub members: Vec<GroupMemberView>,
@@ -43,6 +48,7 @@ pub fn group_details(chat_id: i64) -> anyhow::Result<GroupDetails> {
     Ok(GroupDetails {
         title: view.title,
         admin_is_me: view.admin_is_me,
+        i_am_admin: view.i_am_admin,
         active: view.active,
         members: view
             .members
@@ -51,6 +57,7 @@ pub fn group_details(chat_id: i64) -> anyhow::Result<GroupDetails> {
                 key: m.identity.to_vec(),
                 name: m.name,
                 admin: m.admin,
+                leader: m.leader,
                 me: m.me,
                 pending: m.pending,
             })
@@ -58,13 +65,40 @@ pub fn group_details(chat_id: i64) -> anyhow::Result<GroupDetails> {
     })
 }
 
-pub fn group_add(chat_id: i64, friends: Vec<i64>) -> anyhow::Result<()> {
-    reach(session::with(|s| Ok(s.group_add(chat_id, &friends)?))?);
+/// Adds friends; with `share_history`, the newcomers also get the last week
+/// of the group's text messages.
+pub fn group_add(chat_id: i64, friends: Vec<i64>, share_history: bool) -> anyhow::Result<()> {
+    reach(session::with(|s| Ok(s.group_add(chat_id, &friends, share_history)?))?);
+    Ok(())
+}
+
+fn key32(member: Vec<u8>) -> anyhow::Result<[u8; 32]> {
+    member.try_into().map_err(|_| anyhow::anyhow!("keys are 32 bytes"))
+}
+
+/// Makes a member an admin (leader only).
+pub fn group_make_admin(chat_id: i64, member: Vec<u8>) -> anyhow::Result<()> {
+    let member = key32(member)?;
+    reach(session::with(|s| Ok(s.group_make_admin(chat_id, &member)?))?);
+    Ok(())
+}
+
+/// Takes admin rights away.
+pub fn group_remove_admin(chat_id: i64, member: Vec<u8>) -> anyhow::Result<()> {
+    let member = key32(member)?;
+    reach(session::with(|s| Ok(s.group_remove_admin(chat_id, &member)?))?);
+    Ok(())
+}
+
+/// The leader makes an admin the new leader and becomes an admin.
+pub fn group_hand_over(chat_id: i64, member: Vec<u8>) -> anyhow::Result<()> {
+    let member = key32(member)?;
+    reach(session::with(|s| Ok(s.group_hand_over(chat_id, &member)?))?);
     Ok(())
 }
 
 pub fn group_remove(chat_id: i64, member: Vec<u8>) -> anyhow::Result<()> {
-    let member: [u8; 32] = member.try_into().map_err(|_| anyhow::anyhow!("keys are 32 bytes"))?;
+    let member = key32(member)?;
     reach(session::with(|s| Ok(s.group_remove(chat_id, &member)?))?);
     Ok(())
 }

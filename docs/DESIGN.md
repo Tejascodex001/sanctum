@@ -94,12 +94,21 @@ Peer to peer, with no server (`core/src/group.rs`).
 - **Encryption:** each group is an MLS group. A message is encrypted once, and the same bytes go to every member over their own Tor link (`Frame::GroupMls`).
 - **Delivery:** each member confirms receipt to the sender. The message shows ✓✓ once every member has it, however it got to them; copies for offline members wait in the sender's outbox, and other members also pass the message on (see "Groups at scale").
 - **Whose message:** MLS says who wrote a message, so a message passed on by another member is still shown as its author's. A current member may pass on anyone's; anyone else may only send their own.
-- **One admin:** the creator is the only one who commits membership changes. With a single committer, members can't disagree about the group's state, which a server would otherwise guarantee.
+- **One committer, several admins:** the leader (the creator, or whoever was handed leadership) is the only one who commits membership changes. With a single committer, members can't disagree about the group's state, which a server would otherwise guarantee.
+  - **Admins** (up to `MAX_ADMINS` = 5 besides the leader) can ask for changes: they send `Content::GroupRequest` (add, remove, rename, demote) inside the group, and the leader's phone checks the sender (MLS says who it is) against its admin list and does it. Without the leader online, requests wait.
+  - **Making an admin** is the leader's call, and only for a member who has joined and is the leader's friend. The list goes out as `Content::GroupRoles { leader, admins, at }`. Members accept it only from the current leader, and only if `at` is newer than the last one (kept in kv as `roles-at:<group>`), so a stale or forged list changes nothing.
+  - **Who can remove whom:** the leader removes anyone, including admins. An admin removes ordinary members, and may demote another admin, but nobody except the leader removes an admin or the leader from the group.
+  - **Handing over:** the leader names an admin as the new leader, and becomes an admin. A leader with admins must hand over before leaving; a leader with none may leave and the group carries on without one, as before.
 - **Adding members:** the admin adds friends only.
   1. It asks a friend for a key package over their link and checks it really is theirs.
   2. It commits the addition, which every existing member applies.
   3. It sends the newcomer a welcome with the group's name and members, then sends everyone the updated member list (`Content::GroupInfo`).
   - Invitees who are offline are retried until their phone is reached.
+- **Sharing history:** when the leader adds someone, they can also show the newcomer the last week (`HISTORY_DAYS` = 7, at most 300 text messages and about 150 KB, never photos or files).
+  - The leader sends `Content::HistoryBatch` over its own direct chat with the newcomer, not into the group. If it arrives before the welcome, it waits in one kv slot (`history-stash`) and is applied when the group is joined, and only if it came from the group's leader.
+  - Imported messages keep their original author and time, and are marked `shared_by` the leader; they are shown as "Earlier message". The leader's phone remembers the choice (`history-for:<group><peer>`) until the newcomer has joined.
+  - Everyone in the group gets `Content::HistoryShared { with }`, shown as a notice line in the chat (`StoredMessage::notice`), so nobody is surprised by what a newcomer can read.
+  - Older builds ignore the new content (it is inside MLS): they simply don't show roles, requests, history or notices.
 - **Members who aren't friends** connect to each other directly for the group: `Session::knows` accepts friends and fellow group members. Strangers can still only send a friend request.
 - **Leaving and removal:** a member who leaves tells everyone and deletes the group from their phone; the admin then commits their removal. A removed member's copy goes inactive.
 - **Out-of-order messages:** they are expected without a server.

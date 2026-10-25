@@ -250,7 +250,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   /// Friends' chats and groups (not notes or temp chats) take reactions.
   bool _canReact(ChatMessage m) =>
-      m.seq != null && m.call == null && widget.card.source is StoreSource && (widget.card.friend || widget.card.group);
+      m.seq != null && !m.isRecord && widget.card.source is StoreSource && (widget.card.friend || widget.card.group);
 
   /// Reacts to [m] with [emoji]; the same one again takes it back.
   Future<void> _react(ChatMessage m, String emoji) async {
@@ -366,7 +366,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   ],
                 ),
               ),
-            if (widget.card.source.replies && m.seq != null && m.call == null)
+            if (widget.card.source.replies && m.seq != null && !m.isRecord)
               ListTile(
                 leading: const Icon(Icons.reply_rounded),
                 title: const Text('Reply'),
@@ -384,7 +384,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   saveMediaToPhone(context, chatId: widget.card.id, seq: m.seq!, media: m.media!);
                 },
               ),
-            if (m.call == null)
+            if (!m.isRecord)
               ListTile(
                 leading: const Icon(Icons.copy_rounded),
                 title: const Text('Copy'),
@@ -403,7 +403,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 },
               ),
               // A call's record is only on this phone.
-              if (m.fromMe && widget.card.friend && m.call == null)
+              if (m.fromMe && widget.card.friend && !m.isRecord)
                 ListTile(
                   leading: const Icon(Icons.delete_forever_rounded, color: Palette.danger),
                   title: const Text('Delete for everyone', style: TextStyle(color: Palette.danger)),
@@ -541,6 +541,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       itemBuilder: (_, i) {
         final index = _messages.length - 1 - i;
         final m = _messages[index];
+        if (m.notice) return _NoticeLine(key: ValueKey(index), text: m.body);
         if (m.call != null) {
           return _CallRecord(
             key: ValueKey(index),
@@ -579,7 +580,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           children: [
             _SwipeToReply(
               key: _bubbleKeys.putIfAbsent(index, GlobalKey.new),
-              enabled: widget.card.source.replies && m.seq != null && m.call == null,
+              enabled: widget.card.source.replies && m.seq != null && !m.isRecord,
               onReply: () => _startReply(m),
               fromMe: m.fromMe,
               child: bubble,
@@ -1283,6 +1284,11 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
               padding: const EdgeInsets.only(bottom: 2),
               child: Text(m.senderName!, style: AppText.micro.copyWith(color: accent, fontWeight: FontWeight.w700)),
             ),
+          if (m.sharedBy != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text('Earlier message · shown by ${m.sharedBy}', style: AppText.micro),
+            ),
           if (m.reply != null)
             GestureDetector(
               onTap: widget.onQuoteTap,
@@ -1906,6 +1912,21 @@ class _TypingRowState extends State<_TypingRow> with SingleTickerProviderStateMi
 
   /// 0 → 1 → 0 over the first part of each cycle.
   static double _bump(double t) => t < 0.3 ? (t < 0.15 ? t / 0.15 : (0.3 - t) / 0.15) : 0;
+}
+
+/// A line about the group itself, in the middle of the chat.
+class _NoticeLine extends StatelessWidget {
+  const _NoticeLine({super.key, required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: Space.sm, horizontal: Space.lg),
+          child: Text(text, textAlign: TextAlign.center, style: AppText.caption),
+        ),
+      );
 }
 
 /// A call's record in the chat ("Voice call · 4:12", "Missed call"),

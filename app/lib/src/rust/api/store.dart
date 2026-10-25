@@ -289,6 +289,13 @@ class MessageView {
   /// in `body`). `from_me`: we called.
   final CallLogView? call;
 
+  /// A line about the group itself ("Sam joined and was shown the last
+  /// week"), shown in the middle of the chat rather than as a bubble.
+  final bool notice;
+
+  /// Earlier group messages the leader showed a newcomer: who passed them on.
+  final String? sharedBy;
+
   const MessageView({
     required this.seq,
     required this.fromMe,
@@ -302,6 +309,8 @@ class MessageView {
     this.album,
     required this.reactions,
     this.call,
+    required this.notice,
+    this.sharedBy,
   });
 
   @override
@@ -317,7 +326,9 @@ class MessageView {
       poll.hashCode ^
       album.hashCode ^
       reactions.hashCode ^
-      call.hashCode;
+      call.hashCode ^
+      notice.hashCode ^
+      sharedBy.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -335,7 +346,9 @@ class MessageView {
           poll == other.poll &&
           album == other.album &&
           reactions == other.reactions &&
-          call == other.call;
+          call == other.call &&
+          notice == other.notice &&
+          sharedBy == other.sharedBy;
 }
 
 /// Everyone who reacted to a message with one emoji.

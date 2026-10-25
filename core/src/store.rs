@@ -56,6 +56,9 @@ pub struct ChatMeta {
     /// Groups: the member who manages membership (its creator). Only they
     /// commit changes, so members never disagree about the group's state.
     pub admin: Option<[u8; 32]>,
+    /// Groups: members the leader (`admin`) made admins. They ask the leader
+    /// to add and remove people; they never commit changes themselves.
+    pub admins: Vec<[u8; 32]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,6 +70,37 @@ pub struct Peer {
     /// Their key is confirmed: their QR was scanned in person, or the
     /// safety number was compared (like Threema's green level).
     pub verified: bool,
+}
+
+/// The fourth on-disk format, before group admins.
+#[derive(Deserialize)]
+struct ChatMetaV3 {
+    kind: ChatKind,
+    title: String,
+    sigil_key: Vec<u8>,
+    pinned: bool,
+    created_at: u64,
+    group_id: Vec<u8>,
+    peers: Vec<Peer>,
+    hidden: bool,
+    admin: Option<[u8; 32]>,
+}
+
+impl From<ChatMetaV3> for ChatMeta {
+    fn from(v: ChatMetaV3) -> Self {
+        Self {
+            kind: v.kind,
+            title: v.title,
+            sigil_key: v.sigil_key,
+            pinned: v.pinned,
+            created_at: v.created_at,
+            group_id: v.group_id,
+            peers: v.peers,
+            hidden: v.hidden,
+            admin: v.admin,
+            admins: Vec::new(),
+        }
+    }
 }
 
 /// The third on-disk format, before hidden chats and groups.
@@ -93,6 +127,7 @@ impl From<ChatMetaV2> for ChatMeta {
             peers: v.peers,
             hidden: false,
             admin: None,
+            admins: Vec::new(),
         }
     }
 }
@@ -137,6 +172,7 @@ impl From<ChatMetaV1> for ChatMeta {
                 .collect(),
             hidden: false,
             admin: None,
+            admins: Vec::new(),
         }
     }
 }
@@ -163,6 +199,7 @@ impl From<ChatMetaV0> for ChatMeta {
             peers: Vec::new(),
             hidden: false,
             admin: None,
+            admins: Vec::new(),
         }
     }
 }
@@ -198,6 +235,13 @@ pub struct StoredMessage {
     /// kept on this phone only. `from_me`: we called. `body` holds the
     /// words shown, so previews and search need nothing special.
     pub call: Option<CallLog>,
+    /// Passed on to us when we joined the group, by this member (it was
+    /// said before we got here; `sender` is who wrote it, as that member
+    /// told us).
+    pub shared_by: Option<[u8; 32]>,
+    /// A line the chat shows between messages ("Sam joined"), not a message
+    /// anyone wrote. Kept on this phone only; `body` holds the words.
+    pub notice: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -217,6 +261,24 @@ pub struct CallLog {
     pub outcome: u8,
     /// How long we talked, in seconds.
     pub seconds: u32,
+}
+
+/// The eighth message format, before shared history and notices.
+#[derive(Deserialize)]
+struct StoredMessageV7 {
+    from_me: bool,
+    body: String,
+    sent_at: u64,
+    delivered: bool,
+    id: Option<MessageId>,
+    reply: Option<Quote>,
+    sender: Option<[u8; 32]>,
+    media: Option<Media>,
+    poll: Option<Poll>,
+    votes: Vec<Vote>,
+    album: Option<Album>,
+    reactions: Vec<Reaction>,
+    call: Option<CallLog>,
 }
 
 /// The seventh message format, before calls.
@@ -823,6 +885,24 @@ impl Store {
         if let Ok(m) = postcard::from_bytes::<StoredMessage>(&plain) {
             return Ok(m);
         }
+        if let Ok(v7) = postcard::from_bytes::<StoredMessageV7>(&plain) {
+            return Ok(StoredMessage {
+                from_me: v7.from_me,
+                body: v7.body,
+                sent_at: v7.sent_at,
+                delivered: v7.delivered,
+                id: v7.id,
+                reply: v7.reply,
+                sender: v7.sender,
+                media: v7.media,
+                poll: v7.poll,
+                votes: v7.votes,
+                album: v7.album,
+                reactions: v7.reactions,
+                call: v7.call,
+                ..Default::default()
+            });
+        }
         if let Ok(v6) = postcard::from_bytes::<StoredMessageV6>(&plain) {
             return Ok(StoredMessage {
                 from_me: v6.from_me,
@@ -837,7 +917,7 @@ impl Store {
                 votes: v6.votes,
                 album: v6.album,
                 reactions: v6.reactions,
-                call: None,
+                ..Default::default()
             });
         }
         if let Ok(v5) = postcard::from_bytes::<StoredMessageV5>(&plain) {
@@ -1018,6 +1098,9 @@ impl Store {
         if let Ok(meta) = postcard::from_bytes::<ChatMeta>(&plain) {
             return Ok(meta);
         }
+        if let Ok(v3) = postcard::from_bytes::<ChatMetaV3>(&plain) {
+            return Ok(v3.into());
+        }
         if let Ok(v2) = postcard::from_bytes::<ChatMetaV2>(&plain) {
             return Ok(v2.into());
         }
@@ -1072,6 +1155,7 @@ mod tests {
             peers: Vec::new(),
             hidden: false,
             admin: None,
+            admins: Vec::new(),
         }
     }
 
@@ -1154,6 +1238,104 @@ mod tests {
         hidden.admin = Some([5; 32]);
         s.update_chat(7, &hidden).unwrap();
         assert_eq!(s.chats().unwrap().remove(0).1, hidden);
+    }
+
+    #[test]
+    fn chats_from_before_group_admins_upgrade() {
+        #[derive(Serialize)]
+        struct V3 {
+            kind: ChatKind,
+            title: String,
+            sigil_key: Vec<u8>,
+            pinned: bool,
+            created_at: u64,
+            group_id: Vec<u8>,
+            peers: Vec<Peer>,
+            hidden: bool,
+            admin: Option<[u8; 32]>,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.db");
+        let key = [6u8; 32];
+        {
+            let s = Store::open(&path, &key).unwrap();
+            let old = V3 {
+                kind: ChatKind::Group,
+                title: "Crew".into(),
+                sigil_key: vec![1; 32],
+                pinned: false,
+                created_at: 5,
+                group_id: vec![8; 16],
+                peers: vec![Peer { identity: [4; 32], name: "Bob".into(), onion: None, verified: false }],
+                hidden: true,
+                admin: Some([2; 32]),
+            };
+            s.db.execute(
+                "INSERT INTO chats (id, sealed) VALUES (?1, ?2)",
+                params![9, s.seal(&chat_aad(9), &old).unwrap()],
+            )
+            .unwrap();
+        }
+        let s = Store::open(&path, &key).unwrap();
+        let (_, meta) = s.chats().unwrap().remove(0);
+        assert_eq!((meta.title.as_str(), meta.hidden, meta.admin), ("Crew", true, Some([2; 32])));
+        assert!(meta.admins.is_empty());
+        let mut with_admins = meta.clone();
+        with_admins.admins = vec![[4; 32]];
+        s.update_chat(9, &with_admins).unwrap();
+        assert_eq!(s.chats().unwrap().remove(0).1, with_admins);
+    }
+
+    #[test]
+    fn messages_from_before_shared_history_upgrade() {
+        #[derive(Serialize)]
+        struct V7 {
+            from_me: bool,
+            body: String,
+            sent_at: u64,
+            delivered: bool,
+            id: Option<MessageId>,
+            reply: Option<Quote>,
+            sender: Option<[u8; 32]>,
+            media: Option<Media>,
+            poll: Option<Poll>,
+            votes: Vec<Vote>,
+            album: Option<Album>,
+            reactions: Vec<Reaction>,
+            call: Option<CallLog>,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[7; 32]).unwrap();
+        let chat = s.create_chat(&meta("Bob")).unwrap();
+        let old = V7 {
+            from_me: false,
+            body: "before".into(),
+            sent_at: 3,
+            delivered: true,
+            id: Some([1; 16]),
+            reply: None,
+            sender: Some([2; 32]),
+            media: None,
+            poll: None,
+            votes: Vec::new(),
+            album: None,
+            reactions: Vec::new(),
+            call: Some(CallLog { video: true, outcome: 1, seconds: 12 }),
+        };
+        s.db.execute(
+            "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, 0, ?2)",
+            params![chat, s.seal(&message_aad(chat, 0), &old).unwrap()],
+        )
+        .unwrap();
+        let m = &s.messages(chat, None).unwrap()[0];
+        assert_eq!((m.body.as_str(), m.sender, m.delivered), ("before", Some([2; 32]), true));
+        assert!(m.shared_by.is_none() && !m.notice && m.call.as_ref().is_some_and(|c| c.video));
+        // And the new fields round-trip.
+        let mut shared = m.clone();
+        shared.shared_by = Some([9; 32]);
+        shared.notice = true;
+        s.add_message(chat, &shared).unwrap();
+        assert_eq!(s.messages(chat, None).unwrap()[1], shared);
     }
 
     #[test]

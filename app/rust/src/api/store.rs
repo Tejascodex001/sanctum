@@ -58,6 +58,11 @@ pub struct MessageView {
     /// A call's record ("Voice call · 4:12", "Missed call"; the words are
     /// in `body`). `from_me`: we called.
     pub call: Option<CallLogView>,
+    /// A line about the group itself ("Sam joined and was shown the last
+    /// week"), shown in the middle of the chat rather than as a bubble.
+    pub notice: bool,
+    /// Earlier group messages the leader showed a newcomer: who passed them on.
+    pub shared_by: Option<String>,
 }
 
 pub struct CallLogView {
@@ -281,6 +286,7 @@ pub fn chat_create(kind: ChatKindView, title: String, sigil_key: Vec<u8>) -> any
             peers: Vec::new(),
             hidden: false,
             admin: None,
+            admins: Vec::new(),
         })?)
     })
 }
@@ -400,6 +406,8 @@ pub fn message_list(chat_id: i64, limit: Option<u32>) -> anyhow::Result<Vec<Mess
                     title: a.title,
                 }),
                 call: m.call.map(call_log_view),
+                notice: m.notice,
+                shared_by: m.shared_by.map(|k| name_of(&k)),
                 body: m.body,
             })
             .collect())

@@ -38,6 +38,9 @@ pub enum SessionError {
     NotAFriend,
     #[error("only the group's admin can do that")]
     NotAdmin,
+    /// A group rule said no; the words are for the person to read.
+    #[error("{0}")]
+    GroupRule(&'static str),
     #[error("too large to send ({0} MB at most for this kind)")]
     TooLarge(u64),
     #[error("storage: {0}")]
@@ -239,6 +242,7 @@ impl Session {
             }],
             hidden: false,
             admin: None,
+            admins: Vec::new(),
         })?;
         Ok(Paired {
             chat_id,
@@ -888,7 +892,13 @@ impl Session {
                 self.events.push(Event::TempMessage(id));
             }
             // Group content belongs in group frames, not a pair's chat.
-            Content::GroupText { .. } | Content::GroupInfo(_) | Content::GroupLeave => {}
+            Content::HistoryBatch { group, items } => self.on_history(peer, group, items)?,
+            Content::GroupText { .. }
+            | Content::GroupInfo(_)
+            | Content::GroupLeave
+            | Content::GroupRoles { .. }
+            | Content::GroupRequest(_)
+            | Content::HistoryShared { .. } => {}
             Content::DeleteMessage { id } => {
                 // Only their own messages.
                 if let Some((seq, m)) = self.store.message_by_id(chat_id, &id)? {
@@ -1606,6 +1616,215 @@ pub(crate) mod tests {
         assert!(bob.s.send_to_chat(bg, "hello?", None).is_err());
     }
 
+    /// Alice leads "Crew" with Bob and Carol in it; Dave is her friend (and
+    /// Bob's) but not in the group.
+    fn crew() -> (Phone, Phone, Phone, Phone, i64, [i64; 4]) {
+        let (mut alice, mut bob, mut carol, mut dave) = (Phone::new(), Phone::new(), Phone::new(), Phone::new());
+        for (phone, name) in [(&mut alice, "Alice"), (&mut bob, "Bob"), (&mut carol, "Carol"), (&mut dave, "Dave")] {
+            phone.s.set_my_name(name);
+        }
+        let friends = |a: &mut Phone, an: &str, b: &mut Phone, bn: &str| {
+            let ab = a.s.add_friend(&b.s.my_code(bn), true).unwrap().chat_id;
+            b.s.add_friend(&a.s.my_code(an), true).unwrap();
+            ab
+        };
+        let ab = friends(&mut alice, "Alice", &mut bob, "Bob");
+        let ac = friends(&mut alice, "Alice", &mut carol, "Carol");
+        let ad = friends(&mut alice, "Alice", &mut dave, "Dave");
+        let bd = friends(&mut bob, "Bob", &mut dave, "Dave");
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        connect(&mut alice, &mut dave);
+        let (group, _) = alice.s.create_group("Crew", &[ab, ac]).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        connect(&mut alice, &mut bob);
+        (alice, bob, carol, dave, group, [ab, ac, ad, bd])
+    }
+
+    fn role_of(phone: &Phone, chat: i64, who: [u8; 32]) -> (bool, bool) {
+        let m = phone.s.group_view(chat).unwrap().members.into_iter().find(|m| m.identity == who).unwrap();
+        (m.admin, m.leader)
+    }
+
+    #[test]
+    fn the_leader_makes_admins_who_ask_the_leader() {
+        let (mut alice, mut bob, mut carol, mut dave, group, [_, _, _, bd]) = crew();
+        let (bg, cg) = (group_of(&bob, "Crew").unwrap(), group_of(&carol, "Crew").unwrap());
+        assert_eq!(role_of(&bob, bg, alice.pk()), (true, true), "the creator leads");
+        assert!(alice.s.group_view(group).unwrap().i_am_admin);
+
+        // Only joined friends can be admins, and a plain member can't add anyone.
+        assert!(matches!(alice.s.group_make_admin(group, &dave.pk()), Err(SessionError::GroupRule(_))));
+        assert!(matches!(bob.s.group_make_admin(bg, &carol.pk()), Err(SessionError::NotAdmin)));
+        assert!(matches!(bob.s.group_add(bg, &[bd], false), Err(SessionError::NotAdmin)));
+
+        alice.s.group_make_admin(group, &bob.pk()).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        assert!(bob.s.group_view(bg).unwrap().i_am_admin && !bob.s.group_view(bg).unwrap().admin_is_me);
+        assert_eq!(role_of(&carol, cg, bob.pk()), (true, false), "everyone sees who the admins are");
+
+        // Bob asks for Dave to be added; Alice's phone does it.
+        bob.s.group_add(bg, &[bd], false).unwrap();
+        connect(&mut bob, &mut alice);
+        connect(&mut alice, &mut dave);
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        assert!(group_of(&dave, "Crew").is_some(), "Dave joined");
+        assert_eq!(names(&carol, cg), ["Alice", "Bob", "Dave", "You"]);
+
+        // Bob renames the group and removes Carol the same way.
+        bob.s.group_rename(bg, "Crew 2").unwrap();
+        bob.s.group_remove(bg, &carol.pk()).unwrap();
+        connect(&mut bob, &mut alice);
+        connect(&mut alice, &mut carol);
+        connect(&mut alice, &mut bob);
+        assert!(group_of(&alice, "Crew 2").is_some() && group_of(&bob, "Crew 2").is_some());
+        assert!(!carol.s.group_view(cg).unwrap().active);
+        assert_eq!(names(&alice, group), ["Bob", "Dave", "You"]);
+
+        // Nobody can take the leader's place, and an admin can't remove one.
+        assert!(matches!(bob.s.group_remove_admin(bg, &alice.pk()), Err(SessionError::GroupRule(_))));
+        assert!(matches!(bob.s.group_remove(bg, &alice.pk()), Err(SessionError::GroupRule(_))));
+        assert!(matches!(alice.s.group_remove_admin(group, &alice.pk()), Err(SessionError::GroupRule(_))));
+        assert!(matches!(alice.s.group_remove(group, &alice.pk()), Err(SessionError::GroupRule(_))));
+
+        // The leader takes Bob's rights back.
+        alice.s.group_remove_admin(group, &bob.pk()).unwrap();
+        connect(&mut alice, &mut bob);
+        assert!(!bob.s.group_view(bg).unwrap().i_am_admin);
+        assert!(matches!(bob.s.group_rename(bg, "Mine"), Err(SessionError::NotAdmin)));
+    }
+
+    #[test]
+    fn a_stale_or_forged_roles_message_changes_nothing() {
+        let (mut alice, mut bob, mut carol, _dave, group, _) = crew();
+        let (bg, cg) = (group_of(&bob, "Crew").unwrap(), group_of(&carol, "Crew").unwrap());
+        alice.s.group_make_admin(group, &bob.pk()).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        // Carol (not the leader) claims to make herself leader: ignored by Bob.
+        let (_, mut meta) = bob.s.group_chat(&alice.s.chat(group).unwrap().group_id).unwrap().unwrap();
+        let mut deliver = |from: [u8; 32], content| bob.s.deliver_group(bg, &mut meta, &from, content).unwrap();
+        deliver(carol.pk(), Content::GroupRoles { leader: carol.pk(), admins: vec![], at: u64::MAX });
+        // An older list from the real leader than the one already held: ignored.
+        deliver(alice.pk(), Content::GroupRoles { leader: alice.pk(), admins: vec![], at: 1 });
+        assert_eq!(role_of(&bob, bg, alice.pk()), (true, true));
+        assert_eq!(role_of(&bob, bg, bob.pk()), (true, false));
+        assert_eq!(role_of(&bob, bg, carol.pk()), (false, false));
+        let _ = cg;
+    }
+
+    #[test]
+    fn leadership_is_handed_over_not_dropped() {
+        let (mut alice, mut bob, mut carol, _dave, group, [_, ac, _, _]) = crew();
+        let (bg, cg) = (group_of(&bob, "Crew").unwrap(), group_of(&carol, "Crew").unwrap());
+        let _ = ac;
+        // A leader with admins can't just walk out, and only admins can take over.
+        assert!(matches!(alice.s.group_hand_over(group, &bob.pk()), Err(SessionError::GroupRule(_))));
+        alice.s.group_make_admin(group, &bob.pk()).unwrap();
+        assert!(matches!(alice.s.group_leave(group), Err(SessionError::GroupRule(_))));
+        alice.s.group_hand_over(group, &bob.pk()).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        connect(&mut bob, &mut carol);
+        assert_eq!(role_of(&carol, cg, bob.pk()), (true, true));
+        assert_eq!(role_of(&carol, cg, alice.pk()), (true, false), "the old leader stays an admin");
+        assert!(bob.s.group_view(bg).unwrap().admin_is_me);
+
+        // Bob now changes the group directly; Alice has to ask.
+        bob.s.group_rename(bg, "Bob's crew").unwrap();
+        connect(&mut bob, &mut alice);
+        connect(&mut bob, &mut carol);
+        assert!(group_of(&alice, "Bob's crew").is_some() && group_of(&carol, "Bob's crew").is_some());
+        alice.s.group_rename(group, "Alice again").unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut bob, &mut carol);
+        assert!(group_of(&carol, "Alice again").is_some());
+
+        // Alice can leave now, and Bob (the leader) removes her for everyone.
+        alice.s.group_leave(group).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut bob, &mut carol);
+        assert_eq!(names(&bob, bg), ["Carol", "You"]);
+        assert_eq!(names(&carol, cg), ["Bob", "You"]);
+    }
+
+    #[test]
+    fn history_goes_to_new_members_only_if_the_leader_chooses() {
+        let (mut alice, mut bob, mut carol, mut dave, group, [_, ac, ad, bd]) = crew();
+        let (bg, cg) = (group_of(&bob, "Crew").unwrap(), group_of(&carol, "Crew").unwrap());
+        let _ = (ac, bd);
+        alice.s.send_to_chat(group, "meet at 6", None).unwrap();
+        bob.s.send_to_chat(bg, "I'll bring snacks", None).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        connect(&mut bob, &mut carol);
+
+        // Dave is added with the history.
+        alice.s.group_add(group, &[ad], true).unwrap();
+        connect(&mut alice, &mut dave);
+        connect(&mut alice, &mut dave);
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        let dg = group_of(&dave, "Crew").expect("Dave joined");
+        let msgs = dave.s.store.messages(dg, None).unwrap();
+        let said: Vec<_> = msgs.iter().filter(|m| !m.notice).map(|m| (m.body.as_str(), m.sender, m.shared_by)).collect();
+        assert_eq!(
+            said,
+            [
+                ("meet at 6", Some(alice.pk()), Some(alice.pk())),
+                ("I'll bring snacks", Some(bob.pk()), Some(alice.pk()))
+            ]
+        );
+        assert!(msgs.iter().all(|m| !m.from_me));
+        // Everyone is told, Dave included; no copy goes to the others.
+        for (phone, chat, text) in [
+            (&bob, bg, "Alice shared the last week of messages with Dave."),
+            (&carol, cg, "Alice shared the last week of messages with Dave."),
+            (&dave, dg, "Alice shared the last week of messages with you."),
+            (&alice, group, "You shared the last week of messages with Dave."),
+        ] {
+            let notices: Vec<_> = phone.s.store.messages(chat, None).unwrap().into_iter().filter(|m| m.notice).collect();
+            assert_eq!(notices.len(), 1, "one notice");
+            assert_eq!(notices[0].body, text);
+        }
+        assert_eq!(bob.s.store.messages(bg, None).unwrap().iter().filter(|m| m.body == "meet at 6").count(), 1);
+    }
+
+    #[test]
+    fn without_the_history_choice_a_new_member_sees_nothing_old() {
+        let (mut alice, mut bob, mut carol, mut dave, group, [_, _, ad, _]) = crew();
+        let _ = (&mut bob, &mut carol);
+        alice.s.send_to_chat(group, "secret plans", None).unwrap();
+        alice.s.group_add(group, &[ad], false).unwrap();
+        connect(&mut alice, &mut dave);
+        connect(&mut alice, &mut dave);
+        let dg = group_of(&dave, "Crew").expect("Dave joined");
+        assert!(dave.s.store.messages(dg, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn history_that_arrives_before_the_welcome_waits_for_it() {
+        let (mut alice, mut bob, _carol, mut dave, group, [_, _, ad, _]) = crew();
+        let _ = &mut bob;
+        let gid = alice.s.chat(group).unwrap().group_id;
+        let item = |n: u8, who: [u8; 32]| crate::protocol::HistoryItem { id: [n; 16], sender: who, sent_at: now(), body: format!("old {n}") };
+        // The leader's, before Dave has joined: kept until he does.
+        dave.s.on_history(&alice.pk(), gid.clone(), vec![item(1, alice.pk()), item(2, bob.pk())]).unwrap();
+        assert!(group_of(&dave, "Crew").is_none());
+        alice.s.group_add(group, &[ad], false).unwrap();
+        connect(&mut alice, &mut dave);
+        connect(&mut alice, &mut dave);
+        let dg = group_of(&dave, "Crew").unwrap();
+        let bodies: Vec<_> = dave.s.store.messages(dg, None).unwrap().into_iter().map(|m| m.body).collect();
+        assert_eq!(bodies, ["old 1", "old 2"]);
+        // Someone who isn't the leader can't add to what Dave sees.
+        dave.s.on_history(&bob.pk(), gid, vec![item(3, bob.pk())]).unwrap();
+        assert_eq!(dave.s.store.messages(dg, None).unwrap().len(), 2);
+    }
+
     #[test]
     fn polls_and_plans_count_everyones_answers() {
         use crate::protocol::{Plan, Poll};
@@ -1909,6 +2128,7 @@ pub(crate) mod tests {
             peers: Vec::new(),
             hidden: false,
             admin: None,
+            admins: Vec::new(),
         });
         assert!(alice.s.typing(notes.unwrap()).unwrap().is_none());
     }
@@ -2340,6 +2560,7 @@ pub(crate) mod tests {
                 peers: vec![],
                 hidden: false,
                 admin: None,
+                admins: Vec::new(),
             })
             .unwrap();
         assert_eq!(alice.s.send_text(notes, "x").unwrap(), None);

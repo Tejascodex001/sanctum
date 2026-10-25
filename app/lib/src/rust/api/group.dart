@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `reach`
+// These functions are ignored because they are not marked as `pub`: `key32`, `reach`
 
 /// Starts a group with these friends (their chat ids); we're its admin.
 /// Most people in a group, counting its admin.
@@ -23,12 +23,43 @@ Future<PlatformInt64> groupCreate({
 Future<GroupDetails> groupDetails({required PlatformInt64 chatId}) =>
     RustLib.instance.api.crateApiGroupGroupDetails(chatId: chatId);
 
+/// Adds friends; with `share_history`, the newcomers also get the last week
+/// of the group's text messages.
 Future<void> groupAdd({
   required PlatformInt64 chatId,
   required Int64List friends,
+  required bool shareHistory,
 }) => RustLib.instance.api.crateApiGroupGroupAdd(
   chatId: chatId,
   friends: friends,
+  shareHistory: shareHistory,
+);
+
+/// Makes a member an admin (leader only).
+Future<void> groupMakeAdmin({
+  required PlatformInt64 chatId,
+  required List<int> member,
+}) => RustLib.instance.api.crateApiGroupGroupMakeAdmin(
+  chatId: chatId,
+  member: member,
+);
+
+/// Takes admin rights away.
+Future<void> groupRemoveAdmin({
+  required PlatformInt64 chatId,
+  required List<int> member,
+}) => RustLib.instance.api.crateApiGroupGroupRemoveAdmin(
+  chatId: chatId,
+  member: member,
+);
+
+/// The leader makes an admin the new leader and becomes an admin.
+Future<void> groupHandOver({
+  required PlatformInt64 chatId,
+  required List<int> member,
+}) => RustLib.instance.api.crateApiGroupGroupHandOver(
+  chatId: chatId,
+  member: member,
 );
 
 Future<void> groupRemove({
@@ -53,6 +84,9 @@ class GroupDetails {
   final String title;
   final bool adminIsMe;
 
+  /// We are the leader or an admin.
+  final bool iAmAdmin;
+
   /// False once we've left or been removed.
   final bool active;
   final List<GroupMemberView> members;
@@ -60,13 +94,18 @@ class GroupDetails {
   const GroupDetails({
     required this.title,
     required this.adminIsMe,
+    required this.iAmAdmin,
     required this.active,
     required this.members,
   });
 
   @override
   int get hashCode =>
-      title.hashCode ^ adminIsMe.hashCode ^ active.hashCode ^ members.hashCode;
+      title.hashCode ^
+      adminIsMe.hashCode ^
+      iAmAdmin.hashCode ^
+      active.hashCode ^
+      members.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -75,6 +114,7 @@ class GroupDetails {
           runtimeType == other.runtimeType &&
           title == other.title &&
           adminIsMe == other.adminIsMe &&
+          iAmAdmin == other.iAmAdmin &&
           active == other.active &&
           members == other.members;
 }
@@ -82,7 +122,12 @@ class GroupDetails {
 class GroupMemberView {
   final Uint8List key;
   final String name;
+
+  /// The leader or an admin.
   final bool admin;
+
+  /// The group's leader.
+  final bool leader;
   final bool me;
 
   /// Invited, not joined yet.
@@ -92,6 +137,7 @@ class GroupMemberView {
     required this.key,
     required this.name,
     required this.admin,
+    required this.leader,
     required this.me,
     required this.pending,
   });
@@ -101,6 +147,7 @@ class GroupMemberView {
       key.hashCode ^
       name.hashCode ^
       admin.hashCode ^
+      leader.hashCode ^
       me.hashCode ^
       pending.hashCode;
 
@@ -112,6 +159,7 @@ class GroupMemberView {
           key == other.key &&
           name == other.name &&
           admin == other.admin &&
+          leader == other.leader &&
           me == other.me &&
           pending == other.pending;
 }

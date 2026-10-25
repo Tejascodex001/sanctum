@@ -6,17 +6,24 @@
 //! pass messages and files on to each other (see `group_sync`), so a
 //! message reaches someone even when its sender is offline.
 //!
-//! The admin (the creator) is the only one who changes membership. With a
+//! The leader (the creator) is the only one who changes membership. With a
 //! single committer, members can never disagree about the group's state,
-//! which is what a server would otherwise guarantee. The admin adds only
+//! which is what a server would otherwise guarantee. The leader adds only
 //! friends: it asks them for a key package over their link, commits the
 //! addition, and sends them a welcome with the group's name and members.
 //! Members who aren't friends with each other still connect directly for
 //! the group's sake (see [`Session::knows`]).
+//!
+//! The leader can make a few members admins. An admin asks in the group
+//! ([`GroupRequest`]) and the leader's phone does it, so there is still one
+//! committer; the leader's own rights can't be taken away, only handed over
+//! by the leader. When the leader adds someone they can pass on the last
+//! week of text messages (see [`Session::group_add`]); everyone is told.
 
+use crate::call::now_ms;
 use crate::group_sync::sync_id;
 use crate::mls::Received;
-use crate::protocol::{Content, Frame, GroupInfo, GroupMember, MessageId, Quote};
+use crate::protocol::{Content, Frame, GroupInfo, GroupMember, GroupRequest, HistoryItem, MessageId, Quote};
 use crate::session::{clip, now, Event, Result, Session, SessionError};
 use crate::store::{ChatKind, ChatMeta, OutboxItem, OutboxState, Peer, StoredMessage};
 
@@ -29,7 +36,10 @@ const UNREADABLE_TRIES: u8 = 5;
 pub struct Member {
     pub identity: [u8; 32],
     pub name: String,
+    /// The leader or an admin.
     pub admin: bool,
+    /// The one who created the group (or was handed it).
+    pub leader: bool,
     pub me: bool,
     /// Invited by the admin, not joined yet (their phone hasn't been
     /// reached).
@@ -40,7 +50,10 @@ pub struct Member {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupView {
     pub title: String,
+    /// We are the leader.
     pub admin_is_me: bool,
+    /// We are the leader or an admin.
+    pub i_am_admin: bool,
     /// False once we've left or been removed.
     pub active: bool,
     pub members: Vec<Member>,
@@ -50,6 +63,15 @@ pub struct GroupView {
 /// files on to each other (see `group_sync`), so a sender doesn't upload a
 /// file once per member (see docs/DESIGN.md, "Groups at scale").
 pub const MAX_GROUP: usize = 50;
+
+/// Most admins besides the leader.
+pub const MAX_ADMINS: usize = 5;
+
+/// How far back, and how much, a new member is shown of what was said.
+const HISTORY_DAYS: u64 = 7;
+const HISTORY_MESSAGES: usize = 300;
+/// Under the frame limit, with room for sealing.
+const HISTORY_BYTES: usize = 150_000;
 
 /// Refuses a group that would have more than [`MAX_GROUP`] people.
 fn fits_group(people: usize) -> Result<()> {
@@ -81,13 +103,36 @@ impl Session {
             peers,
             hidden: false,
             admin: Some(self.public_key()),
+            admins: Vec::new(),
         })?;
         Ok((chat_id, invitees))
     }
 
-    /// Invites more friends (admin only).
-    pub fn group_add(&mut self, chat_id: i64, friends: &[i64]) -> Result<Vec<[u8; 32]>> {
-        let mut meta = self.admin_chat(chat_id)?;
+    /// Invites more friends. The leader does it; an admin asks the leader.
+    /// With `share_history`, the new members are also given the last week of
+    /// text messages (everyone in the group is told).
+    pub fn group_add(&mut self, chat_id: i64, friends: &[i64], share_history: bool) -> Result<Vec<[u8; 32]>> {
+        let (meta, leader) = self.manager_chat(chat_id)?;
+        if !leader {
+            let mut told = Vec::new();
+            for peer in self.friends_for(friends)? {
+                if meta.peers.iter().all(|p| p.identity != peer.identity) {
+                    let request = GroupRequest::Add { who: peer.identity, history: share_history };
+                    told = self.broadcast(&meta, &Content::GroupRequest(request), None)?;
+                }
+            }
+            return Ok(told);
+        }
+        self.add_invitees(chat_id, meta, friends, share_history)
+    }
+
+    fn add_invitees(
+        &mut self,
+        chat_id: i64,
+        mut meta: ChatMeta,
+        friends: &[i64],
+        share_history: bool,
+    ) -> Result<Vec<[u8; 32]>> {
         let mut invitees = Vec::new();
         for peer in self.friends_for(friends)? {
             if !meta.peers.iter().any(|p| p.identity == peer.identity) {
@@ -98,13 +143,30 @@ impl Session {
         // Everyone invited, plus us.
         fits_group(meta.peers.len() + 1)?;
         self.store.update_chat(chat_id, &meta)?;
+        if share_history {
+            for peer in &invitees {
+                self.store.kv_put(&history_name(&meta.group_id, peer), &true)?;
+            }
+        }
         Ok(invitees)
     }
 
-    /// Removes a member (admin only). They're told, and so is everyone else.
+    /// Removes a member. The leader does it; an admin asks the leader (and
+    /// can't remove another admin). They're told, and so is everyone else.
     pub fn group_remove(&mut self, chat_id: i64, member: &[u8; 32]) -> Result<Vec<[u8; 32]>> {
-        let mut meta = self.admin_chat(chat_id)?;
+        let (mut meta, leader) = self.manager_chat(chat_id)?;
+        if !leader {
+            if is_admin(&meta, member) {
+                return Err(SessionError::GroupRule("Only the group leader can remove an admin."));
+            }
+            return self.broadcast(&meta, &Content::GroupRequest(GroupRequest::Remove { who: *member }), None);
+        }
+        if *member == self.public_key() {
+            return Err(SessionError::GroupRule("Hand over leadership before you leave the group."));
+        }
+        let was_admin = meta.admins.contains(member);
         meta.peers.retain(|p| &p.identity != member);
+        meta.admins.retain(|a| a != member);
         self.store.update_chat(chat_id, &meta)?;
         if !self.mls.members(&meta.group_id)?.contains(member) {
             // Only invited: nothing to commit.
@@ -118,29 +180,101 @@ impl Session {
             self.enqueue(peer, &meta.group_id, commit.clone(), None)?;
         }
         reach.extend(self.broadcast(&meta, &Content::GroupInfo(self.info_of(&meta)?), None)?);
+        if was_admin {
+            reach.extend(self.send_roles(&meta)?);
+        }
         reach.push(*member);
         Ok(dedup(reach))
     }
 
-    /// Renames the group (admin only).
+    /// Renames the group. The leader does it; an admin asks the leader.
     pub fn group_rename(&mut self, chat_id: i64, title: &str) -> Result<Vec<[u8; 32]>> {
-        let mut meta = self.admin_chat(chat_id)?;
+        let (mut meta, leader) = self.manager_chat(chat_id)?;
         let title = clip(title.trim(), 64);
         if title.is_empty() {
             return Ok(Vec::new());
+        }
+        if !leader {
+            return self.broadcast(&meta, &Content::GroupRequest(GroupRequest::Rename { title }), None);
         }
         meta.title = title;
         self.store.update_chat(chat_id, &meta)?;
         self.broadcast(&meta, &Content::GroupInfo(self.info_of(&meta)?), None)
     }
 
+    /// Makes a member an admin (leader only). They must have joined, be the
+    /// leader's friend, and there is room for only a few.
+    pub fn group_make_admin(&mut self, chat_id: i64, member: &[u8; 32]) -> Result<Vec<[u8; 32]>> {
+        let mut meta = self.admin_chat(chat_id)?;
+        if !self.mls.members(&meta.group_id)?.contains(member) || !self.is_friend(member)? {
+            return Err(SessionError::GroupRule(
+                "Admins must be your friends and already in the group.",
+            ));
+        }
+        if meta.admins.contains(member) {
+            return Ok(Vec::new());
+        }
+        if meta.admins.len() >= MAX_ADMINS {
+            return Err(SessionError::GroupRule("A group can have up to 5 admins besides its leader."));
+        }
+        meta.admins.push(*member);
+        self.store.update_chat(chat_id, &meta)?;
+        self.send_roles(&meta)
+    }
+
+    /// Takes admin rights from an admin. The leader can; so can any admin,
+    /// but nobody can take the leader's.
+    pub fn group_remove_admin(&mut self, chat_id: i64, member: &[u8; 32]) -> Result<Vec<[u8; 32]>> {
+        let (mut meta, leader) = self.manager_chat(chat_id)?;
+        if meta.admin == Some(*member) {
+            return Err(SessionError::GroupRule(
+                "The group leader stays an admin until they hand over leadership themselves.",
+            ));
+        }
+        if !leader {
+            return self.broadcast(&meta, &Content::GroupRequest(GroupRequest::Demote { who: *member }), None);
+        }
+        if !meta.admins.contains(member) {
+            return Ok(Vec::new());
+        }
+        meta.admins.retain(|a| a != member);
+        self.store.update_chat(chat_id, &meta)?;
+        self.send_roles(&meta)
+    }
+
+    /// Hands leadership to an admin (leader only). The leader stays an admin.
+    pub fn group_hand_over(&mut self, chat_id: i64, to: &[u8; 32]) -> Result<Vec<[u8; 32]>> {
+        let mut meta = self.admin_chat(chat_id)?;
+        if !meta.admins.contains(to) {
+            return Err(SessionError::GroupRule("Leadership can only go to an admin."));
+        }
+        let joined = self.mls.members(&meta.group_id)?;
+        if meta.peers.iter().any(|p| !joined.contains(&p.identity)) {
+            return Err(SessionError::GroupRule(
+                "Wait until everyone you invited has joined, then hand over leadership.",
+            ));
+        }
+        let me = self.public_key();
+        meta.admins.retain(|a| a != to);
+        meta.admins.push(me);
+        meta.admin = Some(*to);
+        self.store.update_chat(chat_id, &meta)?;
+        // From now on the new leader's word counts.
+        let reach = self.send_roles(&meta)?;
+        self.events.push(Event::Chat(chat_id));
+        Ok(reach)
+    }
+
     /// Leaves the group: tells everyone, then deletes it from this phone.
-    /// (An admin who leaves leaves the group without one: it carries on,
-    /// but nobody can add or remove members.)
+    /// (A leader with admins hands leadership over first. A group left
+    /// without a leader carries on, but nobody can add or remove members.)
     pub fn group_leave(&mut self, chat_id: i64) -> Result<Vec<[u8; 32]>> {
         let meta = self.chat(chat_id)?;
         if meta.kind != ChatKind::Group {
             return Err(SessionError::NoSuchChat);
+        }
+        if meta.admin == Some(self.public_key()) && !meta.admins.is_empty() && !meta.group_id.is_empty() {
+            return Err(SessionError::GroupRule("Hand over leadership to an admin before you leave the group."));
         }
         let reach = if meta.group_id.is_empty() {
             Vec::new()
@@ -155,6 +289,25 @@ impl Session {
         Ok(reach)
     }
 
+    /// Tells the group who leads it and who its admins are.
+    fn send_roles(&mut self, meta: &ChatMeta) -> Result<Vec<[u8; 32]>> {
+        let leader = meta.admin.unwrap_or_else(|| self.public_key());
+        let at = now_ms();
+        self.store.kv_put(&roles_name(&meta.group_id), &at)?;
+        self.broadcast(meta, &Content::GroupRoles { leader, admins: meta.admins.clone(), at }, None)
+    }
+
+    /// An admin or the leader, and whether it's the leader.
+    fn manager_chat(&self, chat_id: i64) -> Result<(ChatMeta, bool)> {
+        let meta = self.chat(chat_id)?;
+        let me = self.public_key();
+        if meta.kind != ChatKind::Group || !is_admin(&meta, &me) || meta.group_id.is_empty() {
+            return Err(SessionError::NotAdmin);
+        }
+        let leader = meta.admin == Some(me);
+        Ok((meta, leader))
+    }
+
     /// What the app shows about a group.
     pub fn group_view(&self, chat_id: i64) -> Result<GroupView> {
         let meta = self.chat(chat_id)?;
@@ -164,7 +317,8 @@ impl Session {
         let mut members = vec![Member {
             identity: me,
             name: "You".into(),
-            admin: meta.admin == Some(me),
+            admin: is_admin(&meta, &me),
+            leader: meta.admin == Some(me),
             me: true,
             pending: false,
         }];
@@ -172,14 +326,16 @@ impl Session {
             members.push(Member {
                 identity: p.identity,
                 name: p.name.clone(),
-                admin: meta.admin == Some(p.identity),
+                admin: is_admin(&meta, &p.identity),
+                leader: meta.admin == Some(p.identity),
                 me: false,
                 pending: active && !joined.contains(&p.identity),
             });
         }
         Ok(GroupView {
-            title: meta.title,
             admin_is_me: meta.admin == Some(me),
+            i_am_admin: is_admin(&meta, &me),
+            title: meta.title,
             active,
             members,
         })
@@ -327,10 +483,114 @@ impl Session {
             },
         )?;
         // ...and everyone learns their name.
-        let reach = self.broadcast(&meta, &Content::GroupInfo(info), None)?;
+        let mut reach = self.broadcast(&meta, &Content::GroupInfo(info), None)?;
+        if !meta.admins.is_empty() {
+            reach.extend(self.send_roles(&meta)?);
+        }
+        reach.extend(self.share_history(chat_id, &meta, peer)?);
         self.pokes.extend(reach);
         self.events.push(Event::Chat(chat_id));
         self.flush(peer)
+    }
+
+    /// If the leader chose so when adding them: gives a new member the last
+    /// week of text messages, over their own chat (the rest of the group
+    /// doesn't get a copy), and tells the group it happened.
+    fn share_history(&mut self, chat_id: i64, meta: &ChatMeta, peer: &[u8; 32]) -> Result<Vec<[u8; 32]>> {
+        let name = history_name(&meta.group_id, peer);
+        if self.store.kv_get::<bool>(&name)?.is_none() {
+            return Ok(Vec::new());
+        }
+        self.store.kv_delete(&name)?;
+        let items = self.history_items(chat_id)?;
+        let Some((direct, _)) = self.direct_chat(peer)? else {
+            return Ok(Vec::new());
+        };
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut reach = self.tell_chat(direct, Content::HistoryBatch { group: meta.group_id.clone(), items })?;
+        reach.extend(self.broadcast(meta, &Content::HistoryShared { with: *peer }, None)?);
+        let who = meta.peers.iter().find(|p| &p.identity == peer).map_or("them", |p| p.name.as_str());
+        self.add_notice(chat_id, format!("You shared the last week of messages with {who}."))?;
+        Ok(reach)
+    }
+
+    /// The last week of text messages of a group, oldest first, within what
+    /// fits in one batch.
+    fn history_items(&self, chat_id: i64) -> Result<Vec<HistoryItem>> {
+        let me = self.public_key();
+        let since = now().saturating_sub(HISTORY_DAYS * 24 * 3600);
+        let mut items: Vec<HistoryItem> = Vec::new();
+        let mut bytes = 0;
+        for m in self.store.messages(chat_id, None)?.into_iter().rev() {
+            if m.sent_at < since || items.len() >= HISTORY_MESSAGES {
+                break;
+            }
+            let (Some(id), false, true, None, None, None) =
+                (m.id, m.notice, !m.body.is_empty(), &m.media, &m.poll, &m.call)
+            else {
+                continue;
+            };
+            let sender = if m.from_me { me } else { m.sender.unwrap_or(me) };
+            let cost = m.body.len() + 80;
+            if bytes + cost > HISTORY_BYTES {
+                break;
+            }
+            bytes += cost;
+            items.push(HistoryItem { id, sender, sent_at: m.sent_at, body: m.body });
+        }
+        items.reverse();
+        Ok(items)
+    }
+
+    /// A line in the chat that no one wrote ("You shared…").
+    fn add_notice(&mut self, chat_id: i64, body: String) -> Result<()> {
+        self.store.add_message(chat_id, &StoredMessage { body, sent_at: now(), delivered: true, notice: true, ..Default::default() })?;
+        self.events.push(Event::Chat(chat_id));
+        Ok(())
+    }
+
+    /// Recent messages from the leader of a group we're in. They may come
+    /// before the welcome does: then they wait until we've joined.
+    pub(crate) fn on_history(&mut self, peer: &[u8; 32], group: Vec<u8>, items: Vec<HistoryItem>) -> Result<()> {
+        match self.group_chat(&group)? {
+            Some((chat_id, meta)) if meta.admin == Some(*peer) => self.apply_history(chat_id, &meta, items),
+            Some(_) => Ok(()),
+            // One waiting at a time: more than that is not from a leader
+            // about to welcome us.
+            None => Ok(self.store.kv_put(STASH, &(group, *peer, items))?),
+        }
+    }
+
+    fn apply_history(&mut self, chat_id: i64, meta: &ChatMeta, mut items: Vec<HistoryItem>) -> Result<()> {
+        let me = self.public_key();
+        let limit = now();
+        items.truncate(HISTORY_MESSAGES);
+        items.sort_by_key(|i| i.sent_at);
+        let mut added = false;
+        for item in items {
+            if item.body.is_empty() || item.sender == me || self.store.message_by_id(chat_id, &item.id)?.is_some() {
+                continue;
+            }
+            self.store.add_message(
+                chat_id,
+                &StoredMessage {
+                    body: clip(&item.body, 8000),
+                    sent_at: item.sent_at.min(limit),
+                    delivered: true,
+                    id: Some(item.id),
+                    sender: Some(item.sender),
+                    shared_by: meta.admin,
+                    ..Default::default()
+                },
+            )?;
+            added = true;
+        }
+        if added {
+            self.events.push(Event::Chat(chat_id));
+        }
+        Ok(())
     }
 
     fn join_group(&mut self, welcome: &[u8], info: GroupInfo) -> Result<()> {
@@ -357,6 +617,7 @@ impl Session {
             peers: Vec::new(),
             hidden: false,
             admin: Some(info.admin),
+            admins: Vec::new(),
         };
         apply_info(&mut meta, &info, &me);
         let chat_id = match self.group_chat(&group)? {
@@ -366,6 +627,15 @@ impl Session {
             }
             None => self.store.create_chat(&meta)?,
         };
+        // The leader's earlier messages may have come first.
+        if let Some((stashed, from, items)) = self.store.kv_get::<(Vec<u8>, [u8; 32], Vec<HistoryItem>)>(STASH)? {
+            if stashed == group {
+                self.store.kv_delete(STASH)?;
+                if from == info.admin {
+                    self.apply_history(chat_id, &meta, items)?;
+                }
+            }
+        }
         self.events.push(Event::Chat(chat_id));
         Ok(())
     }
@@ -436,7 +706,7 @@ impl Session {
 
     /// Applies a group message from `sender` (whose it is, by MLS: it may
     /// have been passed on by another member).
-    fn deliver_group(&mut self, chat_id: i64, meta: &mut ChatMeta, peer: &[u8; 32], content: Content) -> Result<()> {
+    pub(crate) fn deliver_group(&mut self, chat_id: i64, meta: &mut ChatMeta, peer: &[u8; 32], content: Content) -> Result<()> {
         let me = self.public_key();
         match content {
             Content::GroupText {
@@ -508,13 +778,75 @@ impl Session {
                     self.pokes.extend(reach);
                 } else {
                     meta.peers.retain(|p| &p.identity != peer);
+                    meta.admins.retain(|a| a != peer);
                     self.store.update_chat(chat_id, meta)?;
                 }
                 self.events.push(Event::Chat(chat_id));
             }
+            // Only the leader says who leads; the newest list wins.
+            Content::GroupRoles { leader, admins, at } if meta.admin == Some(*peer) => {
+                let joined = self.mls.members(&meta.group_id)?;
+                let name = roles_name(&meta.group_id);
+                let newest = self.store.kv_get::<u64>(&name)?.is_none_or(|last| at > last);
+                if joined.contains(&leader) && newest {
+                    self.store.kv_put(&name, &at)?;
+                    meta.admin = Some(leader);
+                    meta.admins = admins
+                        .into_iter()
+                        .filter(|a| *a != leader && joined.contains(a))
+                        .take(MAX_ADMINS + 1)
+                        .collect();
+                    meta.admins.dedup();
+                    self.store.update_chat(chat_id, meta)?;
+                    self.events.push(Event::Chat(chat_id));
+                }
+            }
+            // An admin asks; only the leader's phone acts, and only for an admin.
+            Content::GroupRequest(request) if meta.admin == Some(me) && meta.admins.contains(peer) => {
+                let reach = self.on_request(chat_id, meta, request)?;
+                self.pokes.extend(reach);
+            }
+            Content::HistoryShared { with } if meta.admin == Some(*peer) => {
+                let leader = self.member_name(meta, peer);
+                let text = if with == me {
+                    format!("{leader} shared the last week of messages with you.")
+                } else {
+                    format!("{leader} shared the last week of messages with {}.", self.member_name(meta, &with))
+                };
+                self.add_notice(chat_id, text)?;
+            }
             _ => {}
         }
         Ok(())
+    }
+
+    /// The leader does what an admin asked, if the rules allow it. An
+    /// admin's mistake or a stale request is dropped, not an error.
+    fn on_request(&mut self, chat_id: i64, meta: &ChatMeta, request: GroupRequest) -> Result<Vec<[u8; 32]>> {
+        let outcome = match request {
+            GroupRequest::Add { who, history } => match self.direct_chat(&who)? {
+                Some((direct, _)) if self.is_friend(&who)? => {
+                    self.add_invitees(chat_id, meta.clone(), &[direct], history)
+                }
+                _ => return Ok(Vec::new()),
+            },
+            GroupRequest::Remove { who } if !is_admin(meta, &who) => self.group_remove(chat_id, &who),
+            GroupRequest::Remove { .. } => return Ok(Vec::new()),
+            GroupRequest::Rename { title } => self.group_rename(chat_id, &title),
+            GroupRequest::Demote { who } => self.group_remove_admin(chat_id, &who),
+        };
+        match outcome {
+            Err(SessionError::GroupRule(_) | SessionError::GroupFull(_)) => Ok(Vec::new()),
+            other => other,
+        }
+    }
+
+    /// What we call a member of a group.
+    fn member_name(&self, meta: &ChatMeta, who: &[u8; 32]) -> String {
+        if *who == self.public_key() {
+            return "You".into();
+        }
+        meta.peers.iter().find(|p| &p.identity == who).map_or_else(|| "A member".into(), |p| p.name.clone())
     }
 
     /// After a membership change: members are whoever MLS says, keeping
@@ -528,6 +860,8 @@ impl Session {
             peers.push(known.unwrap_or_else(|| new_peer(identity, "Member")));
         }
         meta.peers = peers;
+        let joined: Vec<[u8; 32]> = meta.peers.iter().map(|p| p.identity).collect();
+        meta.admins.retain(|a| joined.contains(a) || *a == me);
         self.store.update_chat(chat_id, meta)?;
         self.events.push(Event::Chat(chat_id));
         Ok(())
@@ -683,6 +1017,24 @@ fn new_peer(identity: [u8; 32], name: &str) -> Peer {
     }
 }
 
+/// The leader or an admin.
+fn is_admin(meta: &ChatMeta, who: &[u8; 32]) -> bool {
+    meta.admin == Some(*who) || meta.admins.contains(who)
+}
+
+/// Where the leader remembers that a new member is to be given the history.
+fn history_name(group: &[u8], peer: &[u8; 32]) -> Vec<u8> {
+    [b"history-for:".as_slice(), group, peer].concat()
+}
+
+/// When the roles we hold were set (the leader's clock), per group.
+fn roles_name(group: &[u8]) -> Vec<u8> {
+    [b"roles-at:".as_slice(), group].concat()
+}
+
+/// A history that arrived before the welcome that makes sense of it.
+const STASH: &[u8] = b"history-stash";
+
 fn dedup(mut v: Vec<[u8; 32]>) -> Vec<[u8; 32]> {
     v.sort();
     v.dedup();
@@ -715,6 +1067,7 @@ mod info_tests {
             peers,
             hidden: false,
             admin: None,
+            admins: Vec::new(),
         }
     }
 

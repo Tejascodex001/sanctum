@@ -17,6 +17,8 @@ class ChatMessage {
     this.album,
     this.reactions = const [],
     this.call,
+    this.notice = false,
+    this.sharedBy,
   });
 
   final String body;
@@ -50,6 +52,16 @@ class ChatMessage {
 
   /// A call's record (the words are in [body]); [fromMe]: we called.
   final CallLogView? call;
+
+  /// A line about the group itself ("Sam joined and was shown the last week"),
+  /// shown in the middle of the chat.
+  final bool notice;
+
+  /// Earlier group messages the leader showed a newcomer: who passed them on.
+  final String? sharedBy;
+
+  /// Call records and notices aren't messages: no replies, reactions or ticks.
+  bool get isRecord => call != null || notice;
 }
 
 /// The part of a message a reply shows.
@@ -98,6 +110,8 @@ class StoreSource implements MessageSource {
             album: m.album,
             reactions: m.reactions,
             call: m.call,
+            notice: m.notice,
+            sharedBy: m.sharedBy,
             reply: m.reply == null
                 ? null
                 : ChatQuote(

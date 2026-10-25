@@ -58,7 +58,7 @@ Each release is told apart by its build number.
 | ✅ | **Friend requests** | One person enters a code and the other accepts. Requests show the pair's sigil and safety number |
 | ✅ | **Verification** | Scanning a QR in person verifies a friend. Otherwise, compare the 12-digit safety number (as in Signal and Threema) |
 | ✅ | **1:1 chat over Tor** | MLS end-to-end encryption, onion services, IPs hidden. Live links: messages arrive in about a second, with online indicators and ✓/✓✓ ticks |
-| ✅ | **Group chats** | Peer to peer, no server. Up to 50 people. Members pass messages and photos on to each other, so a message reaches you even if whoever sent it has gone offline since, and a photo isn't uploaded by its sender once per member. The admin manages members; members who aren't friends still reach each other |
+| ✅ | **Group chats** | Peer to peer, no server. Up to 50 people. Members pass messages and photos on to each other, so a message reaches you even if whoever sent it has gone offline since, and a photo isn't uploaded by its sender once per member. The leader manages members and can make up to 5 admins who add or remove people for the group; leadership can be handed over. When adding someone, the leader can show them the last week of text messages (everyone is told). Members who aren't friends still reach each other |
 | ✅ | **Temp chats** | Kept in memory only, on both phones. Each message burns 24 hours after it's sent, and either person can wipe the chat for both |
 | ✅ | **Nearby (Wi-Fi / hotspot)** | Chat with friends on the same Wi-Fi or one phone's hotspot, with no internet. Opt-in |
 | ✅ | **Nearby over Bluetooth** | For friends who've connected once before. Android 10+. Part of the same Nearby switch |

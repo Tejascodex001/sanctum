@@ -363,6 +363,41 @@ pub enum Content {
     /// The call is over, or never started: `reason` says why (see
     /// `call::EndReason`; an unknown value counts as a plain hang-up).
     CallEnd { call: CallId, reason: u8 },
+    /// From the group's leader: who leads it and who its admins are. Only
+    /// the leader's word counts; `at` (milliseconds) lets a late copy of an
+    /// older list be told from the newest.
+    GroupRoles { leader: [u8; 32], admins: Vec<[u8; 32]>, at: u64 },
+    /// From an admin to the group: "please do this". Only the leader acts
+    /// on it (the leader alone changes who is in the group), and only if
+    /// the sender is an admin.
+    GroupRequest(GroupRequest),
+    /// Sent by the leader to someone just added, over their own chat (not
+    /// to the group): recent messages from before they joined.
+    HistoryBatch { group: Vec<u8>, items: Vec<HistoryItem> },
+    /// To the whole group: the leader passed recent messages on to this
+    /// member, so nobody is surprised.
+    HistoryShared { with: [u8; 32] },
+}
+
+/// What an admin asks of the leader (see [`Content::GroupRequest`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GroupRequest {
+    /// Add this friend of the leader's, optionally passing on recent
+    /// messages.
+    Add { who: [u8; 32], history: bool },
+    Remove { who: [u8; 32] },
+    Rename { title: String },
+    /// Take admin rights from this admin (the leader's can't be taken).
+    Demote { who: [u8; 32] },
+}
+
+/// One earlier text message of a group, passed on to a new member.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryItem {
+    pub id: MessageId,
+    pub sender: [u8; 32],
+    pub sent_at: u64,
+    pub body: String,
 }
 
 /// A shared album: the photos and videos in a chat that carry its id.
