@@ -69,7 +69,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   double _level = 0;
   Timer? _recordTick;
 
-  /// Bubbles on screen, by sequence number: tapping a quote scrolls there.
+  /// Bubbles on screen, by their place in the list (a sent message keeps
+  /// its place when it gets its sequence number, so it isn't rebuilt):
+  /// tapping a quote scrolls there.
   final _bubbleKeys = <int, GlobalKey>{};
   final _scroll = ScrollController();
   int? _flash;
@@ -139,16 +141,35 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     super.dispose();
   }
 
-  Future<void> _reload() async {
-    final List<ChatMessage> messages;
-    try {
-      messages = await widget.card.source.load();
-    } catch (_) {
-      // The chat is gone (e.g. the friend removed us from both phones).
-      if (mounted) widget.close();
-      return;
+  Future<void>? _reloading;
+  bool _reloadAgain = false;
+
+  /// Loads the messages again. Asked while a load is already running, it
+  /// waits for that one and loads once more after it (never two at once),
+  /// so a message we just sent isn't swapped in twice.
+  Future<void> _reload() {
+    final running = _reloading;
+    if (running != null) {
+      _reloadAgain = true;
+      return running;
     }
-    if (mounted) setState(() => _messages = messages);
+    return _reloading = _reloadLoop().whenComplete(() => _reloading = null);
+  }
+
+  Future<void> _reloadLoop() async {
+    do {
+      _reloadAgain = false;
+      final List<ChatMessage> messages;
+      try {
+        messages = await widget.card.source.load();
+      } catch (_) {
+        // The chat is gone (e.g. the friend removed us from both phones).
+        if (mounted) widget.close();
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _messages = messages);
+    } while (_reloadAgain);
   }
 
   Future<void> _send() async {
@@ -182,11 +203,22 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     await _reload();
   }
 
-  void _startReply(ChatMessage m) {
+  void _startReply(ChatMessage m, {bool fromSheet = false}) {
     if (!widget.card.source.replies || m.seq == null) return;
     HapticFeedback.selectionClick();
     setState(() => _replyTo = m);
-    _focus.requestFocus();
+    // The keyboard comes up after this frame (a field that still has focus
+    // because the keyboard was hidden with Back ignores requestFocus), and
+    // again once the actions sheet has finished closing, which can take
+    // focus back.
+    void raise() {
+      if (!mounted) return;
+      _focus.requestFocus();
+      SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => raise());
+    if (fromSheet) Future<void>.delayed(const Duration(milliseconds: 300), raise);
   }
 
   /// Scrolls to a quoted message (when it's near enough to be built) and
@@ -262,10 +294,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     if (picked.isNotEmpty) await _react(m, picked.characters.take(2).toString());
   }
 
+  BuildContext? _bubbleContext(int seq) {
+    final index = _messages.indexWhere((m) => m.seq == seq);
+    return index < 0 ? null : _bubbleKeys[index]?.currentContext;
+  }
+
   /// Scrolls back until the message at [seq] is built, then shows it.
   Future<void> _reveal(int seq) async {
     for (var i = 0; i < 200 && mounted; i++) {
-      if (_bubbleKeys[seq]?.currentContext != null) return _jumpTo(seq);
+      if (_bubbleContext(seq) != null) return _jumpTo(seq);
       if (!_scroll.hasClients) return;
       final p = _scroll.position;
       if (p.pixels >= p.maxScrollExtent) return;
@@ -275,7 +312,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   }
 
   void _jumpTo(int? seq) {
-    final context = seq == null ? null : _bubbleKeys[seq]?.currentContext;
+    final context = seq == null ? null : _bubbleContext(seq);
     if (context == null) return;
     Scrollable.ensureVisible(context, duration: Motion.medium, curve: Motion.emphasized, alignment: 0.5);
     setState(() => _flash = seq);
@@ -335,7 +372,16 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 title: const Text('Reply'),
                 onTap: () {
                   Navigator.pop(sheet);
-                  _startReply(m);
+                  _startReply(m, fromSheet: true);
+                },
+              ),
+            if (m.seq != null && m.media != null && m.media!.ready)
+              ListTile(
+                leading: const Icon(Icons.download_rounded),
+                title: const Text('Save to phone'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  saveMediaToPhone(context, chatId: widget.card.id, seq: m.seq!, media: m.media!);
                 },
               ),
             if (m.call == null)
@@ -508,9 +554,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         // Messages from the same side within two minutes are grouped.
         final grouped = next != null && next.fromMe == m.fromMe && next.sentAt.difference(m.sentAt).inMinutes < 2;
         final bubble = _Bubble(
-          // By position: messages only append (temp ones also burn from
-          // the front), so a reload never replays an entrance.
-          key: ValueKey(index),
           message: m,
           highlight: m.seq != null && m.seq == _flash,
           onQuoteTap: () => _jumpTo(m.reply?.seq),
@@ -525,18 +568,23 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           friendOnline: online,
           animate: index >= _initialCount,
         );
-        final keyed =
-            m.seq == null ? bubble : KeyedSubtree(key: _bubbleKeys.putIfAbsent(m.seq!, GlobalKey.new), child: bubble);
-        final item = widget.card.source.replies && m.seq != null
-            ? _SwipeToReply(onReply: () => _startReply(m), fromMe: m.fromMe, child: keyed)
-            : keyed;
+        // Every message has the same shape from the moment it's shown, and
+        // is identified by its place (messages only append; temp ones also
+        // burn from the front), so getting its sequence number, or a
+        // thread chip, never rebuilds it or replays its entrance.
         final count = m.seq == null ? 0 : replies[m.seq] ?? 0;
-        if (count == 0) return item;
         return Column(
+          key: ValueKey(index),
           crossAxisAlignment: m.fromMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            item,
-            _ThreadChip(count: count, accent: accent, onTap: () => _openThread(m, accent, online)),
+            _SwipeToReply(
+              key: _bubbleKeys.putIfAbsent(index, GlobalKey.new),
+              enabled: widget.card.source.replies && m.seq != null && m.call == null,
+              onReply: () => _startReply(m),
+              fromMe: m.fromMe,
+              child: bubble,
+            ),
+            if (count > 0) _ThreadChip(count: count, accent: accent, onTap: () => _openThread(m, accent, online)),
           ],
         );
       },
@@ -1418,10 +1466,14 @@ class _QuoteBlock extends StatelessWidget {
 
 /// Swipe a message right to answer it, as in WhatsApp or Signal.
 class _SwipeToReply extends StatefulWidget {
-  const _SwipeToReply({required this.child, required this.onReply, required this.fromMe});
+  const _SwipeToReply(
+      {super.key, required this.child, required this.onReply, required this.fromMe, this.enabled = true});
 
   final Widget child;
   final VoidCallback onReply;
+
+  /// Off until the message has its sequence number (a reply points at it).
+  final bool enabled;
   final bool fromMe;
 
   @override
@@ -1447,6 +1499,7 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
     final t = (_dx / _trigger).clamp(0.0, 1.0);
     return GestureDetector(
       onHorizontalDragUpdate: (d) {
+        if (!widget.enabled) return;
         _back.stop();
         setState(() => _dx = (_dx + d.delta.dx).clamp(0.0, _trigger * 1.4));
         if (!_armed && _dx >= _trigger) {
@@ -1457,6 +1510,7 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
         }
       },
       onHorizontalDragEnd: (_) {
+        if (!widget.enabled) return;
         if (_armed) widget.onReply();
         _armed = false;
         _from = _dx;
