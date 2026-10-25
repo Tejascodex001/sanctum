@@ -610,6 +610,9 @@ impl Node {
         if links.get(&peer).is_some_and(|l| l.id == link) {
             links.remove(&peer);
             drop(links);
+            // Whatever was pushed to them over this link may not have got there.
+            let _ = self.session.lock().unwrap().link_ended(&peer);
+            self.emit_session_events();
             let _ = self.events.send(NetEvent::PeerDisconnected(peer));
         }
         result

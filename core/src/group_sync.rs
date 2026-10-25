@@ -94,6 +94,9 @@ pub(crate) struct GroupSync {
     index: HashMap<Vec<u8>, Vec<KeptRef>>,
     /// Members our files were pushed to (see [`SEEDS`]).
     seeds: HashMap<BlobId, HashSet<[u8; 32]>>,
+    /// Members told not to ask us for our file (the seeds were taken):
+    /// they're called back if a seed turns out not to have got it.
+    declined: HashMap<BlobId, HashSet<[u8; 32]>>,
     /// Files being fetched now.
     pub(crate) fetching: HashMap<BlobId, Fetch>,
     /// When a file was announced to us.
@@ -176,6 +179,54 @@ impl Session {
                 holds: HashMap::new(),
             },
         );
+        Ok(())
+    }
+
+    /// The link to `peer` is gone (and no other has taken its place). A file
+    /// we pushed to them that they never confirmed didn't get there, so it
+    /// no longer uses up one of the few seeds; members who were told to
+    /// get it from someone else are told they may ask us after all (a
+    /// phone that just dropped off can look connected for a moment, and
+    /// would otherwise keep the file from the member who is online).
+    pub fn link_ended(&mut self, peer: &[u8; 32]) -> Result<()> {
+        self.sync.peers.remove(peer);
+        for set in self.sync.declined.values_mut() {
+            set.remove(peer);
+        }
+        let waiting: Vec<BlobId> = self
+            .store
+            .outbox_for(peer)?
+            .into_iter()
+            .filter_map(|(_, item)| match item.state {
+                OutboxState::Blob { blob, .. } => Some(blob),
+                _ => None,
+            })
+            .collect();
+        for blob in waiting {
+            let Some(seeds) = self.sync.seeds.get_mut(&blob) else { continue };
+            if !seeds.remove(peer) || seeds.len() >= SEEDS {
+                continue;
+            }
+            for q in self.sync.declined.remove(&blob).unwrap_or_default() {
+                if !self.sync.peers.contains_key(&q) {
+                    continue;
+                }
+                // Offer it to them again, this time with a go-ahead.
+                for (id, item) in self.store.outbox_for(&q)? {
+                    if matches!(item.state, OutboxState::Blob { blob: b, .. } if b == blob) {
+                        if let Some(ps) = self.sync.peers.get_mut(&q) {
+                            ps.offered.remove(&id);
+                        }
+                    }
+                }
+                if let Some(ps) = self.sync.peers.get_mut(&q) {
+                    ps.known.values_mut().for_each(|k| {
+                        k.remove(&blob);
+                    });
+                }
+                self.pokes.push(q);
+            }
+        }
         Ok(())
     }
 
@@ -374,6 +425,9 @@ impl Session {
             seeds.insert(*peer);
             return Ok(true);
         }
+        if !ask {
+            self.sync.declined.entry(*blob).or_default().insert(*peer);
+        }
         offers.groups.entry(group).or_default().1.push(HaveBlob { blob: *blob, owed: Some(*id), ask });
         Ok(false)
     }
@@ -421,6 +475,9 @@ impl Session {
                         }
                         // Our own file: only the first few fetch it from us.
                         let ask = self.sync.seeds.get(&r.id).is_none_or(|s| s.len() < SEEDS || s.contains(peer));
+                        if !ask {
+                            self.sync.declined.entry(r.id).or_default().insert(*peer);
+                        }
                         blobs.push(HaveBlob { blob: r.id, owed: None, ask });
                     } else {
                         ids.push(HaveEntry { id: r.id, epoch: r.epoch, owed: None });
@@ -902,6 +959,51 @@ mod tests {
         assert_eq!(chunks(&t.from_dialer), 2);
         assert_eq!(p[4].s.media_bytes(chats[4], 0).unwrap().unwrap(), bytes);
         assert!(p[0].texts(chats[0])[0].2);
+    }
+
+    #[test]
+    fn a_seed_that_dropped_off_frees_its_place() {
+        let (mut p, chats) = group(5);
+        let (path, bytes) = photo(&p[0], 3 * crate::media::CHUNK + 7);
+        // Eve is connected when Alice shares the file, and is gone a moment
+        // later (her phone dropped off before Alice noticed).
+        let (alice_pk, eve_pk) = (p[0].pk(), p[4].pk());
+        let features = p[0].features & p[4].features;
+        p[0].s.link_started(&eve_pk);
+        p[0].s.link_features(&eve_pk, features).unwrap();
+        p[0].s.send_media(chats[0], outgoing(&path), None).unwrap();
+        assert_eq!(chunks(&p[0].s.on_link_up(&eve_pk).unwrap()), 4);
+        // Two others get it from Alice; the next one is only told to get it
+        // from someone else.
+        for i in 1..=SEEDS - 1 {
+            let (alice, other) = pair(&mut p, 0, i);
+            assert_eq!(chunks(&link(alice, other).from_dialer), 4);
+        }
+        let (alice, dave) = pair(&mut p, 0, 3);
+        assert_eq!(chunks(&link(alice, dave).from_dialer), 0);
+        assert_eq!(p[3].s.media_bytes(chats[3], 0).unwrap(), None);
+        // Alice finds Eve's link is dead: Dave, still connected, is sent
+        // the file at once instead of waiting for a long time.
+        p[0].s.take_pokes();
+        p[0].s.link_ended(&eve_pk).unwrap();
+        let dave_pk = p[3].pk();
+        assert_eq!(p[0].s.take_pokes(), [dave_pk]);
+        let mut to_dave = p[0].s.on_link_up(&dave_pk).unwrap();
+        // (Dave was linked before Alice shared the file, so it's offered
+        // with a go-ahead; he asks, and she sends it.)
+        let mut sent = 0;
+        while !to_dave.is_empty() {
+            sent += chunks(&to_dave);
+            let mut to_alice = Vec::new();
+            for f in to_dave.drain(..) {
+                to_alice.extend(p[3].s.on_frame(&alice_pk, f).unwrap());
+            }
+            for f in to_alice {
+                to_dave.extend(p[0].s.on_frame(&dave_pk, f).unwrap());
+            }
+        }
+        assert_eq!(sent, 4);
+        assert_eq!(p[3].s.media_bytes(chats[3], 0).unwrap().unwrap(), bytes);
     }
 
     #[test]
