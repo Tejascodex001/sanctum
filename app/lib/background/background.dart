@@ -235,9 +235,17 @@ abstract final class Background {
   static Future<Map<Object?, Object?>?> recordStop() => _call<Map<Object?, Object?>>(_app, 'recordStop');
   static Future<void> recordCancel() => _call(_app, 'recordCancel');
 
-  /// Opens a (decrypted) file in another app the user picks.
-  static Future<bool> openFile(String path, String mime) async =>
-      await _call<bool>(_app, 'openFile', {'path': path, 'mime': mime}) ?? false;
+  /// Opens a (decrypted) file in another app. "opened", "noapp" (nothing
+  /// on the phone can show it), "missing" (the copy is gone) or "failed".
+  static Future<String> openFile(String path, String name, String mime) => AppLock.whileAway(
+      () async => await _call<String>(_app, 'openFile', {'path': path, 'name': name, 'mime': mime}) ?? 'failed');
+
+  /// Copies a (decrypted) file into the phone's own Pictures, Movies, Music
+  /// or Downloads folder (a "Sanctum" folder in it), on the user's request.
+  /// "saved", "cancelled" (older phones ask where to put it), "missing" or
+  /// "failed".
+  static Future<String> saveToPhone(String path, String name, String mime) => AppLock.whileAway(
+      () async => await _call<String>(_app, 'saveToPhone', {'path': path, 'name': name, 'mime': mime}) ?? 'failed');
 
   /// Blocks (or allows) screenshots and the recents preview.
   static Future<void> setSecure(bool secure) => _call(_app, 'setSecure', {'secure': secure});

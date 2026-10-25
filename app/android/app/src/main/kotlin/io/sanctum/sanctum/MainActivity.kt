@@ -1,13 +1,21 @@
 package io.sanctum.sanctum
 
 import android.Manifest
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Handler
 import android.os.Looper
@@ -82,6 +90,127 @@ class MainActivity : FlutterFragmentActivity() {
             captureFile = null
             pendingCapture = null
             result.success(null)
+        }
+    }
+
+    /**
+     * "Save to phone" on Android 9 and older: the system's own "save as"
+     * screen (no storage permission needed). Newer phones save straight
+     * into the Pictures, Movies, Music or Downloads folder instead.
+     */
+    private class CreateFile : ActivityResultContract<Pair<String, String>, Uri?>() {
+        override fun createIntent(context: Context, input: Pair<String, String>): Intent =
+            Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType(input.first)
+                .putExtra(Intent.EXTRA_TITLE, input.second)
+
+        override fun parseResult(resultCode: Int, intent: Intent?): Uri? =
+            if (resultCode == Activity.RESULT_OK) intent?.data else null
+    }
+
+    private var pendingSave: MethodChannel.Result? = null
+    private var pendingSaveFile: File? = null
+    private val createDocument = registerForActivityResult(CreateFile()) { finishSave(it) }
+
+    private fun finishSave(uri: Uri?) {
+        val result = pendingSave ?: return
+        val file = pendingSaveFile
+        pendingSave = null
+        pendingSaveFile = null
+        if (uri == null || file == null) return result.success("cancelled")
+        val main = Handler(Looper.getMainLooper())
+        thread(isDaemon = true) {
+            val ok = runCatching {
+                contentResolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
+            }.isSuccess
+            main.post { result.success(if (ok) "saved" else "failed") }
+        }
+    }
+
+    /**
+     * Copies a decrypted file to where the user's other apps can see it, only
+     * when they ask. Answers "saved", "cancelled", "missing" or "failed".
+     */
+    private fun saveToPhone(path: String, name: String, mime: String?, result: MethodChannel.Result) {
+        val file = File(path)
+        if (!file.isFile) return result.success("missing")
+        val type = MediaPrep.guessMime(mime, name)
+        val saveName = MediaPrep.saveName(name, type)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val main = Handler(Looper.getMainLooper())
+            thread(isDaemon = true) {
+                val ok = runCatching { saveToMediaStore(file, saveName, type) }.getOrDefault(false)
+                main.post { result.success(if (ok) "saved" else "failed") }
+            }
+        } else {
+            pendingSave?.success("cancelled")
+            pendingSave = result
+            pendingSaveFile = file
+            if (runCatching { createDocument.launch(type to saveName) }.isFailure) {
+                pendingSave = null
+                pendingSaveFile = null
+                result.success("failed")
+            }
+        }
+    }
+
+    /** Android 10+: a "Sanctum" folder inside Pictures, Movies, Music or Downloads. */
+    private fun saveToMediaStore(file: File, name: String, mime: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val volume = MediaStore.VOLUME_EXTERNAL_PRIMARY
+        val (collection, folder) = when {
+            mime.startsWith("image/") -> MediaStore.Images.Media.getContentUri(volume) to Environment.DIRECTORY_PICTURES
+            mime.startsWith("video/") -> MediaStore.Video.Media.getContentUri(volume) to Environment.DIRECTORY_MOVIES
+            mime.startsWith("audio/") -> MediaStore.Audio.Media.getContentUri(volume) to Environment.DIRECTORY_MUSIC
+            else -> MediaStore.Downloads.getContentUri(volume) to Environment.DIRECTORY_DOWNLOADS
+        }
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "$folder/Sanctum")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val resolver = contentResolver
+        val uri = resolver.insert(collection, values) ?: return false
+        return try {
+            resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
+            resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+            true
+        } catch (e: Exception) {
+            runCatching { resolver.delete(uri, null, null) }
+            false
+        }
+    }
+
+    /**
+     * Opens a decrypted copy in another app, through a read-only link
+     * granted just for this. Answers "opened", "noapp" (nothing on the phone
+     * can show this kind of file), "missing" or "failed".
+     */
+    private fun openFile(path: String, name: String, mime: String?): String {
+        val file = File(path)
+        if (!file.isFile) return "missing"
+        val uri = try {
+            FileProvider.getUriForFile(this, "$packageName.updates", file)
+        } catch (e: IllegalArgumentException) {
+            return "failed"
+        }
+        val view = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, MediaPrep.guessMime(mime, name.ifEmpty { file.name }))
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // Some phones only pass the permission on to the app that opens the
+        // file when the link is also attached as clip data.
+        view.clipData = ClipData.newRawUri("", uri)
+        return try {
+            // No chooser of our own: Android asks which app when there are
+            // several, and says so when there is none.
+            startActivity(view)
+            "opened"
+        } catch (e: ActivityNotFoundException) {
+            "noapp"
+        } catch (e: Exception) {
+            "failed"
         }
     }
 
@@ -221,16 +350,19 @@ class MainActivity : FlutterFragmentActivity() {
                         pendingPickMany = result
                         pickVisualMany.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                     }
-                    "openFile" -> {
-                        // Another app opens a decrypted copy, through a
-                        // read-only link granted just for this.
-                        val file = File(call.argument<String>("path")!!)
-                        val uri = FileProvider.getUriForFile(this@MainActivity, "$packageName.updates", file)
-                        val view = Intent(Intent.ACTION_VIEW)
-                            .setDataAndType(uri, call.argument<String>("mime") ?: "*/*")
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        result.success(runCatching { startActivity(Intent.createChooser(view, null)) }.isSuccess)
-                    }
+                    "openFile" -> result.success(
+                        openFile(
+                            call.argument<String>("path")!!,
+                            call.argument<String>("name") ?: "",
+                            call.argument<String>("mime"),
+                        ),
+                    )
+                    "saveToPhone" -> saveToPhone(
+                        call.argument<String>("path")!!,
+                        call.argument<String>("name") ?: "file",
+                        call.argument<String>("mime"),
+                        result,
+                    )
                     "requestBluetooth" -> {
                         // Nearby devices (Android 12+); before that, BLE
                         // scanning needs location access.
