@@ -7,7 +7,12 @@ import android.content.ClipData
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.net.Uri
+import android.os.CancellationSignal
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -188,6 +193,59 @@ class MainActivity : FlutterFragmentActivity() {
      * granted just for this. Answers "opened", "noapp" (nothing on the phone
      * can show this kind of file), "missing" or "failed".
      */
+    private fun hasLocationPermission(): Boolean =
+        checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /// One fix from the phone's own location service (never Google's): the
+    /// first answer from GPS or the network, or after 20 seconds the freshest
+    /// one the phone already knew. Null if location is off or denied.
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun currentLocation(result: MethodChannel.Result) {
+        val manager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            .filter { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
+        if (!hasLocationPermission() || providers.isEmpty()) {
+            result.success(null)
+            return
+        }
+        val main = Handler(Looper.getMainLooper())
+        val listeners = mutableListOf<LocationListener>()
+        val cancel = CancellationSignal()
+        var done = false
+        fun finish(location: Location?) {
+            if (done) return
+            done = true
+            cancel.cancel()
+            listeners.forEach { runCatching { manager.removeUpdates(it) } }
+            result.success(location?.let { mapOf("lat" to it.latitude, "lon" to it.longitude) })
+        }
+        for (provider in providers) {
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    manager.getCurrentLocation(provider, cancel, mainExecutor) { it?.let(::finish) }
+                } else {
+                    val listener = object : LocationListener {
+                        override fun onLocationChanged(location: Location) = finish(location)
+                        @Deprecated("Needed before Android 10")
+                        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+                        override fun onProviderEnabled(provider: String) {}
+                        override fun onProviderDisabled(provider: String) {}
+                    }
+                    listeners.add(listener)
+                    @Suppress("DEPRECATION")
+                    manager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
+                }
+            }
+        }
+        main.postDelayed({
+            val known = providers
+                .mapNotNull { runCatching { manager.getLastKnownLocation(it) }.getOrNull() }
+                .maxByOrNull { it.time }
+            finish(known)
+        }, 20_000)
+    }
+
     private fun openFile(path: String, name: String, mime: String?): String {
         val file = File(path)
         if (!file.isFile) return "missing"
@@ -244,6 +302,14 @@ class MainActivity : FlutterFragmentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
             pendingPermissions?.success(granted.values.all { it })
             pendingPermissions = null
+        }
+
+    // Sharing a place: precise or approximate is fine.
+    private var pendingLocationPermission: MethodChannel.Result? = null
+    private val locationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+            pendingLocationPermission?.success(granted.values.any { it })
+            pendingLocationPermission = null
         }
 
     // The engine lives in SanctumApplication and outlives this activity.
@@ -349,6 +415,24 @@ class MainActivity : FlutterFragmentActivity() {
                         pendingPickMany?.success(emptyList<Any>())
                         pendingPickMany = result
                         pickVisualMany.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                    }
+                    "requestLocation" -> {
+                        if (hasLocationPermission()) {
+                            result.success(true)
+                        } else {
+                            pendingLocationPermission?.success(false)
+                            pendingLocationPermission = result
+                            locationPermissionLauncher.launch(
+                                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                            )
+                        }
+                    }
+                    "currentLocation" -> currentLocation(result)
+                    "openGeo" -> {
+                        val lat = call.argument<Double>("lat") ?: 0.0
+                        val lon = call.argument<Double>("lon") ?: 0.0
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("geo:$lat,$lon?q=$lat,$lon"))
+                        result.success(runCatching { startActivity(intent) }.isSuccess)
                     }
                     "openFile" -> result.success(
                         openFile(

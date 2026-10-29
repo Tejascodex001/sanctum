@@ -39,6 +39,11 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `core/src/video.rs` | Video in calls: fragments and reassembly, rate control, sound before pictures |
 | `core/src/direct.rs` | Faster calls: direct routes, the address filter, probing and falling back to the link |
 | `core/src/feedback.rs` | Feedback to the developer: the form's contents, the wire format, the sender's queue and the developer's inbox. `net/src/feedback.rs` delivers it over its own onion service; the address builds send to is `DEVELOPER` in `app/rust/src/api/feedback.rs` |
+| `core/src/chat_prefs.rs` | Per-chat choices: mute and drafts (this phone only), and the pinned message (shared, newest wins) |
+| `core/src/disappear.rs` | Disappearing messages: a chat's timer, newest wins, and deleting messages when their time comes |
+| `core/src/view_once.rs` | Photos and videos a friend can open once, then gone from both phones |
+| `core/src/share.rs` | Sharing a place, and forwarding a message to other chats |
+| `core/src/schedule.rs` | Messages written now and sent later by this phone |
 | `core/src/moment.rs` | Daily moments: one photo a day for every friend, gone after 24 hours |
 | `core/src/store.rs` | The encrypted SQLite store. Every row is sealed; index columns are keyed hashes |
 | `core/src/protocol.rs` | Wire types: `Frame` (link level) and `Content` (inside MLS) |
@@ -51,6 +56,8 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `net/src/direct.rs` | The UDP socket for Faster calls |
 | `app/rust/src/api/` | The Dart-facing API (flutter_rust_bridge). Keep it thin; logic belongs in `core` |
 | `app/rust/src/call_jni.rs` | JNI functions Kotlin calls directly for call audio (`CallNative.kt`), bypassing Dart |
+| `app/rust/src/api/chat_extras.rs` | The Dart-facing side of mute, drafts, pins, disappearing messages, open once, places, send later and forwarding |
+| `app/lib/chat/view_once.dart` | Opening a friend's open-once photo or video (screenshots blocked, no saving) |
 | `app/lib/chat/media.dart` | Photos, videos, voice notes and files in chats: viewing, opening in other apps, and "Save to phone" (with `MainActivity.kt` and `MediaPrep.kt`) |
 | `app/lib/call/` | The call controller (ring, audio, service) and the call screen, shown above the app lock |
 | `app/lib/settings/` | The Settings screen (opened from your sigil) |

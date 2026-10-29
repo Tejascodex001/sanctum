@@ -1,6 +1,7 @@
 //! Persistent chats, encrypted at rest. See `sanctum_core::store`.
 
 use super::call::CallOutcomeView;
+use super::chat_extras::{can_forward, view_once_view, PlaceView, ViewOnceView};
 use super::poll::PollView;
 use super::session;
 use sanctum_core::media::Outgoing;
@@ -33,6 +34,13 @@ pub struct StoredChat {
     pub members: u32,
     /// Groups: false once we've left or been removed.
     pub active: bool,
+    /// Notifications are silenced until then (Unix seconds; 0: not muted;
+    /// `muted_forever()`: for good).
+    pub muted_until: i64,
+    /// What was typed but not sent.
+    pub draft: String,
+    /// How long new messages last, in seconds (0: for good).
+    pub disappear_seconds: u32,
 }
 
 pub struct MessageView {
@@ -67,6 +75,14 @@ pub struct MessageView {
     pub edited: bool,
     /// We can change its words now (ours, and recent enough).
     pub can_edit: bool,
+    /// It can be passed on to another chat.
+    pub can_forward: bool,
+    /// A photo or video that can be opened once.
+    pub view_once: ViewOnceView,
+    /// A place someone shared (`body` says "📍 Location").
+    pub place: Option<PlaceView>,
+    /// When it disappears (Unix seconds), or 0 if it stays.
+    pub expires_at: i64,
 }
 
 pub struct CallLogView {
@@ -249,10 +265,12 @@ pub fn store_new_key() -> Vec<u8> {
 }
 
 pub fn chat_list() -> anyhow::Result<Vec<StoredChat>> {
-    with(|s| {
-        Ok(s.chats()?
-            .into_iter()
-            .map(|(id, m)| StoredChat {
+    session::with(|s| {
+        let chats = s.store.chats()?;
+        let mut out = Vec::with_capacity(chats.len());
+        for (id, m) in chats {
+            let muted = s.muted_until(id)?;
+            out.push(StoredChat {
                 id,
                 kind: match m.kind {
                     ChatKind::Notes => ChatKindView::Notes,
@@ -268,8 +286,12 @@ pub fn chat_list() -> anyhow::Result<Vec<StoredChat>> {
                 hidden: m.hidden,
                 members: m.peers.len() as u32,
                 active: m.kind != ChatKind::Group || !m.group_id.is_empty(),
-            })
-            .collect())
+                muted_until: if muted == sanctum_core::chat_prefs::MUTED_FOREVER { i64::MAX } else { muted as i64 },
+                draft: s.draft(id)?,
+                disappear_seconds: s.disappear_seconds(id)? as u32,
+            });
+        }
+        Ok(out)
     })
 }
 
@@ -387,6 +409,10 @@ pub fn message_list(chat_id: i64, limit: Option<u32>) -> anyhow::Result<Vec<Mess
                 seq,
                 edited: m.edited_at > 0,
                 can_edit: sanctum_core::edit::can_edit_now(&m, notes),
+                can_forward: can_forward(&m),
+                view_once: view_once_view(m.view_once),
+                place: m.place.map(|p| PlaceView { lat: p.lat, lon: p.lon }),
+                expires_at: m.expires_at as i64,
                 from_me: m.from_me,
                 sent_at: m.sent_at as i64,
                 delivered: m.delivered,

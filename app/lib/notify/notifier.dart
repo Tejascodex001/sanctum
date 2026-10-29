@@ -139,6 +139,8 @@ class Notifier with WidgetsBindingObserver {
     final temp = key.startsWith('t:');
     final id = int.parse(key.substring(2));
     final chat = temp ? null : (await chatList()).where((c) => c.id == id).firstOrNull;
+    // Muted: counted as unread, but no notification.
+    if (chat != null && chat.mutedUntil > DateTime.now().millisecondsSinceEpoch ~/ 1000) return;
     // A hidden chat's notification doesn't say whose it is.
     final hidden = !temp && (chat?.hidden ?? true);
     final title = temp ? (await tempList()).where((t) => t.id.toInt() == id).firstOrNull?.title : chat?.title;

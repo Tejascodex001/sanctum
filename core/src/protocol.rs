@@ -388,6 +388,19 @@ pub enum Content {
     MomentRules { id: MessageId, seconds: u8, once: bool },
     /// To a moment's owner: the sender looked at it.
     MomentSeen { id: MessageId },
+    /// The sender pinned this message to the top of the chat for everyone
+    /// (None: took the pin down). `at` (milliseconds): the newest wins.
+    Pin { id: Option<MessageId>, at: u64 },
+    /// The sender set the chat's disappearing-messages timer (0: off).
+    /// `at` (milliseconds): the newest wins.
+    Disappear { seconds: u64, at: u64 },
+    /// A photo or video the friend can open once (friends' chats only);
+    /// the file follows, as for [`Content::Media`].
+    ViewOnce { id: MessageId, sent_at: u64, media: Media },
+    /// To the sender of a view-once photo: it was opened.
+    Opened { id: MessageId },
+    /// The sender's location, once (not live).
+    Location { id: MessageId, sent_at: u64, lat: f64, lon: f64 },
 }
 
 /// What an admin asks of the leader (see [`Content::GroupRequest`]).
@@ -604,6 +617,14 @@ mod tests {
         assert_eq!(have.to_bytes()[0], 16);
         assert_eq!(Frame::GroupWant { group: vec![1], ids: Vec::new() }.to_bytes()[0], 17);
         assert_eq!(Frame::BlobWant { group: vec![1], blob: [0; 16], from: 0 }.to_bytes()[0], 18);
+        assert_eq!(Content::MomentSeen { id: [0; 16] }.encode()[0], 28);
+        assert_eq!(Content::Pin { id: None, at: 1 }.encode()[0], 29);
+        assert_eq!(Content::Disappear { seconds: 60, at: 1 }.encode()[0], 30);
+        assert_eq!(Content::ViewOnce { id: [0; 16], sent_at: 1, media: Media::default() }.encode()[0], 31);
+        assert_eq!(Content::Opened { id: [0; 16] }.encode()[0], 32);
+        let here = Content::Location { id: [0; 16], sent_at: 1, lat: 12.5, lon: -0.25 };
+        assert_eq!(here.encode()[0], 33);
+        assert_eq!(Content::decode(&here.encode()), Some(here));
     }
 
     /// Older builds read a handshake frame that carries features as if it

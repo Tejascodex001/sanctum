@@ -239,6 +239,21 @@ abstract final class Background {
       });
 
   /// Voice notes: the microphone permission (asked once), then recording.
+  /// Where the phone is now, asked once (after permission), from the phone's
+  /// own location service. Null if denied, off, or no fix in time.
+  static Future<({double lat, double lon})?> currentLocation() async {
+    final allowed = await AppLock.whileAway(() async => await _call<bool>(_app, 'requestLocation') ?? false);
+    if (!allowed) return null;
+    final m = await _call<Map<Object?, Object?>>(_app, 'currentLocation');
+    final lat = m?['lat'], lon = m?['lon'];
+    if (lat is! double || lon is! double) return null;
+    return (lat: lat, lon: lon);
+  }
+
+  /// Opens a place in a maps app on the phone; false if there is none.
+  static Future<bool> openMap(double lat, double lon) =>
+      AppLock.whileAway(() async => await _call<bool>(_app, 'openGeo', {'lat': lat, 'lon': lon}) ?? false);
+
   static Future<bool> requestMicrophone() =>
       AppLock.whileAway(() async => await _call<bool>(_app, 'requestMicrophone') ?? false);
   static Future<bool> recordStart() async => await _call<bool>(_app, 'recordStart') ?? false;

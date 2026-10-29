@@ -5,6 +5,7 @@
 
 import '../frb_generated.dart';
 import 'call.dart';
+import 'chat_extras.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'poll.dart';
 
@@ -314,6 +315,18 @@ class MessageView {
   /// We can change its words now (ours, and recent enough).
   final bool canEdit;
 
+  /// It can be passed on to another chat.
+  final bool canForward;
+
+  /// A photo or video that can be opened once.
+  final ViewOnceView viewOnce;
+
+  /// A place someone shared (`body` says "📍 Location").
+  final PlaceView? place;
+
+  /// When it disappears (Unix seconds), or 0 if it stays.
+  final PlatformInt64 expiresAt;
+
   const MessageView({
     required this.seq,
     required this.fromMe,
@@ -331,6 +344,10 @@ class MessageView {
     this.sharedBy,
     required this.edited,
     required this.canEdit,
+    required this.canForward,
+    required this.viewOnce,
+    this.place,
+    required this.expiresAt,
   });
 
   @override
@@ -350,7 +367,11 @@ class MessageView {
       notice.hashCode ^
       sharedBy.hashCode ^
       edited.hashCode ^
-      canEdit.hashCode;
+      canEdit.hashCode ^
+      canForward.hashCode ^
+      viewOnce.hashCode ^
+      place.hashCode ^
+      expiresAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -372,7 +393,11 @@ class MessageView {
           notice == other.notice &&
           sharedBy == other.sharedBy &&
           edited == other.edited &&
-          canEdit == other.canEdit;
+          canEdit == other.canEdit &&
+          canForward == other.canForward &&
+          viewOnce == other.viewOnce &&
+          place == other.place &&
+          expiresAt == other.expiresAt;
 }
 
 /// Everyone who reacted to a message with one emoji.
@@ -464,6 +489,16 @@ class StoredChat {
   /// Groups: false once we've left or been removed.
   final bool active;
 
+  /// Notifications are silenced until then (Unix seconds; 0: not muted;
+  /// `muted_forever()`: for good).
+  final PlatformInt64 mutedUntil;
+
+  /// What was typed but not sent.
+  final String draft;
+
+  /// How long new messages last, in seconds (0: for good).
+  final int disappearSeconds;
+
   const StoredChat({
     required this.id,
     required this.kind,
@@ -476,6 +511,9 @@ class StoredChat {
     required this.hidden,
     required this.members,
     required this.active,
+    required this.mutedUntil,
+    required this.draft,
+    required this.disappearSeconds,
   });
 
   @override
@@ -490,7 +528,10 @@ class StoredChat {
       waiting.hashCode ^
       hidden.hashCode ^
       members.hashCode ^
-      active.hashCode;
+      active.hashCode ^
+      mutedUntil.hashCode ^
+      draft.hashCode ^
+      disappearSeconds.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -507,5 +548,8 @@ class StoredChat {
           waiting == other.waiting &&
           hidden == other.hidden &&
           members == other.members &&
-          active == other.active;
+          active == other.active &&
+          mutedUntil == other.mutedUntil &&
+          draft == other.draft &&
+          disappearSeconds == other.disappearSeconds;
 }

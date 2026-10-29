@@ -816,6 +816,12 @@ impl Session {
                 };
                 self.add_notice(chat_id, text)?;
             }
+            Content::Pin { id, at } => self.on_pin(chat_id, id, at)?,
+            Content::Disappear { seconds, at } => {
+                let who = self.member_name(meta, peer);
+                self.on_disappear(chat_id, &who, seconds, at)?;
+            }
+            Content::Location { id, sent_at, lat, lon } => self.on_location(chat_id, peer, id, sent_at, lat, lon)?,
             _ => {}
         }
         Ok(())

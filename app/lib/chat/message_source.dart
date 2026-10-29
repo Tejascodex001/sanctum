@@ -1,3 +1,4 @@
+import '../src/rust/api/chat_extras.dart';
 import '../src/rust/api/poll.dart';
 import '../src/rust/api/store.dart';
 import '../src/rust/api/temp_chat.dart';
@@ -21,6 +22,9 @@ class ChatMessage {
     this.sharedBy,
     this.edited = false,
     this.canEdit = false,
+    this.canForward = false,
+    this.viewOnce = ViewOnceView.no,
+    this.place,
   });
 
   final String body;
@@ -67,6 +71,15 @@ class ChatMessage {
 
   /// We can still change its words (ours, and recent enough).
   final bool canEdit;
+
+  /// It can be passed on to another chat.
+  final bool canForward;
+
+  /// A photo or video that can be opened once, and whether it was.
+  final ViewOnceView viewOnce;
+
+  /// A place someone shared.
+  final PlaceView? place;
 
   /// Call records and notices aren't messages: no replies, reactions or ticks.
   bool get isRecord => call != null || notice;
@@ -125,6 +138,10 @@ class StoreSource implements MessageSource {
             sharedBy: m.sharedBy,
             edited: m.edited,
             canEdit: m.canEdit,
+            canForward: m.canForward,
+            viewOnce: m.viewOnce,
+            place: m.place,
+            expiresAt: m.expiresAt > 0 ? _fromUnix(m.expiresAt) : null,
             reply: m.reply == null
                 ? null
                 : ChatQuote(

@@ -172,8 +172,29 @@ impl Session {
     /// queues it (and the file) for the chat's other phones. Returns who
     /// to reach.
     pub fn send_media(&mut self, chat_id: i64, out: Outgoing<'_>, reply_to: Option<i64>) -> Result<Vec<[u8; 32]>> {
+        self.send_media_as(chat_id, out, reply_to, false)
+    }
+
+    /// [`Session::send_media`], or a photo or video the friend can open
+    /// only once (see `view_once`).
+    pub(crate) fn send_media_as(
+        &mut self,
+        chat_id: i64,
+        out: Outgoing<'_>,
+        reply_to: Option<i64>,
+        view_once: bool,
+    ) -> Result<Vec<[u8; 32]>> {
         let meta = self.chat(chat_id)?;
-        let (media, total) = self.seal_file(&out)?;
+        if view_once
+            && (meta.kind != ChatKind::Direct || !matches!(out.kind, MediaKind::Image | MediaKind::Video) || out.album.is_some())
+        {
+            return Err(SessionError::Protocol);
+        }
+        let (mut media, total) = self.seal_file(&out)?;
+        if view_once {
+            // Not even a blurry preview.
+            media.thumb.clear();
+        }
         let blob = media.blob;
         let id: MessageId = rand::random();
         let sent_at = now();
@@ -186,7 +207,7 @@ impl Session {
             chat_id,
             &StoredMessage {
                 from_me: true,
-                body: out.caption.into(),
+                body: if view_once { String::new() } else { out.caption.into() },
                 sent_at,
                 delivered: meta.kind == ChatKind::Notes,
                 id: Some(id),
@@ -194,11 +215,13 @@ impl Session {
                 sender: None,
                 media: Some(media.clone()),
                 album: album.clone(),
+                view_once: view_once.into(),
                 ..Default::default()
             },
         )?;
         self.events.push(Event::Chat(chat_id));
         let content = match album {
+            _ if view_once => Content::ViewOnce { id, sent_at, media },
             Some(album) => Content::AlbumMedia {
                 id,
                 body: out.caption.into(),
@@ -235,8 +258,10 @@ impl Session {
     }
 
     /// The decrypted attachment of a message, if it has arrived.
+    /// Never a view-once photo's: that opens only through
+    /// [`Session::open_view_once`].
     pub fn media_bytes(&self, chat_id: i64, seq: i64) -> Result<Option<Vec<u8>>> {
-        let Some(media) = self.store.message(chat_id, seq)?.and_then(|m| m.media) else {
+        let Some(media) = self.store.message(chat_id, seq)?.filter(|m| m.view_once == 0).and_then(|m| m.media) else {
             return Ok(None);
         };
         self.open_file(&media)

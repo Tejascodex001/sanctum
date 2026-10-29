@@ -1,5 +1,6 @@
 import '../chat/message_source.dart';
 import '../chat/poll.dart';
+import '../src/rust/api/chat_extras.dart';
 import '../src/rust/api/sigil.dart';
 import '../src/rust/api/store.dart';
 
@@ -53,6 +54,17 @@ class ChatCard {
   String? preview;
   DateTime updatedAt;
 
+  /// Notifications are silenced until then (Unix seconds; 0: not muted).
+  int mutedUntil = 0;
+
+  /// What was typed here but not sent.
+  String draft = '';
+
+  /// How long new messages last, in seconds (0: for good).
+  int disappearSeconds = 0;
+
+  bool get muted => mutedUntil > DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
   /// Temp chats: when the oldest remaining message burns.
   DateTime? nextBurn;
 
@@ -73,14 +85,16 @@ class ChatCard {
     final last = messages.last;
     preview = last.poll != null
         ? pollPreview(last.poll!)
-        : last.body.isNotEmpty || last.media == null
-            ? last.body
-            : switch (last.media!.kind) {
-                MediaKindView.image => 'Photo',
-                MediaKindView.video => 'Video',
-                MediaKindView.audio => 'Voice note',
-                MediaKindView.file => last.media!.name,
-              };
+        : last.viewOnce != ViewOnceView.no
+            ? (last.media?.kind == MediaKindView.video ? 'Video to open once' : 'Photo to open once')
+            : last.body.isNotEmpty || last.media == null
+                ? last.body
+                : switch (last.media!.kind) {
+                    MediaKindView.image => 'Photo',
+                    MediaKindView.video => 'Video',
+                    MediaKindView.audio => 'Voice note',
+                    MediaKindView.file => last.media!.name,
+                  };
     // In a group, say who wrote it.
     if (group && preview != null && !last.isRecord) {
       final who = last.fromMe ? 'You' : last.senderName;

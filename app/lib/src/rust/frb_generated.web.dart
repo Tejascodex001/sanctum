@@ -7,6 +7,7 @@
 // ignore_for_file: argument_type_not_assignable
 
 import 'api/call.dart';
+import 'api/chat_extras.dart';
 import 'api/feedback.dart';
 import 'api/group.dart';
 import 'api/identity.dart';
@@ -78,6 +79,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   MediaView dco_decode_box_autoadd_media_view(dynamic raw);
+
+  @protected
+  PlaceView dco_decode_box_autoadd_place_view(dynamic raw);
 
   @protected
   PlanView dco_decode_box_autoadd_plan_view(dynamic raw);
@@ -215,6 +219,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RequestView> dco_decode_list_request_view(dynamic raw);
 
   @protected
+  List<ScheduledView> dco_decode_list_scheduled_view(dynamic raw);
+
+  @protected
   List<SearchHit> dco_decode_list_search_hit(dynamic raw);
 
   @protected
@@ -275,6 +282,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   MediaView? dco_decode_opt_box_autoadd_media_view(dynamic raw);
 
   @protected
+  PlaceView? dco_decode_opt_box_autoadd_place_view(dynamic raw);
+
+  @protected
   PlanView? dco_decode_opt_box_autoadd_plan_view(dynamic raw);
 
   @protected
@@ -302,6 +312,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PairedView dco_decode_paired_view(dynamic raw);
 
   @protected
+  PlaceView dco_decode_place_view(dynamic raw);
+
+  @protected
   PlanAheadView dco_decode_plan_ahead_view(dynamic raw);
 
   @protected
@@ -324,6 +337,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RequestView dco_decode_request_view(dynamic raw);
+
+  @protected
+  ScheduledView dco_decode_scheduled_view(dynamic raw);
 
   @protected
   SearchHit dco_decode_search_hit(dynamic raw);
@@ -360,6 +376,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   UpdateInfo dco_decode_update_info(dynamic raw);
+
+  @protected
+  ViewOnceView dco_decode_view_once_view(dynamic raw);
 
   @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
@@ -420,6 +439,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   MediaView sse_decode_box_autoadd_media_view(SseDeserializer deserializer);
+
+  @protected
+  PlaceView sse_decode_box_autoadd_place_view(SseDeserializer deserializer);
 
   @protected
   PlanView sse_decode_box_autoadd_plan_view(SseDeserializer deserializer);
@@ -575,6 +597,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RequestView> sse_decode_list_request_view(SseDeserializer deserializer);
 
   @protected
+  List<ScheduledView> sse_decode_list_scheduled_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<SearchHit> sse_decode_list_search_hit(SseDeserializer deserializer);
 
   @protected
@@ -649,6 +676,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  PlaceView? sse_decode_opt_box_autoadd_place_view(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   PlanView? sse_decode_opt_box_autoadd_plan_view(SseDeserializer deserializer);
 
   @protected
@@ -680,6 +712,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   PairedView sse_decode_paired_view(SseDeserializer deserializer);
 
   @protected
+  PlaceView sse_decode_place_view(SseDeserializer deserializer);
+
+  @protected
   PlanAheadView sse_decode_plan_ahead_view(SseDeserializer deserializer);
 
   @protected
@@ -702,6 +737,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RequestView sse_decode_request_view(SseDeserializer deserializer);
+
+  @protected
+  ScheduledView sse_decode_scheduled_view(SseDeserializer deserializer);
 
   @protected
   SearchHit sse_decode_search_hit(SseDeserializer deserializer);
@@ -738,6 +776,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   UpdateInfo sse_decode_update_info(SseDeserializer deserializer);
+
+  @protected
+  ViewOnceView sse_decode_view_once_view(SseDeserializer deserializer);
 
   @protected
   void sse_encode_AnyhowException(
@@ -817,6 +858,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_media_view(
     MediaView self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_place_view(
+    PlaceView self,
     SseSerializer serializer,
   );
 
@@ -1022,6 +1069,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_scheduled_view(
+    List<ScheduledView> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_search_hit(
     List<SearchHit> self,
     SseSerializer serializer,
@@ -1115,6 +1168,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_place_view(
+    PlaceView? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_plan_view(
     PlanView? self,
     SseSerializer serializer,
@@ -1157,6 +1216,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_paired_view(PairedView self, SseSerializer serializer);
 
   @protected
+  void sse_encode_place_view(PlaceView self, SseSerializer serializer);
+
+  @protected
   void sse_encode_plan_ahead_view(PlanAheadView self, SseSerializer serializer);
 
   @protected
@@ -1182,6 +1244,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_request_view(RequestView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_scheduled_view(ScheduledView self, SseSerializer serializer);
 
   @protected
   void sse_encode_search_hit(SearchHit self, SseSerializer serializer);
@@ -1221,6 +1286,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_update_info(UpdateInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_view_once_view(ViewOnceView self, SseSerializer serializer);
 }
 
 // Section: wire_class

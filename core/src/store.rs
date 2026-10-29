@@ -12,6 +12,7 @@ use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -245,6 +246,43 @@ pub struct StoredMessage {
     /// When its writer last changed `body` (milliseconds); 0 if never. A
     /// late older edit can't undo a newer one.
     pub edited_at: u64,
+    /// When this phone deletes it (Unix seconds), set from the chat's
+    /// disappearing-messages timer as it's stored; 0: kept.
+    pub expires_at: u64,
+    /// A photo or video that can be looked at once: 0 not one, 1 not
+    /// opened yet, 2 opened (its file is gone).
+    pub view_once: u8,
+    /// A shared location (`body` holds the words shown).
+    pub place: Option<Place>,
+}
+
+/// A chat's disappearing-messages timer, the same on every phone in it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct DisappearTimer {
+    /// How long new messages stay, in seconds; 0: off.
+    pub seconds: u64,
+    /// When it was set (milliseconds), so a late older change loses.
+    pub at: u64,
+}
+
+const EXPIRING: &[u8] = b"expiring-chats";
+
+fn disappear_name(chat_id: i64) -> Vec<u8> {
+    [b"disappear:".as_slice(), &chat_id.to_le_bytes()].concat()
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// A point on the map.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct Place {
+    pub lat: f64,
+    pub lon: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -264,6 +302,28 @@ pub struct CallLog {
     pub outcome: u8,
     /// How long we talked, in seconds.
     pub seconds: u32,
+}
+
+/// The tenth message format, before disappearing messages, view-once
+/// photos and locations.
+#[derive(Deserialize)]
+struct StoredMessageV9 {
+    from_me: bool,
+    body: String,
+    sent_at: u64,
+    delivered: bool,
+    id: Option<MessageId>,
+    reply: Option<Quote>,
+    sender: Option<[u8; 32]>,
+    media: Option<Media>,
+    poll: Option<Poll>,
+    votes: Vec<Vote>,
+    album: Option<Album>,
+    reactions: Vec<Reaction>,
+    call: Option<CallLog>,
+    shared_by: Option<[u8; 32]>,
+    notice: bool,
+    edited_at: u64,
 }
 
 /// The ninth message format, before edits.
@@ -458,6 +518,9 @@ pub struct Store {
     /// Keys the hashes that index MLS state, so lookup keys (which contain
     /// group ids) never appear on disk.
     index_key: [u8; 32],
+    /// The soonest a disappearing message is due (Unix seconds); 0 until
+    /// the chats with such messages were looked through.
+    soonest_expiry: Cell<u64>,
 }
 
 impl Store {
@@ -513,6 +576,7 @@ impl Store {
             db,
             cipher: XChaCha20Poly1305::new(key.into()),
             index_key: blake3::derive_key("sanctum store index v1", key),
+            soonest_expiry: Cell::new(0),
         };
         // Fail fast on a wrong key rather than on first read.
         if let Some((id, sealed)) = store
@@ -569,9 +633,27 @@ impl Store {
         Ok(())
     }
 
+    /// Stores a new message. In a chat with disappearing messages on, it
+    /// gets its deletion time here, whoever wrote it (notices stay).
     pub fn add_message(&self, chat_id: i64, msg: &StoredMessage) -> Result<i64> {
         if !self.chat_exists(chat_id)? {
             return Err(StoreError::NoSuchChat);
+        }
+        let timer = self.disappear_timer(chat_id)?;
+        let mut timed;
+        let msg = if timer.seconds > 0 && msg.expires_at == 0 && !msg.notice {
+            timed = msg.clone();
+            // From when it was sent: a message that waited to be delivered
+            // goes when the sender's copy does.
+            let now = unix_now();
+            let from = if msg.sent_at == 0 { now } else { msg.sent_at.min(now) };
+            timed.expires_at = from + timer.seconds;
+            &timed
+        } else {
+            msg
+        };
+        if msg.expires_at > 0 {
+            self.note_expiring(chat_id, msg.expires_at)?;
         }
         let seq: i64 = self.db.query_row(
             "SELECT MAX(COALESCE((SELECT MAX(seq) + 1 FROM messages WHERE chat_id = ?1), 0),
@@ -908,6 +990,27 @@ impl Store {
         if let Ok(m) = postcard::from_bytes::<StoredMessage>(&plain) {
             return Ok(m);
         }
+        if let Ok(v9) = postcard::from_bytes::<StoredMessageV9>(&plain) {
+            return Ok(StoredMessage {
+                from_me: v9.from_me,
+                body: v9.body,
+                sent_at: v9.sent_at,
+                delivered: v9.delivered,
+                id: v9.id,
+                reply: v9.reply,
+                sender: v9.sender,
+                media: v9.media,
+                poll: v9.poll,
+                votes: v9.votes,
+                album: v9.album,
+                reactions: v9.reactions,
+                call: v9.call,
+                shared_by: v9.shared_by,
+                notice: v9.notice,
+                edited_at: v9.edited_at,
+                ..Default::default()
+            });
+        }
         if let Ok(v8) = postcard::from_bytes::<StoredMessageV8>(&plain) {
             return Ok(StoredMessage {
                 from_me: v8.from_me,
@@ -1097,6 +1200,70 @@ impl Store {
 
     fn mls_index(&self, k: &[u8]) -> Vec<u8> {
         blake3::keyed_hash(&self.index_key, k).as_bytes().to_vec()
+    }
+
+    /// A chat's disappearing-messages timer (all zero: off).
+    pub fn disappear_timer(&self, chat_id: i64) -> Result<DisappearTimer> {
+        Ok(self.kv_get(&disappear_name(chat_id))?.unwrap_or_default())
+    }
+
+    pub fn set_disappear_timer(&self, chat_id: i64, timer: &DisappearTimer) -> Result<()> {
+        self.kv_put(&disappear_name(chat_id), timer)
+    }
+
+    /// A message in `chat_id` will be due at `at`.
+    fn note_expiring(&self, chat_id: i64, at: u64) -> Result<()> {
+        let mut chats: Vec<i64> = self.kv_get(EXPIRING)?.unwrap_or_default();
+        if !chats.contains(&chat_id) {
+            chats.push(chat_id);
+            self.kv_put(EXPIRING, &chats)?;
+        }
+        let soonest = self.soonest_expiry.get();
+        if soonest != 0 {
+            self.soonest_expiry.set(soonest.min(at));
+        }
+        Ok(())
+    }
+
+    /// Disappearing messages that are due at `now`, as (chat, sequence
+    /// number), for the caller to delete with their files. Cheap until one
+    /// is due: the soonest is remembered.
+    pub fn take_expired(&self, now: u64) -> Result<Vec<(i64, i64, StoredMessage)>> {
+        let soonest = self.soonest_expiry.get();
+        if soonest != 0 && soonest > now {
+            return Ok(Vec::new());
+        }
+        let chats: Vec<i64> = self.kv_get(EXPIRING)?.unwrap_or_default();
+        let mut due = Vec::new();
+        let mut next = u64::MAX;
+        let mut still = Vec::new();
+        for chat_id in chats {
+            if !self.chat_exists(chat_id)? {
+                continue;
+            }
+            let mut any = false;
+            for (seq, m) in self.messages_indexed(chat_id, None)? {
+                match m.expires_at {
+                    0 => {}
+                    // Kept on the list until the caller has deleted it.
+                    at if at <= now => {
+                        due.push((chat_id, seq, m));
+                        next = next.min(now);
+                        any = true;
+                    }
+                    at => {
+                        next = next.min(at);
+                        any = true;
+                    }
+                }
+            }
+            if any {
+                still.push(chat_id);
+            }
+        }
+        self.kv_put(EXPIRING, &still)?;
+        self.soonest_expiry.set(next);
+        Ok(due)
     }
 
     fn chat_exists(&self, id: i64) -> Result<bool> {
@@ -1327,6 +1494,85 @@ mod tests {
         with_admins.admins = vec![[4; 32]];
         s.update_chat(9, &with_admins).unwrap();
         assert_eq!(s.chats().unwrap().remove(0).1, with_admins);
+    }
+
+    #[test]
+    fn messages_from_before_disappearing_upgrade() {
+        #[derive(Serialize)]
+        struct V9 {
+            from_me: bool,
+            body: String,
+            sent_at: u64,
+            delivered: bool,
+            id: Option<MessageId>,
+            reply: Option<Quote>,
+            sender: Option<[u8; 32]>,
+            media: Option<Media>,
+            poll: Option<Poll>,
+            votes: Vec<Vote>,
+            album: Option<Album>,
+            reactions: Vec<Reaction>,
+            call: Option<CallLog>,
+            shared_by: Option<[u8; 32]>,
+            notice: bool,
+            edited_at: u64,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[7; 32]).unwrap();
+        let chat = s.create_chat(&meta("Bob")).unwrap();
+        let old = V9 {
+            from_me: true,
+            body: "before".into(),
+            sent_at: 4,
+            delivered: true,
+            id: Some([3; 16]),
+            reply: None,
+            sender: None,
+            media: None,
+            poll: None,
+            votes: Vec::new(),
+            album: None,
+            reactions: Vec::new(),
+            call: None,
+            shared_by: None,
+            notice: false,
+            edited_at: 9,
+        };
+        s.db.execute(
+            "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, 0, ?2)",
+            params![chat, s.seal(&message_aad(chat, 0), &old).unwrap()],
+        )
+        .unwrap();
+        let m = s.message(chat, 0).unwrap().unwrap();
+        assert_eq!((m.body.as_str(), m.edited_at, m.expires_at, m.view_once, m.place), ("before", 9, 0, 0, None));
+        let mut new = m.clone();
+        new.expires_at = 5;
+        new.view_once = 2;
+        new.place = Some(Place { lat: 12.97, lon: 77.59 });
+        s.update_message(chat, 0, &new).unwrap();
+        assert_eq!(s.message(chat, 0).unwrap().unwrap(), new);
+    }
+
+    #[test]
+    fn disappearing_messages_are_due_on_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[7; 32]).unwrap();
+        let chat = s.create_chat(&meta("Bob")).unwrap();
+        let before = s.add_message(chat, &StoredMessage { body: "kept".into(), ..Default::default() }).unwrap();
+        s.set_disappear_timer(chat, &DisappearTimer { seconds: 60, at: 1 }).unwrap();
+        let timed = s.add_message(chat, &StoredMessage { body: "goes".into(), ..Default::default() }).unwrap();
+        let notice = StoredMessage { body: "Timer on".into(), notice: true, ..Default::default() };
+        s.add_message(chat, &notice).unwrap();
+        let at = s.message(chat, timed).unwrap().unwrap().expires_at;
+        assert!(at >= unix_now() + 59);
+        assert!(s.take_expired(at - 1).unwrap().is_empty());
+        let due = s.take_expired(at).unwrap();
+        assert_eq!(due.iter().map(|d| (d.0, d.1)).collect::<Vec<_>>(), vec![(chat, timed)]);
+        assert_eq!(s.message(chat, before).unwrap().unwrap().expires_at, 0);
+        // Reopened, it finds them again.
+        drop(s);
+        let s = Store::open(dir.path().join("s.db"), &[7; 32]).unwrap();
+        assert_eq!(s.take_expired(at).unwrap().len(), 1);
     }
 
     #[test]

@@ -186,6 +186,17 @@ Changing the words of a message you sent, in friends' chats, groups and notes (`
 - In groups an edit can arrive before its message. The newest waits in the sealed key-value table until the message comes.
 - **Quiet:** an edit refreshes the chat but never notifies. Bubbles say "edited". Replies keep quoting the words as they were. Older builds ignore edits and keep showing the original.
 
+## Chat extras
+Small things around messages (`core/src/chat_prefs.rs`, `disappear.rs`, `view_once.rs`, `share.rs`, `schedule.rs`; the app side in `app/rust/src/api/chat_extras.rs`).
+- **Mute and drafts stay on this phone,** in the sealed key-value table, per chat. A muted chat still stores and counts messages; `notifier.dart` just doesn't post. Drafts are saved shortly after typing stops and when the chat closes.
+- **Pins are shared:** `Content::Pin { id, at }` inside MLS, naming the message by its shared id (None takes the pin away). Anyone in the chat can pin; the newest `at` (milliseconds) wins everywhere, so a pin can arrive before its message.
+- **Disappearing messages:** `Content::Disappear` sets a chat's timer (1 minute to 90 days, newest wins, with a notice saying who). Messages sent while it's on carry `expires_at`, counted from when they were sent; every phone deletes them and their files when that passes (`purge()` → `burn_expired`). Messages from before keep living. The app offers it in friends' chats and groups.
+- **Open once:** `Content::ViewOnce` is a photo or video sent like any attachment but with no thumbnail and no caption, in friends' chats only. Neither phone can save, forward, copy or export it; even the sender can't open their copy. Opening it (`open_view_once`) hands the bytes over once and deletes the receiver's file, then `Content::Opened` tells the sender to delete theirs. The viewer blocks screenshots while it shows.
+- **Places:** `Content::Location { lat, lon }`, one point, never live. The phone finds it with Android's own `LocationManager` (no Google), only after asking; the permission is asked for only then. The app shows numbers and opens a `geo:` link in whatever maps app the phone has; nothing is fetched from a map service.
+- **Forwarding** sends a copy as a new message of ours (`share.rs`): words, a file (re-sent from our sealed copy) or a place. Polls, call records, notices and open-once photos can't be forwarded.
+- **Send later** keeps messages sealed in the store until their time (up to a year ahead, 100 at once); `purge()` → `send_scheduled` sends what's due. Only this phone knows about them.
+- **Older builds** ignore these `Content` kinds (they're inside MLS, so no `FEATURES` bit): they won't show pins, places or open-once photos, and won't delete disappearing messages.
+
 ## Typing
 "Asha is typing…" in friends' chats and groups (`core/src/typing.rs`).
 - **Ephemeral:** `Frame::Typing` is sent only to people in the chat whose link is up right now. It is never stored, never put in the outbox and never resent; anyone not connected simply doesn't see it. It carries no text, only which chat: empty for the pair's own chat, or the group's id (which `Frame::GroupMls` already carries).

@@ -263,7 +263,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ? 'Request sent · waiting for them to accept'
                     : 'Private and end-to-end encrypted',
         updatedAt: DateTime.fromMillisecondsSinceEpoch(c.createdAt * 1000),
-      )..pinned = c.pinned;
+      )
+        ..pinned = c.pinned
+        ..mutedUntil = c.mutedUntil
+        ..draft = c.draft
+        ..disappearSeconds = c.disappearSeconds;
       await card.refresh();
       cards.add(card);
     }

@@ -157,6 +157,8 @@ pub struct Session {
     pub(crate) media: MediaHub,
     /// Members passing group messages and files on (see `group_sync`).
     pub(crate) sync: GroupSync,
+    /// When the next scheduled message is due (0: not looked yet).
+    pub(crate) scheduled_next: u64,
 }
 
 impl Session {
@@ -189,6 +191,7 @@ impl Session {
             calls: Calls::default(),
             media: MediaHub::default(),
             sync: GroupSync::default(),
+            scheduled_next: 0,
         })
     }
 
@@ -521,8 +524,8 @@ impl Session {
         peers
     }
 
-    /// Burns expired temp messages, and ends calls nobody answered. Call on
-    /// a timer.
+    /// Burns expired temp and disappearing messages, sends scheduled ones,
+    /// and ends calls nobody answered. Call on a timer.
     pub fn purge(&mut self) {
         for id in self.temp.purge_expired(now()) {
             self.events.push(Event::TempGone(id));
@@ -530,6 +533,8 @@ impl Session {
         let _ = self.purge_moments();
         let _ = self.call_tick(now_ms(), std::time::Instant::now());
         let _ = self.prune_kept(now(), false);
+        let _ = self.burn_expired();
+        let _ = self.send_scheduled();
     }
 
     fn queue_temp(&mut self, peer: [u8; 32], content: Content) {
@@ -957,6 +962,11 @@ impl Session {
                     self.events.push(Event::TempGone(id));
                 }
             }
+            Content::Pin { id, at } => self.on_pin(chat_id, id, at)?,
+            Content::Disappear { seconds, at } => self.on_disappear(chat_id, &name, seconds, at)?,
+            Content::ViewOnce { id, sent_at, media } => self.on_view_once(chat_id, peer, id, sent_at, media)?,
+            Content::Opened { id } => self.on_opened(chat_id, id)?,
+            Content::Location { id, sent_at, lat, lon } => self.on_location(chat_id, peer, id, sent_at, lat, lon)?,
         }
         Ok(())
     }
@@ -1065,6 +1075,7 @@ impl Session {
                 self.sync_forget(&meta.group_id)?;
             }
         }
+        self.forget_chat_prefs(chat_id)?;
         self.store.delete_chat(chat_id)?;
         Ok(())
     }

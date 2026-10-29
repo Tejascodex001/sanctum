@@ -4,10 +4,12 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart' show Int64List;
 
 import '../background/background.dart';
 import '../call/call_controller.dart';
 import '../src/rust/api/call.dart';
+import '../src/rust/api/chat_extras.dart';
 import '../deck/chat_card.dart';
 import '../deck/chat_tile.dart';
 import '../net/net_bus.dart';
@@ -15,6 +17,7 @@ import '../notify/notifier.dart';
 import 'albums.dart';
 import 'media.dart';
 import 'poll.dart';
+import 'view_once.dart';
 import '../security/screenshots.dart';
 import '../sigil/emblem.dart';
 import '../sigil/sigil_painter.dart';
@@ -86,14 +89,29 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   DateTime _typingSent = DateTime(0);
   late final _wipe = AnimationController(vsync: this, duration: Motion.slow);
 
+  /// What's typed but not sent is kept (saved a moment after typing stops).
+  Timer? _draftSave;
+
+  /// The message pinned for everyone in the chat, if it's here.
+  int? _pinnedSeq;
+
+  bool get _stored => widget.card.source is StoreSource;
+
   @override
   void initState() {
     super.initState();
+    if (_stored && widget.card.draft.isNotEmpty) {
+      _input.text = widget.card.draft;
+      _hasText = true;
+    }
     _input.addListener(() {
       final has = _input.text.trim().isNotEmpty;
       if (has != _hasText) setState(() => _hasText = has);
       if (has) _sayTyping();
+      _draftSave?.cancel();
+      _draftSave = Timer(const Duration(milliseconds: 600), _saveDraft);
     });
+    if (_stored) _loadPinned();
     if (widget.card.preloaded == null) _reload();
     final show = widget.showSeq;
     if (show != null) {
@@ -121,10 +139,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         if (_typing.isNotEmpty) setState(_typing.clear);
       }
     });
-    // Temp messages count down and disappear while the chat is open.
-    if (widget.card.temp) {
-      _tick = Timer.periodic(const Duration(seconds: 30), (_) => _reload());
-    }
+    // Temp and disappearing messages count down and go while the chat is open.
+    _tick = Timer.periodic(const Duration(seconds: 30), (_) {
+      final now = DateTime.now();
+      if (widget.card.temp || _messages.any((m) => m.expiresAt != null && !m.expiresAt!.isAfter(now))) _reload();
+    });
   }
 
   String get _key => widget.card.temp ? Notifier.tempKey(widget.card.id) : Notifier.chatKey(widget.card.id);
@@ -138,6 +157,10 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     _events?.cancel();
     _recordTick?.cancel();
     if (_recording) Background.recordCancel();
+    if (_draftSave?.isActive ?? false) {
+      _draftSave!.cancel();
+      _saveDraft();
+    }
     _input.dispose();
     _focus.dispose();
     _scroll.dispose();
@@ -173,7 +196,299 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       }
       if (!mounted) return;
       setState(() => _messages = messages);
+      if (_stored) await _loadPinned();
     } while (_reloadAgain);
+  }
+
+  Future<void> _loadPinned() async {
+    try {
+      final seq = await chatPinnedMessage(chatId: widget.card.id);
+      if (mounted && seq != _pinnedSeq) setState(() => _pinnedSeq = seq);
+    } catch (_) {}
+  }
+
+  /// Keeps the composer's words for next time (not while changing a sent
+  /// message: those words are already in the chat).
+  void _saveDraft() {
+    if (!_stored || _editing != null) return;
+    final text = _input.text;
+    if (text.trim() == widget.card.draft.trim()) return;
+    widget.card.draft = text.trim().isEmpty ? '' : text;
+    chatSetDraft(chatId: widget.card.id, text: text).ignore();
+  }
+
+  void _snack(String text) => ScaffoldMessenger.maybeOf(context)
+    ?..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(text)));
+
+  /// Pins [m] for everyone in the chat, or takes the pin away.
+  Future<void> _pin(ChatMessage? m) async {
+    HapticFeedback.selectionClick();
+    setState(() => _pinnedSeq = m?.seq);
+    try {
+      await messagePin(chatId: widget.card.id, seq: m?.seq);
+    } catch (_) {
+      _snack('That didn\'t work. Try again in a moment.');
+    }
+    await _loadPinned();
+  }
+
+  /// Sends a copy of [m] to the chats picked.
+  Future<void> _forward(ChatMessage m) async {
+    final chats = [
+      for (final c in await chatList())
+        if (c.active && !c.hidden && !(c.kind == ChatKindView.direct && c.waiting)) c
+    ];
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<List<int>>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => _ForwardSheet(chats: chats, accent: widget.card.sigil.look.accent.color),
+    );
+    if (picked == null || picked.isEmpty || !mounted) return;
+    HapticFeedback.lightImpact();
+    try {
+      await messageForward(from: widget.card.id, seq: m.seq!, to: Int64List.fromList(picked));
+      _snack(picked.length == 1 ? 'Forwarded' : 'Forwarded to ${picked.length} chats');
+    } catch (e) {
+      _snack(sendErrorText(e));
+    }
+    if (picked.contains(widget.card.id)) await _reload();
+  }
+
+  Future<void> _openOnce(ChatMessage m) async {
+    final media = m.media;
+    if (media == null || m.seq == null) return;
+    await openViewOnce(context, chatId: widget.card.id, seq: m.seq!, kind: media.kind, chatKey: _key);
+    await _reload();
+  }
+
+  /// Sends where the phone is now, after asking.
+  Future<void> _shareLocation() async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Share where you are?'),
+        content: Text(
+          widget.card.group
+              ? 'Everyone in ${widget.card.title} will see this spot. It\'s sent once; it doesn\'t follow you.'
+              : '${widget.card.title} will see this spot. It\'s sent once; it doesn\'t follow you.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(dialog, true), child: const Text('Share')),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    _snack('Finding where you are…');
+    final here = await Background.currentLocation();
+    if (!mounted) return;
+    if (here == null) {
+      _snack('Couldn\'t find where you are. Check that location is on and allowed for Sanctum.');
+      return;
+    }
+    ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+    HapticFeedback.lightImpact();
+    try {
+      await locationSend(chatId: widget.card.id, lat: here.lat, lon: here.lon);
+    } catch (e) {
+      _snack(sendErrorText(e));
+    }
+    await _reload();
+  }
+
+  /// Sends the composer's words later, at a time picked.
+  Future<void> _schedule() async {
+    final body = _input.text.trim();
+    if (body.isEmpty) {
+      _snack('Type the message first, then pick when it goes.');
+      _raiseKeyboard();
+      return;
+    }
+    final now = DateTime.now();
+    final day = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: now.add(const Duration(days: 365)),
+      helpText: 'Send on',
+    );
+    if (day == null || !mounted) return;
+    final soon = now.add(const Duration(minutes: 5));
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(soon),
+      helpText: 'Send at',
+    );
+    if (time == null || !mounted) return;
+    final at = DateTime(day.year, day.month, day.day, time.hour, time.minute);
+    if (!at.isAfter(DateTime.now())) {
+      _snack('Pick a time that hasn\'t passed yet.');
+      return;
+    }
+    try {
+      await messageSchedule(chatId: widget.card.id, body: body, at: at.millisecondsSinceEpoch ~/ 1000);
+    } catch (e) {
+      _snack(scheduleErrorText(e));
+      return;
+    }
+    HapticFeedback.lightImpact();
+    _input.clear();
+    _snack('It will go ${whenWords(at)}. Sanctum needs to be running then.');
+  }
+
+  /// Messages waiting to go later, each with a way to cancel it.
+  Future<void> _scheduledSheet() async {
+    final accent = widget.card.sigil.look.accent.color;
+    var waiting = await scheduledList(chatId: widget.card.id);
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, setSheet) => SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheet).height * 0.7),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+                  child: Text('Scheduled messages', style: AppText.title),
+                ),
+                if (waiting.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, Space.xl),
+                    child: Text(
+                      'Nothing waiting. Type a message, tap + and pick "Send later".',
+                      style: AppText.caption,
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        for (final w in waiting)
+                          ListTile(
+                            leading: Icon(Icons.schedule_send_rounded, color: accent),
+                            title: Text(w.body, maxLines: 2, overflow: TextOverflow.ellipsis),
+                            subtitle: Text(whenWords(DateTime.fromMillisecondsSinceEpoch(w.at * 1000))),
+                            trailing: IconButton(
+                              tooltip: 'Don\'t send',
+                              icon: const Icon(Icons.close_rounded),
+                              onPressed: () async {
+                                await scheduledCancel(id: w.id);
+                                final left = await scheduledList(chatId: widget.card.id);
+                                setSheet(() => waiting = left);
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _muteSheet() async {
+    final card = widget.card;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final until = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.xs),
+              child: Text(
+                'Messages still arrive and count as unread; the phone just stays quiet.',
+                style: AppText.caption,
+              ),
+            ),
+            for (final (label, seconds) in const [('For 1 hour', 3600), ('For 8 hours', 28800), ('For 1 week', 604800)])
+              ListTile(
+                leading: const Icon(Icons.notifications_paused_rounded),
+                title: Text(label),
+                onTap: () => Navigator.pop(sheet, now + seconds),
+              ),
+            ListTile(
+              leading: const Icon(Icons.notifications_off_rounded),
+              title: const Text('Until I turn it back on'),
+              onTap: () => Navigator.pop(sheet, mutedForever()),
+            ),
+            if (card.muted)
+              ListTile(
+                leading: const Icon(Icons.notifications_active_rounded),
+                title: const Text('Turn notifications back on'),
+                onTap: () => Navigator.pop(sheet, 0),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (until == null || !mounted) return;
+    HapticFeedback.selectionClick();
+    await chatSetMuted(chatId: card.id, until: until);
+    setState(() => card.mutedUntil = until);
+  }
+
+  Future<void> _disappearSheet() async {
+    final card = widget.card;
+    final seconds = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheet) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.xs),
+                child: Text('Disappearing messages', style: AppText.title),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+                child: Text(
+                  'New messages are deleted from every phone in this chat after the time you pick. '
+                  'Everyone sees the change.',
+                  style: AppText.caption,
+                ),
+              ),
+              for (final s in const [0, 3600, 28800, 86400, 604800, 7776000])
+                ListTile(
+                  leading: Icon(s == 0 ? Icons.timer_off_rounded : Icons.timer_rounded),
+                  title: Text(s == 0 ? 'Off' : disappearWords(seconds: s)),
+                  trailing: s == card.disappearSeconds
+                      ? Icon(Icons.check_rounded, color: card.sigil.look.accent.color)
+                      : null,
+                  onTap: () => Navigator.pop(sheet, s),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (seconds == null || seconds == card.disappearSeconds || !mounted) return;
+    HapticFeedback.selectionClick();
+    try {
+      await chatSetDisappear(chatId: card.id, seconds: seconds);
+      setState(() => card.disappearSeconds = seconds);
+    } catch (_) {
+      _snack('That didn\'t work. Try again in a moment.');
+    }
+    await _reload();
   }
 
   Future<void> _send() async {
@@ -182,6 +497,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     if (body.isEmpty) return;
     HapticFeedback.lightImpact();
     _input.clear();
+    _draftSave?.cancel();
+    _saveDraft();
     final replyTo = _replyTo;
     // Shown at once; the reload swaps in the stored copy.
     final now = DateTime.fromMillisecondsSinceEpoch(DateTime.now().millisecondsSinceEpoch ~/ 1000 * 1000);
@@ -449,7 +766,34 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   _startReply(m, fromSheet: true);
                 },
               ),
-            if (m.seq != null && m.media != null && m.media!.ready)
+            if (!m.fromMe && m.seq != null && m.viewOnce == ViewOnceView.waiting)
+              ListTile(
+                leading: const Icon(Icons.visibility_rounded),
+                title: const Text('Open once'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _openOnce(m);
+                },
+              ),
+            if (m.canForward && m.seq != null && _stored)
+              ListTile(
+                leading: const Icon(Icons.shortcut_rounded),
+                title: const Text('Forward'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _forward(m);
+                },
+              ),
+            if (m.seq != null && !m.isRecord && _stored && widget.card.active)
+              ListTile(
+                leading: Icon(_pinnedSeq == m.seq ? Icons.push_pin_outlined : Icons.push_pin_rounded),
+                title: Text(_pinnedSeq == m.seq ? 'Unpin' : 'Pin'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _pin(_pinnedSeq == m.seq ? null : m);
+                },
+              ),
+            if (m.seq != null && m.media != null && m.media!.ready && m.viewOnce == ViewOnceView.no)
               ListTile(
                 leading: const Icon(Icons.download_rounded),
                 title: const Text('Save to phone'),
@@ -458,7 +802,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   saveMediaToPhone(context, chatId: widget.card.id, seq: m.seq!, media: m.media!);
                 },
               ),
-            if (m.seq != null && m.canEdit)
+            if (m.seq != null && m.canEdit && m.viewOnce == ViewOnceView.no && m.place == null)
               ListTile(
                 leading: const Icon(Icons.edit_rounded),
                 title: Text(m.media == null ? 'Edit' : 'Edit caption'),
@@ -467,13 +811,14 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                   _startEdit(m);
                 },
               ),
-            if (!m.isRecord)
+            if (!m.isRecord && m.viewOnce == ViewOnceView.no && (m.body.isNotEmpty || m.place != null))
               ListTile(
                 leading: const Icon(Icons.copy_rounded),
                 title: const Text('Copy'),
                 onTap: () {
                   Navigator.pop(sheet);
-                  Clipboard.setData(ClipboardData(text: m.body));
+                  final place = m.place;
+                  Clipboard.setData(ClipboardData(text: place == null ? m.body : placeWords(place)));
                 },
               ),
             if (m.seq != null) ...[
@@ -519,6 +864,57 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     widget.close();
   }
 
+  void _menu(String choice) => switch (choice) {
+        'mute' => _muteSheet(),
+        'disappear' => _disappearSheet(),
+        'scheduled' => _scheduledSheet(),
+        _ => null,
+      };
+
+  Widget _pinnedBar(Color accent) {
+    final seq = _pinnedSeq!;
+    final m = _messages.where((m) => m.seq == seq).firstOrNull;
+    final text = m == null
+        ? 'Pinned message'
+        : m.place != null
+            ? 'Location'
+            : m.body.isNotEmpty
+                ? m.body
+                : m.media != null
+                    ? 'Attachment'
+                    : 'Pinned message';
+    return Material(
+      color: Palette.surface,
+      child: InkWell(
+        onTap: () => _reveal(seq),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(Space.lg, Space.xs, Space.xs, Space.xs),
+          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Palette.outline))),
+          child: Row(
+            children: [
+              Icon(Icons.push_pin_rounded, size: 16, color: accent),
+              const SizedBox(width: Space.sm),
+              Expanded(
+                child: Text(
+                  text.replaceAll('\n', ' '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.caption.copyWith(color: Palette.text),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Unpin',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.close_rounded, size: 18),
+                onPressed: () => _pin(null),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final sigil = widget.card.sigil;
@@ -550,7 +946,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                       widget.card.friend && !widget.card.temp && !widget.card.group ? () => _call(video: true) : null,
                   onWipe: widget.onWipe == null ? null : _doWipe,
                   onInfo: widget.onGroupInfo,
+                  onMenu: _stored && widget.card.active ? _menu : null,
                 ),
+                if (_pinnedSeq != null) _pinnedBar(accent),
                 Expanded(
                   child: AnimatedBuilder(
                     animation: _wipe,
@@ -645,6 +1043,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           onReact: _canReact(m) ? (e) => _react(m, e) : null,
           onChanged: _reload,
           onAlbumTap: _openAlbums,
+          onOpenOnce: () => _openOnce(m),
           chatId: widget.card.id,
           accent: accent,
           showTime: !grouped,
@@ -772,16 +1171,21 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       builder: (sheet) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(Space.md, 0, Space.md, Space.lg),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Wrap(
+            alignment: WrapAlignment.spaceEvenly,
+            spacing: Space.sm,
+            runSpacing: Space.md,
             children: [
-              for (final (key, icon, label) in const [
+              for (final (key, icon, label) in [
                 ('visual', Icons.photo_library_rounded, 'Gallery'),
                 ('camera', Icons.photo_camera_rounded, 'Camera'),
                 ('file', Icons.insert_drive_file_rounded, 'File'),
                 ('albums', Icons.photo_album_rounded, 'Album'),
                 ('poll', Icons.poll_rounded, 'Poll or plan'),
+                // Seen once, by one person: friends' chats only.
+                if (widget.card.friend && !widget.card.group) ('once', Icons.visibility_rounded, 'Open once'),
+                ('location', Icons.place_rounded, 'Location'),
+                ('schedule', Icons.schedule_send_rounded, 'Send later'),
               ])
                 _AttachButton(
                   icon: icon,
@@ -804,6 +1208,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       if (sent) await _reload();
       return;
     }
+    if (kind == 'location') return _shareLocation();
+    if (kind == 'schedule') return _schedule();
+    if (kind == 'once') return _sendOnce();
     final picked = kind == 'camera' ? await Background.capturePhoto() : await Background.pickMedia(kind);
     if (picked == null || !mounted) return;
     final caption = _input.text.trim();
@@ -819,6 +1226,34 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(sendErrorText(e))));
       }
+    }
+    await _reload();
+  }
+
+  /// A photo or video the friend can open once: no caption, no preview.
+  Future<void> _sendOnce() async {
+    final picked = await Background.pickMedia('visual');
+    if (picked == null || !mounted) return;
+    final kind = picked['kind'] == 'video' ? MediaKindView.video : MediaKindView.image;
+    final path = picked['path']! as String;
+    HapticFeedback.lightImpact();
+    try {
+      await viewOnceSend(
+        chatId: widget.card.id,
+        path: path,
+        kind: kind,
+        mime: picked['mime'] as String? ?? '',
+        name: picked['name'] as String? ?? '',
+        width: picked['width'] as int? ?? 0,
+        height: picked['height'] as int? ?? 0,
+        durationMs: picked['durationMs'] as int? ?? 0,
+      );
+    } catch (e) {
+      _snack(sendErrorText(e));
+    } finally {
+      try {
+        File(path).deleteSync();
+      } catch (_) {}
     }
     await _reload();
   }
@@ -1075,12 +1510,16 @@ class _Header extends StatelessWidget {
     this.onInfo,
     this.onCall,
     this.onVideoCall,
+    this.onMenu,
   });
 
   final ChatCard card;
   final VoidCallback onBack;
   final VoidCallback? onWipe;
   final VoidCallback? onInfo;
+
+  /// Mute, disappearing messages, scheduled messages.
+  final void Function(String)? onMenu;
 
   /// Friends' chats: a voice call, or a video call.
   final VoidCallback? onCall;
@@ -1110,7 +1549,21 @@ class _Header extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(card.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.heading),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(card.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.heading),
+                      ),
+                      if (card.disappearSeconds > 0) ...[
+                        const SizedBox(width: Space.xs),
+                        Icon(Icons.timer_rounded, size: 14, color: Palette.textMuted),
+                      ],
+                      if (card.muted) ...[
+                        const SizedBox(width: Space.xs),
+                        Icon(Icons.notifications_off_rounded, size: 14, color: Palette.textFaint),
+                      ],
+                    ],
+                  ),
                   const SizedBox(height: 2),
                   ValueListenableBuilder<Set<int>>(
                     valueListenable: NetBus.instance.online,
@@ -1168,6 +1621,26 @@ class _Header extends StatelessWidget {
               onPressed: onWipe,
               icon: const Icon(Icons.local_fire_department_rounded, color: Palette.danger, size: 18),
               label: const Text('Wipe', style: TextStyle(color: Palette.danger)),
+            ),
+          if (onMenu != null)
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              icon: const Icon(Icons.more_vert_rounded, size: 20),
+              onSelected: onMenu,
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'mute',
+                  child: Text(card.muted ? 'Notifications: off' : 'Mute notifications'),
+                ),
+                if (card.friend || card.group)
+                  PopupMenuItem(
+                    value: 'disappear',
+                    child: Text(card.disappearSeconds > 0
+                        ? 'Disappearing: ${disappearWords(seconds: card.disappearSeconds)}'
+                        : 'Disappearing messages'),
+                  ),
+                const PopupMenuItem(value: 'scheduled', child: Text('Scheduled messages')),
+              ],
             ),
         ],
       ),
@@ -1303,10 +1776,14 @@ class _Bubble extends StatefulWidget {
     this.onReact,
     this.onChanged,
     this.onAlbumTap,
+    this.onOpenOnce,
     required this.chatId,
   });
 
   final ChatMessage message;
+
+  /// A friend's photo or video that opens once was tapped.
+  final VoidCallback? onOpenOnce;
 
   /// For loading the message's attachment.
   final int chatId;
@@ -1353,6 +1830,7 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
 
   String _burnsIn(DateTime at) {
     final left = at.difference(DateTime.now());
+    if (left.inHours >= 48) return 'burns in ${left.inDays}d';
     if (left.inHours >= 1) return 'burns in ${left.inHours}h';
     return 'burns in ${left.inMinutes.clamp(0, 59)}m';
   }
@@ -1431,12 +1909,18 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
                 ),
               ),
             ),
-          if (m.media != null)
+          if (m.viewOnce != ViewOnceView.no)
+            _OnceContent(message: m, fg: fg, onOpen: widget.onOpenOnce)
+          else if (m.place != null)
+            _PlaceContent(place: m.place!, fg: fg)
+          else if (m.media != null)
             Padding(
               padding: EdgeInsets.only(bottom: m.body.isEmpty ? 0 : Space.xs),
               child: MediaContent(media: m.media!, chatId: widget.chatId, seq: m.seq, fg: fg),
             ),
-          if (m.poll != null)
+          if (m.viewOnce != ViewOnceView.no || m.place != null)
+            const SizedBox.shrink()
+          else if (m.poll != null)
             PollContent(
               poll: m.poll!,
               chatId: widget.chatId,
@@ -1538,6 +2022,202 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A place in plain numbers, and a button to open it in a maps app.
+String placeWords(PlaceView p) => '${p.lat.toStringAsFixed(5)}, ${p.lon.toStringAsFixed(5)}';
+
+/// When a scheduled message goes, in words: "today at 18:30", "on 12 Mar at 09:00".
+String whenWords(DateTime at) {
+  final now = DateTime.now();
+  final time = '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}';
+  final days = DateTime(at.year, at.month, at.day).difference(DateTime(now.year, now.month, now.day)).inDays;
+  if (days == 0) return 'today at $time';
+  if (days == 1) return 'tomorrow at $time';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  final year = at.year == now.year ? '' : ' ${at.year}';
+  return 'on ${at.day} ${months[at.month - 1]}$year at $time';
+}
+
+/// Scheduling refused, in plain words (the reasons come from the engine
+/// already worded for people).
+String scheduleErrorText(Object e) {
+  final text = e.toString();
+  for (final known in [
+    'Pick a time later today or in the coming year.',
+    'Too many messages are waiting to be sent.',
+    'A message can\'t be empty.',
+  ]) {
+    if (text.contains(known)) return known;
+  }
+  return 'That didn\'t work. Try again in a moment.';
+}
+
+class _PlaceContent extends StatelessWidget {
+  const _PlaceContent({required this.place, required this.fg});
+
+  final PlaceView place;
+  final Color fg;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: Space.xs),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.place_rounded, color: fg, size: 22),
+              const SizedBox(width: Space.xs),
+              Text('Location', style: AppText.bodyStrong.copyWith(color: fg)),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(placeWords(place), style: AppText.mono.copyWith(color: fg.withValues(alpha: 0.8), fontSize: 12)),
+          const SizedBox(height: Space.xs),
+          OutlinedButton.icon(
+            onPressed: () async {
+              if (!await Background.openMap(place.lat, place.lon) && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('There\'s no maps app on this phone to open it with.')),
+                );
+              }
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: fg,
+              side: BorderSide(color: fg.withValues(alpha: 0.5)),
+              visualDensity: VisualDensity.compact,
+            ),
+            icon: const Icon(Icons.map_rounded, size: 16),
+            label: const Text('Open in maps app'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A photo or video that opens once: no preview, just what it is and
+/// whether it's been opened.
+class _OnceContent extends StatelessWidget {
+  const _OnceContent({required this.message, required this.fg, this.onOpen});
+
+  final ChatMessage message;
+  final Color fg;
+  final VoidCallback? onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = message;
+    final video = m.media?.kind == MediaKindView.video;
+    final what = video ? 'Video' : 'Photo';
+    final opened = m.viewOnce == ViewOnceView.opened;
+    final ready = m.media?.ready ?? false;
+    final canOpen = !m.fromMe && !opened && ready;
+    final label = opened
+        ? 'Opened'
+        : m.fromMe
+            ? '$what · opens once'
+            : ready
+                ? 'Tap to open $what'.replaceFirst('Photo', 'photo').replaceFirst('Video', 'video')
+                : 'Getting the ${what.toLowerCase()}…';
+    return GestureDetector(
+      onTap: canOpen ? onOpen : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: fg.withValues(alpha: opened ? 0.3 : 0.8), width: 1.5),
+              ),
+              child: Center(
+                child: opened
+                    ? Icon(Icons.done_rounded, size: 16, color: fg.withValues(alpha: 0.5))
+                    : Text('1', style: AppText.bodyStrong.copyWith(color: fg, fontSize: 14)),
+              ),
+            ),
+            const SizedBox(width: Space.sm),
+            Text(
+              label,
+              style:
+                  (canOpen ? AppText.bodyStrong : AppText.body).copyWith(color: fg.withValues(alpha: opened ? 0.6 : 1)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Picks the chats to forward a message to.
+class _ForwardSheet extends StatefulWidget {
+  const _ForwardSheet({required this.chats, required this.accent});
+
+  final List<StoredChat> chats;
+  final Color accent;
+
+  @override
+  State<_ForwardSheet> createState() => _ForwardSheetState();
+}
+
+class _ForwardSheetState extends State<_ForwardSheet> {
+  final _picked = <int>{};
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.75),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.lg, 0, Space.lg, Space.sm),
+              child: Text('Forward to', style: AppText.title),
+            ),
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                children: [
+                  for (final c in widget.chats)
+                    CheckboxListTile(
+                      value: _picked.contains(c.id),
+                      activeColor: widget.accent,
+                      secondary: Icon(switch (c.kind) {
+                        ChatKindView.group => Icons.groups_rounded,
+                        ChatKindView.notes => Icons.sticky_note_2_rounded,
+                        ChatKindView.direct => Icons.person_rounded,
+                      }),
+                      title: Text(c.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      onChanged: (on) => setState(() => on == true ? _picked.add(c.id) : _picked.remove(c.id)),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, Space.md),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _picked.isEmpty ? null : () => Navigator.pop(context, _picked.toList()),
+                  child: Text(_picked.length > 1 ? 'Send to ${_picked.length} chats' : 'Send'),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

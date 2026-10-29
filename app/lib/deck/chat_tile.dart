@@ -18,7 +18,7 @@ class ChatTile extends StatelessWidget {
 
   final ChatCard card;
 
-  static const height = 78.0;
+  static const height = 70.0;
 
   @override
   Widget build(BuildContext context) {
@@ -126,22 +126,40 @@ class _Text extends StatelessWidget {
             Flexible(
               child: Text(card.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.heading),
             ),
+            if (card.muted) ...[
+              const SizedBox(width: Space.xs),
+              Icon(Icons.notifications_off_rounded, size: 13, color: Palette.textFaint, semanticLabel: 'Muted'),
+            ],
           ],
         ),
-        const SizedBox(height: 3),
-        Text(
-          card.preview ?? (card.temp ? 'Burns 24h after sending' : 'No messages yet'),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: AppText.caption.copyWith(
-            color: card.preview == null
-                ? Palette.textFaint
-                : unread
-                    ? Palette.text
-                    : Palette.textMuted,
-            fontWeight: unread ? FontWeight.w700 : null,
+        const SizedBox(height: 2),
+        if (card.draft.trim().isNotEmpty && !unread)
+          Text.rich(
+            TextSpan(children: [
+              TextSpan(
+                text: 'Draft: ',
+                style: TextStyle(color: card.sigil.look.accent.color, fontWeight: FontWeight.w600),
+              ),
+              TextSpan(text: card.draft.trim().replaceAll('\n', ' ')),
+            ]),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.caption.copyWith(color: Palette.textMuted),
+          )
+        else
+          Text(
+            card.preview ?? (card.temp ? 'Burns 24h after sending' : 'No messages yet'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.caption.copyWith(
+              color: card.preview == null
+                  ? Palette.textFaint
+                  : unread
+                      ? Palette.text
+                      : Palette.textMuted,
+              fontWeight: unread ? FontWeight.w700 : null,
+            ),
           ),
-        ),
       ],
     );
   }
