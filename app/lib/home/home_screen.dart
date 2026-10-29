@@ -722,9 +722,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                       ),
                       const SizedBox(width: Space.md),
-                      // Shrinks first on a narrow screen.
-                      const Flexible(flex: 100, child: _NetPill()),
-                      const Spacer(),
+                      // Takes the free space, so the buttons stay at the right edge;
+                      // the pill shrinks first on a narrow screen.
+                      const Expanded(child: Align(alignment: Alignment.centerLeft, child: _NetPill())),
                       AnimatedSwitcher(
                         duration: Motion.fast,
                         child: _onTemp && _temp.isNotEmpty
