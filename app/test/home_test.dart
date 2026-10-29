@@ -8,6 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanctum/home/home_screen.dart';
+import 'package:sanctum/net/net_bus.dart';
 import 'package:sanctum/theme/appearance.dart';
 import 'package:sanctum/src/rust/api/identity.dart';
 import 'package:sanctum/src/rust/api/sigil.dart';
@@ -167,6 +168,13 @@ void main() {
     await tester.tap(find.text('Chats'));
     await settle(tester);
     await shot(tester, '1-chats');
+    // Connected: no pill, just a dot on your sigil.
+    NetBus.instance.status.value = const NetInfo(status: NetStatus.online, progress: 100, detail: '');
+    await settle(tester);
+    expect(find.text('Offline'), findsNothing);
+    await shot(tester, '1-chats-online');
+    NetBus.instance.status.value = const NetInfo(status: NetStatus.off, progress: 0, detail: '');
+    await settle(tester);
 
     // Add a friend: the screen shows our code and a way to read theirs.
     await tester.tap(find.text('New chat'));

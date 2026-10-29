@@ -315,6 +315,7 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 - **Sigils** are drawn once into GPU images and cached (LRU); lists and the slowly turning chat/lock backdrops only move those images, so nothing is re-drawn per frame.
 - **Emblems** (`app/lib/sigil/emblem.dart`): a friend's sigil is round; a group's is a rounded square with a small people badge, in the list and the chat header. A gold ring marks a friend with a moment you haven't seen. In groups, each person's name above their messages has its own colour (picked from their name), and the list preview says who wrote last ("Asha: …").
 - **The door:** a small gold door from the logo sits beside "Sanctum" (`app/lib/home/sanctum_door.dart`, drawn from the same shapes as `docs/brand/`). Tapping swings it open; seven quick taps open it wide onto a card with how long you've been here, your friends and groups (not hidden ones), and "0 servers · 0 ads · 0 trackers". Long-press still reveals hidden chats.
+- **Connection status:** while connected, a green dot on your own sigil (top right) is all there is. A pill beside the name appears only while connecting ("Connecting 40%") or offline (tap to retry), so the bar stays light most of the time.
 - **Opening a chat:** messages load first, then the page fades and settles up while the chat's emblem flies from the card into the header (Hero). The backdrop sigil fades in after the transition.
 
 ## Roadmap

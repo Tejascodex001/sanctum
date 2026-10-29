@@ -748,15 +748,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         message: 'Settings',
                         child: GestureDetector(
                           onTap: _showMe,
-                          child: Container(
-                            width: 38,
-                            height: 38,
-                            padding: const EdgeInsets.all(1.5),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(color: widget.mySigil.look.accent.color.withValues(alpha: 0.6)),
-                            ),
-                            child: ClipOval(child: SigilView(spec: widget.mySigil)),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Container(
+                                width: 38,
+                                height: 38,
+                                padding: const EdgeInsets.all(1.5),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: widget.mySigil.look.accent.color.withValues(alpha: 0.6)),
+                                ),
+                                child: ClipOval(child: SigilView(spec: widget.mySigil)),
+                              ),
+                              const Positioned(right: -1, bottom: -1, child: _OnlineDot()),
+                            ],
                           ),
                         ),
                       ),
@@ -1016,7 +1022,36 @@ class _Empty extends StatelessWidget {
   }
 }
 
-/// Tor connection status, beside the wordmark.
+const _online = Color(0xFF3DDC97);
+
+/// A small green dot on your sigil while you're connected.
+class _OnlineDot extends StatelessWidget {
+  const _OnlineDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<NetInfo>(
+      valueListenable: NetBus.instance.status,
+      builder: (context, net, _) => AnimatedScale(
+        duration: Motion.medium,
+        curve: Motion.decelerate,
+        scale: net.status == NetStatus.online ? 1 : 0,
+        child: Container(
+          width: 12,
+          height: 12,
+          decoration: BoxDecoration(
+            color: _online,
+            shape: BoxShape.circle,
+            border: Border.all(color: Palette.bg, width: 2),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Connection status beside the wordmark, shown only while not connected
+/// (connecting, or offline with a retry).
 class _NetPill extends StatelessWidget {
   const _NetPill();
 
@@ -1025,8 +1060,10 @@ class _NetPill extends StatelessWidget {
     return ValueListenableBuilder<NetInfo>(
       valueListenable: NetBus.instance.status,
       builder: (context, net, _) {
+        // Online is the usual state: then only the dot on your sigil says so.
+        if (net.status == NetStatus.online) return const SizedBox.shrink();
         final (color, label) = switch (net.status) {
-          NetStatus.online => (const Color(0xFF3DDC97), 'Online'),
+          NetStatus.online => (_online, 'Online'),
           NetStatus.connecting => (const Color(0xFFFFC145), 'Connecting ${net.progress}%'),
           NetStatus.failed => (Palette.danger, 'Offline · retry'),
           NetStatus.off => (Palette.textFaint, 'Offline'),
