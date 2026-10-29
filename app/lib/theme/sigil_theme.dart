@@ -23,13 +23,13 @@ ThemeData sanctumTheme({Color accent = const Color(0xFF8B7CFF)}) {
     error: Palette.danger,
   );
   final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(Radii.md));
-  const buttonText = TextStyle(fontFamily: 'Inter', fontSize: 15, fontWeight: FontWeight.w600);
+  const buttonText = TextStyle(fontFamily: 'Figtree', fontSize: 15, fontWeight: FontWeight.w600);
 
   return ThemeData(
     useMaterial3: true,
     brightness: brightness,
     colorScheme: scheme,
-    fontFamily: 'Inter',
+    fontFamily: 'Figtree',
     scaffoldBackgroundColor: Palette.bg,
     splashFactory: InkSparkle.splashFactory,
     textTheme: TextTheme(

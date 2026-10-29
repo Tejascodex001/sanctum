@@ -75,19 +75,20 @@ abstract final class Palette {
 }
 
 abstract final class AppText {
-  static const _display = 'SpaceGrotesk';
-  static const _body = 'Inter';
+  // One warm, rounded family for everything but codes.
+  static const _display = 'Figtree';
+  static const _body = 'Figtree';
   static const _mono = 'JetBrainsMono';
 
   static const display =
-      TextStyle(fontFamily: _display, fontSize: 28, fontWeight: FontWeight.w700, letterSpacing: -0.6, height: 1.1);
-  static const title = TextStyle(fontFamily: _display, fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.3);
+      TextStyle(fontFamily: _display, fontSize: 30, fontWeight: FontWeight.w800, letterSpacing: -0.9, height: 1.1);
+  static const title = TextStyle(fontFamily: _display, fontSize: 21, fontWeight: FontWeight.w800, letterSpacing: -0.5);
   static const heading =
-      TextStyle(fontFamily: _display, fontSize: 17, fontWeight: FontWeight.w500, letterSpacing: -0.2);
-  static const body = TextStyle(fontFamily: _body, fontSize: 15.5, fontWeight: FontWeight.w400, height: 1.35);
+      TextStyle(fontFamily: _display, fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: -0.2);
+  static const body = TextStyle(fontFamily: _body, fontSize: 16, fontWeight: FontWeight.w400, height: 1.35);
   static const bodyStrong = TextStyle(fontFamily: _body, fontSize: 15, fontWeight: FontWeight.w600);
   static TextStyle get caption =>
-      TextStyle(fontFamily: _body, fontSize: 13, fontWeight: FontWeight.w400, color: Palette.textMuted);
+      TextStyle(fontFamily: _body, fontSize: 13.5, fontWeight: FontWeight.w500, color: Palette.textMuted);
   static TextStyle get micro =>
       TextStyle(fontFamily: _body, fontSize: 11.5, fontWeight: FontWeight.w500, color: Palette.textFaint);
   static TextStyle get overline => TextStyle(

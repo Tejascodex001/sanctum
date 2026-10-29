@@ -90,6 +90,7 @@ Each release is told apart by its build number.
 | ✅ | **Edit messages** | Hold your message and pick Edit to fix its words or a caption, within 15 minutes of sending (notes any time). Everyone sees the new words, marked "edited". Friends' chats and groups |
 | ✅ | **Typing** | "Asha is typing…" in friends' chats and groups. Sent only while you're both connected, never stored, and never what you type |
 | ✅ | **Settings** | Tap your sigil: your name, light or dark theme (or like the phone), accent colour (your sigil's or your pick), lock, staying connected, nearby, updates and panic wipe |
+| ✅ | **The look** | One bold, rounded font throughout. A chat with new messages glows in its own colour and pulses when another arrives. Pull down on Chats or Friends and the Sanctum door opens to check for news |
 | ✅ | **Search** | Type in the home search box to find any message, poll, plan or file name across your chats. Done on the phone; hidden chats only while revealed |
 | ✅ | **Catch-up** | "While you were away": who wrote, who mentioned you, plans to answer and polls waiting for you |
 

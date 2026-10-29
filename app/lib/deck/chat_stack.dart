@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../home/sanctum_door.dart';
 import '../sigil/sigil_painter.dart';
 import '../theme/tokens.dart';
 import 'chat_card.dart';
@@ -33,7 +34,7 @@ class ChatStack extends StatefulWidget {
   final String query;
   final Widget empty;
 
-  /// Pull down to refresh, as in Slack or Instagram.
+  /// Pull down to refresh: the door opens.
   final Future<void> Function()? onRefresh;
 
   @override
@@ -48,10 +49,7 @@ class _ChatStackState extends State<ChatStack> {
     final q = widget.query.trim().toLowerCase();
     final list = [
       for (final c in widget.cards)
-        if (q.isEmpty ||
-            c.title.toLowerCase().contains(q) ||
-            (c.preview?.toLowerCase().contains(q) ?? false))
-          c,
+        if (q.isEmpty || c.title.toLowerCase().contains(q) || (c.preview?.toLowerCase().contains(q) ?? false)) c,
     ];
     list.sort((a, b) {
       if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
@@ -64,12 +62,7 @@ class _ChatStackState extends State<ChatStack> {
   Widget build(BuildContext context) {
     final list = _list();
     if (widget.onRefresh == null) return list;
-    return RefreshIndicator(
-      onRefresh: widget.onRefresh!,
-      color: Theme.of(context).colorScheme.primary,
-      backgroundColor: Palette.surfaceHigh,
-      child: list,
-    );
+    return DoorRefresh(onRefresh: widget.onRefresh!, child: list);
   }
 
   static const _physics = AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics());
@@ -116,9 +109,7 @@ class _ChatStackState extends State<ChatStack> {
           );
         }
         item = Padding(padding: const EdgeInsets.only(bottom: Space.sm), child: item);
-        return animate
-            ? _Entrance(key: ValueKey('in-${card.id}'), delay: i.clamp(0, 10) * 45, child: item)
-            : item;
+        return animate ? _Entrance(key: ValueKey('in-${card.id}'), delay: i.clamp(0, 10) * 45, child: item) : item;
       },
     );
   }

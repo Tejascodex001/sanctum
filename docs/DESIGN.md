@@ -37,7 +37,7 @@ Rust core (sanctum-core)
   - The user can grant a battery-optimization exemption for phones with aggressive battery savers.
 - **Notifications** are posted natively on the phone, never through Google or any push service. Every message gets one, while the app is open too, except in the chat on screen. In groups they say who wrote.
   - They say who wrote and how many messages ("3 new messages"), never what. On the lock screen even the name is hidden ("New message").
-  - Tapping one opens that chat. Chat cards show unread badges.
+  - Tapping one opens that chat. Chat cards show unread badges, and the emblem of a chat with new messages glows in its colour; each new message sends a ripple out and bounces it once. Pull to refresh shows the door from the logo instead of a spinner: it opens as you pull, clicks when you have pulled far enough, and glows while it works.
   - Rust emits a separate `Message` event for an incoming message, so a delivery receipt never notifies.
 - **Tor startup** reports bootstrap progress to the UI, gives up after 3 minutes, and turns any crash into a visible failure with a retry. rustls uses the `ring` crypto backend.
 - **Outbox:** sealed on disk, resent on every connection and every 30 s until acknowledged; receivers recognise resends after a lost ack. Acks mark messages delivered (✓ sent, ✓✓ delivered).
@@ -308,7 +308,7 @@ On the phone, over the sealed store (`core/src/recall.rs`). Nothing is indexed i
 
 ## UI: Sigil design system
 Flutter with **Material 3** as the foundation (accessibility, text input, platform behaviour such as predictive back), restyled with our own tokens in `app/lib/theme/tokens.dart`; screens use only these.
-- **Type:** Space Grotesk (headings), Inter (text), JetBrains Mono (codes, safety numbers). Bundled in the app (OFL 1.1), never fetched at runtime.
+- **Type:** Figtree for headings and text (heavy, tight headings; warm, rounded text), JetBrains Mono (codes, safety numbers). Bundled in the app (OFL 1.1), never fetched at runtime.
 - **Colour:** neutral near-black surfaces; each chat's sigil accent is the only strong colour (your bubbles, focus, highlights).
 - **Shape and space:** 4-pt spacing scale, radii 12/16/22/28, hairline borders instead of shadows.
 - **Motion:** Material 3 emphasized curves; 160/280/420 ms. Only opacity and transforms animate.

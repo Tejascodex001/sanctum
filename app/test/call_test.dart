@@ -31,8 +31,9 @@ Future<void> _loadFonts() async {
     await loader.load();
   }
 
-  await load('Inter', ['assets/fonts/Inter-400.ttf', 'assets/fonts/Inter-500.ttf', 'assets/fonts/Inter-600.ttf']);
-  await load('SpaceGrotesk', ['assets/fonts/SpaceGrotesk-500.ttf', 'assets/fonts/SpaceGrotesk-700.ttf']);
+  await load('Figtree', [
+    for (final w in [400, 500, 600, 700, 800]) 'assets/fonts/Figtree-$w.ttf'
+  ]);
   final icons =
       '${Platform.environment['FLUTTER_ROOT'] ?? '/opt/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf';
   await load('MaterialIcons', [icons]);

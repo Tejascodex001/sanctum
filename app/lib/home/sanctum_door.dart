@@ -250,3 +250,123 @@ class _SanctuaryState extends State<_Sanctuary> with SingleTickerProviderStateMi
     );
   }
 }
+
+/// Pull down to refresh, with the door from the logo instead of a spinner:
+/// it opens as you pull, clicks when you've pulled far enough, glows while
+/// the refresh runs, and shuts as it slips away. [child] must scroll with
+/// bouncing physics, so pulling reveals the space above the list.
+class DoorRefresh extends StatefulWidget {
+  const DoorRefresh({super.key, required this.onRefresh, required this.child});
+
+  final Future<void> Function() onRefresh;
+  final Widget child;
+
+  @override
+  State<DoorRefresh> createState() => _DoorRefreshState();
+}
+
+class _DoorRefreshState extends State<DoorRefresh> with TickerProviderStateMixin {
+  /// How far to pull for the door to open fully and the refresh to start.
+  static const _reach = 80.0;
+
+  /// The room kept above the list while refreshing.
+  static const _room = 64.0;
+  static const _door = Size(36, 41);
+
+  double _over = 0;
+  bool _armed = false;
+  bool _busy = false;
+  late final _glow = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+  late final _hold = AnimationController(vsync: this, duration: Motion.medium);
+
+  @override
+  void dispose() {
+    _glow.dispose();
+    _hold.dispose();
+    super.dispose();
+  }
+
+  bool _onScroll(ScrollNotification n) {
+    if (n.depth != 0 || n.metrics.axis != Axis.vertical) return false;
+    final over = math.max(0.0, n.metrics.minScrollExtent - n.metrics.pixels);
+    if (over != _over) setState(() => _over = over);
+    if (_busy) return false;
+    final dragging = n is ScrollUpdateNotification && n.dragDetails != null;
+    if (dragging) {
+      if (!_armed && over >= _reach) {
+        _armed = true;
+        HapticFeedback.mediumImpact();
+      } else if (_armed && over < _reach * 0.75) {
+        _armed = false;
+      }
+    } else if (_armed && (n is ScrollUpdateNotification || n is ScrollEndNotification)) {
+      _start();
+    }
+    return false;
+  }
+
+  Future<void> _start() async {
+    setState(() {
+      _armed = false;
+      _busy = true;
+    });
+    _hold.forward();
+    _glow.repeat(reverse: true);
+    try {
+      await widget.onRefresh();
+    } finally {
+      if (mounted) {
+        _glow.stop();
+        setState(() => _busy = false);
+        await _hold.reverse();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final list = NotificationListener<ScrollNotification>(onNotification: _onScroll, child: widget.child);
+    return AnimatedBuilder(
+      animation: Listenable.merge([_glow, _hold]),
+      child: list,
+      builder: (context, child) {
+        final hold = Curves.easeOutCubic.transform(_hold.value);
+        final pull = (_over / _reach).clamp(0.0, 1.0);
+        final open = _busy ? 1.0 : math.max(pull, hold);
+        final shown = math.max(pull, hold);
+        // Centred in whatever space has opened above the list.
+        final room = math.max(_over, hold * _room);
+        return Stack(
+          children: [
+            Padding(padding: EdgeInsets.only(top: hold * _room), child: child),
+            if (shown > 0)
+              Positioned(
+                top: math.max(2.0, (room - _door.height) / 2),
+                left: 0,
+                right: 0,
+                child: IgnorePointer(
+                  child: Center(
+                    child: Opacity(
+                      opacity: shown,
+                      child: Transform.scale(
+                        scale: 0.6 + 0.4 * shown,
+                        child: CustomPaint(
+                          size: _door,
+                          painter: DoorPainter(
+                            open: open,
+                            glow: _busy ? 0.45 + 0.55 * _glow.value : open * 0.8,
+                            gold: Palette.gold,
+                            leaf: Palette.bg,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}

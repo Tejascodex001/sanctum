@@ -290,7 +290,8 @@ class _AddFriendScreenState extends State<AddFriendScreen> {
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   hintText: 'or type / paste their code',
-                  suffixIcon: IconButton(tooltip: 'Paste', icon: const Icon(Icons.content_paste_rounded), onPressed: _paste),
+                  suffixIcon:
+                      IconButton(tooltip: 'Paste', icon: const Icon(Icons.content_paste_rounded), onPressed: _paste),
                 ),
               ),
               const SizedBox(height: 10),
@@ -417,7 +418,7 @@ class _SigilEquation extends StatelessWidget {
             Text(label, style: AppText.micro, maxLines: 1, overflow: TextOverflow.ellipsis),
           ],
         );
-    final op = TextStyle(fontFamily: 'SpaceGrotesk', fontSize: 22, color: Palette.textFaint);
+    final op = TextStyle(fontFamily: 'Figtree', fontSize: 22, fontWeight: FontWeight.w700, color: Palette.textFaint);
     return Column(
       children: [
         Row(
@@ -435,7 +436,8 @@ class _SigilEquation extends StatelessWidget {
           0.75,
           Column(
             children: [
-              SizedBox.square(dimension: 170, child: ClipOval(child: LivingSigil(spec: shared, period: 40, exact: true))),
+              SizedBox.square(
+                  dimension: 170, child: ClipOval(child: LivingSigil(spec: shared, period: 40, exact: true))),
               const SizedBox(height: 8),
               Text('YOUR CHAT\'S SIGIL', style: AppText.overline),
             ],

@@ -7,8 +7,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sanctum/deck/chat_tile.dart';
 import 'package:sanctum/home/home_screen.dart';
 import 'package:sanctum/net/net_bus.dart';
+import 'package:sanctum/notify/notifier.dart';
 import 'package:sanctum/theme/appearance.dart';
 import 'package:sanctum/src/rust/api/identity.dart';
 import 'package:sanctum/src/rust/api/sigil.dart';
@@ -41,8 +43,9 @@ Future<void> loadFonts() async {
     await loader.load();
   }
 
-  await load('Inter', ['assets/fonts/Inter-400.ttf', 'assets/fonts/Inter-500.ttf', 'assets/fonts/Inter-600.ttf']);
-  await load('SpaceGrotesk', ['assets/fonts/SpaceGrotesk-500.ttf', 'assets/fonts/SpaceGrotesk-700.ttf']);
+  await load('Figtree', [
+    for (final w in [400, 500, 600, 700, 800]) 'assets/fonts/Figtree-$w.ttf'
+  ]);
   await load('JetBrainsMono', ['assets/fonts/JetBrainsMono-500.ttf']);
   final icons =
       '${Platform.environment['FLUTTER_ROOT'] ?? '/opt/flutter'}/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf';
@@ -175,6 +178,29 @@ void main() {
     await shot(tester, '1-chats-online');
     NetBus.instance.status.value = const NetInfo(status: NetStatus.off, progress: 0, detail: '');
     await settle(tester);
+
+    // New messages: the emblem glows, and a new one sends a ripple out.
+    final notes = tester.widget<ChatTile>(find.byType(ChatTile).first).card;
+    Notifier.instance.unread.value = {Notifier.chatKey(notes.id): 1};
+    await settle(tester);
+    Notifier.instance.unread.value = {Notifier.chatKey(notes.id): 2};
+    await tester.pump(const Duration(milliseconds: 250));
+    await shot(tester, '1-chats-new');
+    await settle(tester);
+    Notifier.instance.unread.value = const {};
+    await settle(tester);
+
+    // Pull to refresh: the door opens as you pull.
+    final pull = await tester.startGesture(tester.getCenter(find.byType(ChatTile).first));
+    for (var i = 0; i < 12; i++) {
+      await pull.moveBy(const Offset(0, 30));
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await shot(tester, '1-chats-pull');
+    await pull.up();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(CustomPaint), findsWidgets);
+    await settle(tester, 14);
 
     // Add a friend: the screen shows our code and a way to read theirs.
     await tester.tap(find.text('New chat'));

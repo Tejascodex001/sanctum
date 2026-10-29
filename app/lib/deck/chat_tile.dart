@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../moments/moments.dart';
@@ -45,21 +47,32 @@ class ChatTile extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: Space.lg),
-            child: Row(
-              children: [
-                Stack(
-                  clipBehavior: Clip.none,
+            child: ValueListenableBuilder<Map<String, int>>(
+              valueListenable: Notifier.instance.unread,
+              builder: (context, unread, _) {
+                final n = unread[card.temp ? Notifier.tempKey(card.id) : Notifier.chatKey(card.id)] ?? 0;
+                return Row(
                   children: [
-                    Hero(tag: 'emblem-${card.id}', child: _Emblem(card: card)),
-                    if (card.friendChatId != null)
-                      Positioned(right: 0, bottom: 0, child: OnlineDot(chatId: card.friendChatId!)),
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        UnreadGlow(
+                          count: n,
+                          color: card.sigil.look.accent.color,
+                          square: card.group,
+                          child: Hero(tag: 'emblem-${card.id}', child: _Emblem(card: card)),
+                        ),
+                        if (card.friendChatId != null)
+                          Positioned(right: 0, bottom: 0, child: OnlineDot(chatId: card.friendChatId!)),
+                      ],
+                    ),
+                    const SizedBox(width: Space.md),
+                    Expanded(child: _Text(card: card, unread: n > 0)),
+                    const SizedBox(width: Space.sm),
+                    _Trailing(card: card),
                   ],
-                ),
-                const SizedBox(width: Space.md),
-                Expanded(child: _Text(card: card)),
-                const SizedBox(width: Space.sm),
-                _Trailing(card: card),
-              ],
+                );
+              },
             ),
           ),
         ],
@@ -87,9 +100,12 @@ class _Emblem extends StatelessWidget {
 }
 
 class _Text extends StatelessWidget {
-  const _Text({required this.card});
+  const _Text({required this.card, required this.unread});
 
   final ChatCard card;
+
+  /// New messages wait: the last one reads brighter and bolder.
+  final bool unread;
 
   @override
   Widget build(BuildContext context) {
@@ -117,7 +133,14 @@ class _Text extends StatelessWidget {
           card.preview ?? (card.temp ? 'Burns 24h after sending' : 'No messages yet'),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: AppText.caption.copyWith(color: card.preview == null ? Palette.textFaint : Palette.textMuted),
+          style: AppText.caption.copyWith(
+            color: card.preview == null
+                ? Palette.textFaint
+                : unread
+                    ? Palette.text
+                    : Palette.textMuted,
+            fontWeight: unread ? FontWeight.w700 : null,
+          ),
         ),
       ],
     );
@@ -235,6 +258,90 @@ class OnlineDot extends StatelessWidget {
             border: Border.all(color: Palette.bg, width: 2),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// New messages: a soft glow in the chat's colour stays behind the emblem
+/// while any wait, and each new one sends a ripple out and makes the emblem
+/// bounce once. Nothing animates while the count stays the same.
+class UnreadGlow extends StatefulWidget {
+  const UnreadGlow({super.key, required this.count, required this.color, this.square = false, required this.child});
+
+  final int count;
+  final Color color;
+
+  /// Groups have rounded-square emblems.
+  final bool square;
+  final Widget child;
+
+  @override
+  State<UnreadGlow> createState() => _UnreadGlowState();
+}
+
+class _UnreadGlowState extends State<UnreadGlow> with SingleTickerProviderStateMixin {
+  late final _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 900));
+
+  @override
+  void didUpdateWidget(UnreadGlow old) {
+    super.didUpdateWidget(old);
+    if (widget.count > old.count) _pulse.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final on = widget.count > 0;
+    final shape = widget.square ? BoxShape.rectangle : BoxShape.circle;
+    final radius = widget.square ? BorderRadius.circular(14) : null;
+    return AnimatedContainer(
+      duration: Motion.slow,
+      curve: Motion.emphasized,
+      decoration: BoxDecoration(
+        shape: shape,
+        borderRadius: radius,
+        boxShadow: [
+          BoxShadow(
+            color: widget.color.withValues(alpha: on ? 0.55 : 0),
+            blurRadius: on ? 18 : 0,
+            spreadRadius: on ? 1 : 0,
+          ),
+        ],
+      ),
+      child: AnimatedBuilder(
+        animation: _pulse,
+        child: widget.child,
+        builder: (context, child) {
+          // The same tree every frame, so the emblem is never rebuilt.
+          final t = _pulse.isAnimating ? _pulse.value : 1.0;
+          final bounce = 1 + 0.14 * math.sin(math.pi * Curves.easeOut.transform((t / 0.45).clamp(0.0, 1.0)));
+          final ripple = Curves.easeOutCubic.transform(t);
+          return Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              Positioned.fill(
+                child: Transform.scale(
+                  scale: 1 + 0.7 * ripple,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: shape,
+                      borderRadius: radius,
+                      border: Border.all(color: widget.color.withValues(alpha: 0.8 * (1 - ripple)), width: 2),
+                    ),
+                  ),
+                ),
+              ),
+              Transform.scale(scale: bounce, child: child),
+            ],
+          );
+        },
       ),
     );
   }

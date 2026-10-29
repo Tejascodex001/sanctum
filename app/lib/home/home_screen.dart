@@ -129,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _loadChats(),
       _loadTemp(),
       _loadRequests(),
-      // Long enough to see the spinner, and for a link or two to come up.
+      // Long enough to see the door glow, and for a link or two to come up.
       Future<void>.delayed(const Duration(milliseconds: 700)),
     ]);
     await NetBus.instance.refreshOnline();
@@ -1411,10 +1411,8 @@ class _FriendsPage extends StatelessWidget {
       for (final c in this.waiting)
         if (_matches(c.title)) c,
     ];
-    return RefreshIndicator(
+    return DoorRefresh(
       onRefresh: onRefresh,
-      color: Theme.of(context).colorScheme.primary,
-      backgroundColor: Palette.surfaceHigh,
       child: ValueListenableBuilder<Set<int>>(
         valueListenable: NetBus.instance.online,
         builder: (context, online, _) {
