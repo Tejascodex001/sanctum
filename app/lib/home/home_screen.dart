@@ -15,6 +15,7 @@ import '../background/background.dart';
 import '../identity/secrets.dart';
 import '../moments/moments.dart';
 import 'recall_views.dart';
+import 'empty_art.dart';
 import 'sanctum_door.dart';
 import '../app_visible.dart';
 import '../net/net_bus.dart';
@@ -65,6 +66,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// The search field is open (from the search button).
   bool _searching = false;
+
+  /// Your name, for the greeting.
+  String _name = '';
   Timer? _purge;
   StreamSubscription<AppEvent>? _events;
   StreamSubscription<String>? _opens;
@@ -84,6 +88,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadChats();
     _loadTemp();
     _loadRequests();
+    _loadName();
+  }
+
+  Future<void> _loadName() async {
+    final name = await loadDisplayName();
+    if (mounted && name != _name) setState(() => _name = name);
   }
 
   /// Back from the background: links may have died meanwhile, so
@@ -691,7 +701,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _showMe() {
     HapticFeedback.selectionClick();
-    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => SettingsScreen(mySigil: widget.mySigil)));
+    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => SettingsScreen(mySigil: widget.mySigil)))
+        .then((_) => _loadName());
   }
 
   @override
@@ -782,6 +793,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 AnimatedSize(
                   duration: Motion.medium,
                   curve: Motion.decelerate,
+                  child: _page.round() == 0 && !(_searching || _search.text.isNotEmpty)
+                      ? _Greeting(name: _name)
+                      : const SizedBox(width: double.infinity),
+                ),
+                AnimatedSize(
+                  duration: Motion.medium,
+                  curve: Motion.decelerate,
                   child: _page.round() == 0 && _search.text.isEmpty
                       ? MomentsStrip(mySigil: widget.mySigil, sigil: _sigil)
                       : const SizedBox(width: double.infinity),
@@ -826,7 +844,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onClosed: _closed,
                     onLongPress: _actions,
                     onRefresh: _refresh,
-                    empty: const _Empty(text: 'No chats yet'),
+                    empty: const _Empty(art: EmptyArt.chats, text: 'No chats yet'),
                   ),
                 ChatStack(
                   cards: _temp,
@@ -837,6 +855,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   onDismiss: _wipe,
                   onRefresh: _refresh,
                   empty: const _Empty(
+                    art: EmptyArt.temp,
                     text: 'No temp chats',
                     detail: 'Start one with a friend. Temp chats live only in memory on both '
                         'phones, every message burns 24 hours after it is sent, and either of '
@@ -904,7 +923,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 }
 
-/// The tabs, at the bottom where thumbs reach, with unread counts.
+/// The tabs, at the bottom where thumbs reach, with unread counts. The
+/// open tab is a pill in the accent colour with its name; the others are
+/// just their icons.
 class _NavBar extends StatelessWidget {
   const _NavBar({
     required this.page,
@@ -925,42 +946,179 @@ class _NavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
-    Widget icon(IconData data, int count, {Color? badge}) => Badge(
-          isLabelVisible: count > 0,
-          backgroundColor: badge ?? accent,
-          textColor: Palette.onColor(badge ?? accent),
-          label: Text('$count'),
-          child: Icon(data),
-        );
+    final tabs = [
+      (Icons.chat_bubble_outline_rounded, Icons.chat_bubble_rounded, 'Chats', chats, accent),
+      (Icons.timer_outlined, Icons.timer_rounded, 'Temp', temp, accent),
+      (Icons.people_outline_rounded, Icons.people_rounded, 'Friends', requests, Palette.warning),
+    ];
     return DecoratedBox(
       decoration: BoxDecoration(
+        color: Palette.bg,
         border: Border(top: BorderSide(color: Palette.outline)),
       ),
-      child: NavigationBar(
-        selectedIndex: page,
-        onDestinationSelected: onTap,
-        height: 64,
-        backgroundColor: Palette.bg,
-        indicatorColor: accent.withValues(alpha: 0.18),
-        surfaceTintColor: Colors.transparent,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        destinations: [
-          NavigationDestination(
-            icon: icon(Icons.chat_bubble_outline_rounded, chats),
-            selectedIcon: icon(Icons.chat_bubble_rounded, chats),
-            label: 'Chats',
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 64,
+          child: Row(
+            children: [
+              for (final (i, (icon, selectedIcon, label, count, badge)) in tabs.indexed)
+                Expanded(
+                  child: _NavTab(
+                    icon: page == i ? selectedIcon : icon,
+                    label: label,
+                    count: count,
+                    badge: badge,
+                    accent: accent,
+                    selected: page == i,
+                    onTap: () => onTap(i),
+                  ),
+                ),
+            ],
           ),
-          NavigationDestination(
-            icon: icon(Icons.timer_outlined, temp),
-            selectedIcon: icon(Icons.timer_rounded, temp),
-            label: 'Temp',
+        ),
+      ),
+    );
+  }
+}
+
+class _NavTab extends StatelessWidget {
+  const _NavTab({
+    required this.icon,
+    required this.label,
+    required this.count,
+    required this.badge,
+    required this.accent,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final int count;
+  final Color badge;
+  final Color accent;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = selected ? accent : Palette.textMuted;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      excludeSemantics: true,
+      child: Tooltip(
+        message: label,
+        excludeFromSemantics: true,
+        child: InkResponse(
+          onTap: () {
+            if (!selected) HapticFeedback.selectionClick();
+            onTap();
+          },
+          radius: 32,
+          child: Center(
+            child: AnimatedContainer(
+              duration: Motion.medium,
+              curve: Motion.emphasized,
+              padding: EdgeInsets.symmetric(horizontal: selected ? Space.lg : Space.md, vertical: 9),
+              decoration: BoxDecoration(
+                color: selected ? accent.withValues(alpha: Palette.light ? 0.16 : 0.2) : Colors.transparent,
+                borderRadius: BorderRadius.circular(Radii.xl),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Badge(
+                    isLabelVisible: count > 0,
+                    backgroundColor: badge,
+                    textColor: Palette.onColor(badge),
+                    label: Text('$count'),
+                    child: Icon(icon, color: fg, size: 24),
+                  ),
+                  // The name slides out of the open tab.
+                  AnimatedSize(
+                    duration: Motion.medium,
+                    curve: Motion.emphasized,
+                    child: selected
+                        ? Padding(
+                            padding: const EdgeInsets.only(left: Space.sm),
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              style: AppText.bodyStrong.copyWith(color: fg, fontWeight: FontWeight.w700),
+                            ),
+                          )
+                        : const SizedBox(height: 24),
+                  ),
+                ],
+              ),
+            ),
           ),
-          NavigationDestination(
-            icon: icon(Icons.people_outline_rounded, requests, badge: Palette.warning),
-            selectedIcon: icon(Icons.people_rounded, requests, badge: Palette.warning),
-            label: 'Friends',
-          ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The top of Chats: today's date and a greeting by the time of day.
+class _Greeting extends StatelessWidget {
+  const _Greeting({required this.name});
+
+  final String name;
+
+  static const _days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  static const _months = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final hello = switch (now.hour) {
+      >= 5 && < 12 => 'Good morning',
+      >= 12 && < 17 => 'Good afternoon',
+      >= 17 && < 22 => 'Good evening',
+      _ => 'Up late',
+    };
+    final first = name.trim().split(RegExp(r'\s+')).first;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(Space.xl, 0, Space.xl, Space.sm),
+      child: SizedBox(
+        width: double.infinity,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${_days[now.weekday - 1]}, ${now.day} ${_months[now.month - 1]}'.toUpperCase(),
+              style: AppText.overline.copyWith(letterSpacing: 1.6),
+            ),
+            const SizedBox(height: 2),
+            Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(text: first.isEmpty ? hello : '$hello, '),
+                  if (first.isNotEmpty) TextSpan(text: first, style: TextStyle(color: Palette.gold)),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.title,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -997,8 +1155,9 @@ class _SearchField extends StatelessWidget {
 }
 
 class _Empty extends StatelessWidget {
-  const _Empty({required this.text, this.detail});
+  const _Empty({required this.art, required this.text, this.detail});
 
+  final EmptyArt art;
   final String text;
   final String? detail;
 
@@ -1010,7 +1169,9 @@ class _Empty extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(text, style: AppText.heading),
+            EmptyArtView(art: art),
+            const SizedBox(height: Space.lg),
+            Text(text, style: AppText.title),
             if (detail != null) ...[
               const SizedBox(height: 10),
               Text(detail!, textAlign: TextAlign.center, style: AppText.caption),
@@ -1433,6 +1594,7 @@ class _FriendsPage extends StatelessWidget {
                   SizedBox(
                     height: box.maxHeight,
                     child: const _Empty(
+                      art: EmptyArt.friends,
                       text: 'No friends yet',
                       detail: 'Add a friend with their code: they get a request to accept. '
                           'Requests you get show up here too.',

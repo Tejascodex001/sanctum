@@ -309,13 +309,16 @@ On the phone, over the sealed store (`core/src/recall.rs`). Nothing is indexed i
 ## UI: Sigil design system
 Flutter with **Material 3** as the foundation (accessibility, text input, platform behaviour such as predictive back), restyled with our own tokens in `app/lib/theme/tokens.dart`; screens use only these.
 - **Type:** Figtree for headings and text (heavy, tight headings; warm, rounded text), JetBrains Mono (codes, safety numbers). Bundled in the app (OFL 1.1), never fetched at runtime.
-- **Colour:** neutral near-black surfaces; each chat's sigil accent is the only strong colour (your bubbles, focus, highlights).
+- **Colour:** neutral near-black surfaces in dark mode, warm cream paper with warm ink in light mode; each chat's sigil accent is the only strong colour (your bubbles, focus, highlights).
 - **Shape and space:** 4-pt spacing scale, radii 12/16/22/28, hairline borders instead of shadows.
 - **Motion:** Material 3 emphasized curves; 160/280/420 ms. Only opacity and transforms animate.
 - **Sigils** are drawn once into GPU images and cached (LRU); lists and the slowly turning chat/lock backdrops only move those images, so nothing is re-drawn per frame.
 - **Emblems** (`app/lib/sigil/emblem.dart`): a friend's sigil is round; a group's is a rounded square with a small people badge, in the list and the chat header. A gold ring marks a friend with a moment you haven't seen. In groups, each person's name above their messages has its own colour (picked from their name), and the list preview says who wrote last ("Asha: …").
 - **The door:** a small gold door from the logo sits beside "Sanctum" (`app/lib/home/sanctum_door.dart`, drawn from the same shapes as `docs/brand/`). Tapping swings it open; seven quick taps open it wide onto a card with how long you've been here, your friends and groups (not hidden ones), and "0 servers · 0 ads · 0 trackers". Long-press still reveals hidden chats.
 - **Connection status:** while connected, a green dot on your own sigil (top right) is all there is. A pill beside the name appears only while connecting ("Connecting 40%") or offline (tap to retry), so the bar stays light most of the time.
+- **Home:** on Chats, a greeting with the date ("Good evening, Asha"; the name in gold) sits above moments and hides while searching. The bottom bar is three tabs; the open one sits in an accent pill with its name, the others show only their icon (and a badge).
+- **Empty screens** (`app/lib/home/empty_art.dart`) have small drawings painted in code, so they follow the theme and accent: the door with speech bubbles (Chats), a flame (Temp), two linked rings with a heart (Friends).
+- **Settings** are grouped cards of rows: a tinted icon tile, a title, a short line and a chevron. Each row opens its own page holding the existing settings panels; panic wipe opens its sheet directly.
 - **Opening a chat:** messages load first, then the page fades and settles up while the chat's emblem flies from the card into the header (Hero). The backdrop sigil fades in after the transition.
 
 ## Roadmap

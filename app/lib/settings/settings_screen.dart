@@ -119,29 +119,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
-          const _Section('APPEARANCE'),
-          _Group(children: [_AppearanceSettings(sigilAccent: sigil.accent.color)]),
-          const _Section('MOMENTS'),
-          const _Group(children: [MomentSettings()]),
-          const _Section('CALLS'),
-          const _Group(children: [CallsSettings()]),
-          const _Section('LOCK'),
-          const PinSettings(),
-          const _Section('STAYING CONNECTED'),
-          const BackgroundSettings(),
-          const SizedBox(height: Space.md),
-          const NearbySettings(),
-          const _Section('UPDATES'),
-          const UpdateSettings(),
-          const _Section('FEEDBACK'),
-          const FeedbackSettings(),
-          const _Section('EMERGENCY'),
+          const SizedBox(height: Space.xl),
           _Group(
             children: [
-              ListTile(
-                leading: const Icon(Icons.delete_forever_rounded, color: Palette.danger),
-                title: const Text('Panic wipe', style: TextStyle(color: Palette.danger)),
-                subtitle: const Text('Erase everything from this phone'),
+              _Entry(
+                icon: Icons.palette_rounded,
+                color: const Color(0xFF8B7CFF),
+                title: 'Appearance',
+                subtitle: 'Light or dark, and your colour',
+                page: () => _Page('Appearance', [
+                  _Group(children: [_AppearanceSettings(sigilAccent: sigil.accent.color)]),
+                ]),
+              ),
+              _Entry(
+                icon: Icons.photo_camera_rounded,
+                color: const Color(0xFFFFB238),
+                title: 'Moments',
+                subtitle: 'Who saw your photo of the day',
+                page: () => const _Page('Moments', [
+                  _Group(children: [MomentSettings()]),
+                ]),
+              ),
+              _Entry(
+                icon: Icons.call_rounded,
+                color: const Color(0xFF3CC87A),
+                title: 'Calls',
+                subtitle: 'Private or faster calls',
+                page: () => const _Page('Calls', [
+                  _Group(children: [CallsSettings()]),
+                ]),
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.lg),
+          _Group(
+            children: [
+              _Entry(
+                icon: Icons.lock_rounded,
+                color: const Color(0xFF5B9DFF),
+                title: 'Lock',
+                subtitle: 'PIN, fingerprint and decoy',
+                page: () => const _Page('Lock', [PinSettings()]),
+              ),
+              _Entry(
+                icon: Icons.wifi_tethering_rounded,
+                color: const Color(0xFF3CC8C8),
+                title: 'Staying connected',
+                subtitle: 'Messages while closed, and nearby',
+                page: () => const _Page('Staying connected', [
+                  BackgroundSettings(),
+                  SizedBox(height: Space.md),
+                  NearbySettings(),
+                ]),
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.lg),
+          _Group(
+            children: [
+              _Entry(
+                icon: Icons.system_update_rounded,
+                color: const Color(0xFFFF8A4C),
+                title: 'Updates',
+                subtitle: 'New versions of Sanctum',
+                page: () => const _Page('Updates', [UpdateSettings()]),
+              ),
+              _Entry(
+                icon: Icons.favorite_rounded,
+                color: const Color(0xFFFF5D8F),
+                title: 'Feedback',
+                subtitle: 'Tell the developer what you think',
+                page: () => const _Page('Feedback', [FeedbackSettings()]),
+              ),
+            ],
+          ),
+          const SizedBox(height: Space.lg),
+          _Group(
+            children: [
+              _Entry(
+                icon: Icons.delete_forever_rounded,
+                color: Palette.danger,
+                title: 'Panic wipe',
+                subtitle: 'Erase everything from this phone',
+                danger: true,
                 onTap: () => showPanicSheet(context),
               ),
             ],
@@ -152,15 +212,84 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-class _Section extends StatelessWidget {
-  const _Section(this.label);
+/// One row of Settings: a coloured icon tile, what it is, and an arrow to
+/// its own page.
+class _Entry extends StatelessWidget {
+  const _Entry({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    this.page,
+    this.onTap,
+    this.danger = false,
+  });
 
-  final String label;
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final Widget Function()? page;
+  final VoidCallback? onTap;
+  final bool danger;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(Space.xs, Space.xl, Space.xs, Space.sm),
-        child: Text(label, style: AppText.overline),
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        if (page != null) {
+          Navigator.push(context, MaterialPageRoute<void>(builder: (_) => page!()));
+        } else {
+          onTap?.call();
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Space.lg, vertical: Space.md),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: Palette.light ? 0.16 : 0.2),
+                borderRadius: BorderRadius.circular(Radii.sm),
+              ),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(width: Space.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: AppText.bodyStrong.copyWith(color: danger ? Palette.danger : Palette.text)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: AppText.caption),
+                ],
+              ),
+            ),
+            if (page != null) Icon(Icons.chevron_right_rounded, color: Palette.textFaint),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A settings page of its own.
+class _Page extends StatelessWidget {
+  const _Page(this.title, this.children);
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: ListView(
+          padding: EdgeInsets.fromLTRB(Space.lg, Space.sm, Space.lg, Space.xl + MediaQuery.paddingOf(context).bottom),
+          children: children,
+        ),
       );
 }
 

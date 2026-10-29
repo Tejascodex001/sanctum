@@ -92,14 +92,19 @@ void main() {
 
   testWidgets('seven taps on the version open the inbox, which gives the address', (tester) async {
     await show(tester, SettingsScreen(mySigil: mine));
-    await tester.scrollUntilVisible(find.text('Send feedback'), 300);
+    await tester.scrollUntilVisible(find.text('Updates'), 300);
     await settle(tester, 2);
-    expect(find.text('Feedback inbox'), findsNothing);
+    await tester.tap(find.text('Updates'));
+    await settle(tester);
     for (var i = 0; i < 7; i++) {
       await tester.tap(find.textContaining('Sanctum beta'));
       await tester.pump(const Duration(milliseconds: 50));
     }
     await settle(tester, 3);
+    await tester.pageBack();
+    await settle(tester);
+    await tester.tap(find.text('Feedback'));
+    await settle(tester);
     expect(find.text('Feedback inbox'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Feedback inbox'), 200);
     await settle(tester, 2);

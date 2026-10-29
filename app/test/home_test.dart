@@ -120,10 +120,13 @@ void main() {
     await settle(tester);
     expect(find.text('hello'), findsOneWidget, reason: 'card shows the last message');
 
+    await shot(tester, '0-greeting');
+
     // Temp chats ("Just me": a widget test runs a single phone; the Rust
     // tests cover temp chats between two phones).
-    await tester.tap(find.text('Temp'));
+    await tester.tap(find.byTooltip('Temp'));
     await settle(tester);
+    await shot(tester, '2-temp-empty');
     for (var i = 0; i < 2; i++) {
       await tester.tap(find.text('New temp chat'));
       await settle(tester);
@@ -168,7 +171,7 @@ void main() {
     expect(find.text('see you at 8'), findsOneWidget);
 
     // Back to Chats for the home screenshot.
-    await tester.tap(find.text('Chats'));
+    await tester.tap(find.byTooltip('Chats'));
     await settle(tester);
     await shot(tester, '1-chats');
     // Connected: no pill, just a dot on your sigil.
@@ -217,7 +220,7 @@ void main() {
     await settle(tester);
 
     // The Friends tab: empty for now, with a way to add one.
-    await tester.tap(find.text('Friends'));
+    await tester.tap(find.byTooltip('Friends'));
     await settle(tester);
     expect(find.text('No friends yet'), findsOneWidget);
     expect(find.text('Add a friend'), findsOneWidget);
@@ -226,15 +229,20 @@ void main() {
     // Settings, from your sigil: switching to light redraws everything.
     await tester.tap(find.byTooltip('Settings'));
     await settle(tester);
-    expect(find.text('APPEARANCE'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
     await shot(tester, '8-settings');
+    await tester.tap(find.text('Appearance'));
+    await settle(tester);
     await tester.tap(find.text('Light'));
     await tester.runAsync(() => Appearance.setAccent(Palette.accents[1]));
+    await settle(tester);
+    await shot(tester, '9-appearance-light');
+    await tester.tap(find.byTooltip('Back'));
     await settle(tester);
     await shot(tester, '9-settings-light');
     await tester.tap(find.byTooltip('Back'));
     await settle(tester);
-    await tester.tap(find.text('Chats'));
+    await tester.tap(find.byTooltip('Chats'));
     await settle(tester);
     await shot(tester, '10-chats-light');
     await tester.tap(find.text('Notes to self'));
@@ -243,11 +251,11 @@ void main() {
     await tester.tap(find.byTooltip('Back'));
     await settle(tester);
     for (final (tab, name) in [('Temp', '14-temp-light'), ('Friends', '15-friends-light')]) {
-      await tester.tap(find.text(tab));
+      await tester.tap(find.byTooltip(tab));
       await settle(tester);
       await shot(tester, name);
     }
-    await tester.tap(find.text('Chats'));
+    await tester.tap(find.byTooltip('Chats'));
     await settle(tester);
     await tester.runAsync(() => Appearance.setAccent(null));
     await tester.runAsync(() => Appearance.setTheme(ThemeChoice.dark));

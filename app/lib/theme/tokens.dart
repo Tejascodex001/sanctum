@@ -25,14 +25,15 @@ abstract final class Palette {
   /// Set by `Appearance`; screens rebuild when it changes.
   static bool light = false;
 
-  static Color get bg => light ? const Color(0xFFF5F5F8) : const Color(0xFF09090C);
-  static Color get surface => light ? const Color(0xFFFFFFFF) : const Color(0xFF111116);
-  static Color get surfaceHigh => light ? const Color(0xFFECECF1) : const Color(0xFF191920);
-  static Color get outline => light ? const Color(0x17000000) : const Color(0x14FFFFFF);
-  static Color get outlineStrong => light ? const Color(0x29000000) : const Color(0x24FFFFFF);
-  static Color get text => light ? const Color(0xF0000000) : const Color(0xF0FFFFFF);
-  static Color get textMuted => light ? const Color(0xA3000000) : const Color(0x9EFFFFFF);
-  static Color get textFaint => light ? const Color(0x6B000000) : const Color(0x66FFFFFF);
+  // Light mode is warm paper rather than cold white, with warm ink.
+  static Color get bg => light ? const Color(0xFFF7F2E9) : const Color(0xFF09090C);
+  static Color get surface => light ? const Color(0xFFFFFCF6) : const Color(0xFF111116);
+  static Color get surfaceHigh => light ? const Color(0xFFEFE7DA) : const Color(0xFF191920);
+  static Color get outline => light ? const Color(0x1C3A2810) : const Color(0x14FFFFFF);
+  static Color get outlineStrong => light ? const Color(0x2E3A2810) : const Color(0x24FFFFFF);
+  static Color get text => light ? const Color(0xF01E160D) : const Color(0xF0FFFFFF);
+  static Color get textMuted => light ? const Color(0xA61E160D) : const Color(0x9EFFFFFF);
+  static Color get textFaint => light ? const Color(0x6E1E160D) : const Color(0x66FFFFFF);
   static const danger = Color(0xFFFF5D5D);
 
   /// Sanctum's own gold (the door in the logo), a little deeper in light mode.
@@ -67,7 +68,7 @@ abstract final class Palette {
   /// A chat card's colour: its sigil's own dark background, or in light
   /// mode a soft tint of its accent.
   static Color card(Color background, Color accent) =>
-      light ? Color.alphaBlend(accent.withValues(alpha: 0.12), const Color(0xFFFFFFFF)) : background;
+      light ? Color.alphaBlend(accent.withValues(alpha: 0.12), const Color(0xFFFFFCF6)) : background;
 
   /// Black or white, whichever reads better on [background].
   static Color onColor(Color background) =>
