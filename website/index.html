@@ -29,9 +29,12 @@
 
 <main id="top">
 
+<!-- The doorway. Grey static drifts in from the edges and dies at the threshold;
+     gold dust floats out of the open door along the light. -->
 <section class="hero">
-  <div class="stars" aria-hidden="true"></div>
+  <canvas class="fx" data-fx="door" aria-hidden="true"></canvas>
   <div class="hero-text">
+    <p class="eyebrow">Private chat for close friends</p>
     <h1>Leave the noise <em>outside.</em></h1>
   </div>
   <div class="scene" aria-hidden="true">
@@ -68,31 +71,32 @@
   </div>
   <div class="windows">
     <article class="window">
-      <div class="pane lit"><div data-sigil="9,constellation" data-sigil-ink></div></div>
+      <div class="pane lit"><canvas class="fx" data-fx="bubbles" aria-hidden="true"></canvas><div data-sigil="9,constellation" data-sigil-ink></div></div>
       <h3>Talk</h3>
       <p>Chats and groups of up to 50, with replies, threads, reactions, photos, files and voice notes.</p>
     </article>
     <article class="window">
-      <div class="pane"><div data-sigil="23,orbits"></div></div>
+      <div class="pane"><canvas class="fx" data-fx="rings" aria-hidden="true"></canvas><div data-sigil="23,orbits"></div></div>
       <h3>Call</h3>
       <p>Voice and video calls with a friend, privately, even from the lock screen.</p>
     </article>
     <article class="window">
-      <div class="pane"><div data-sigil="61,lattice"></div></div>
+      <div class="pane"><canvas class="fx" data-fx="gather" aria-hidden="true"></canvas><div data-sigil="61,lattice"></div></div>
       <h3>Gather</h3>
       <p>Polls, "which day works?", plans that show who's coming, shared albums and a daily moment.</p>
     </article>
     <article class="window">
-      <div class="pane"><div data-sigil="88,glyph"></div></div>
+      <div class="pane"><canvas class="fx" data-fx="embers" aria-hidden="true"></canvas><div data-sigil="88,glyph"></div></div>
       <h3>Disappear</h3>
       <p>Temp chats that burn after a day, hidden chats, a decoy PIN and a two-second panic wipe.</p>
     </article>
   </div>
+  <p class="hint" aria-hidden="true">Run a finger over the windows, or tap them.</p>
   <ul class="more">
     <li><b>No signal?</b> Chat with friends on the same Wi-Fi, a phone's hotspot or Bluetooth.</li>
     <li><b>Daily moments.</b> One photo a day for your friends, gone after 24 hours.</li>
-    <li><b>Reels</b> <span class="tag">Beta</span> Short videos from community-run sites, watched anonymously.</li>
     <li><b>Find anything.</b> Search every chat, and catch up on what you missed.</li>
+    <li><b>Change your mind.</b> Edit a message for 15 minutes, or delete it for everyone.</li>
   </ul>
 </section>
 
@@ -101,6 +105,17 @@
     <h2>How it's <em>private.</em></h2>
     <p>Most chat apps run through a company's computers. Sanctum has none.</p>
   </div>
+
+  <!-- A message's trip: your phone, three random stops, Joe's phone. -->
+  <figure class="route">
+    <canvas class="fx" data-fx="route" aria-hidden="true"></canvas>
+    <div class="route-ends">
+      <span>Your phone</span>
+      <span>Joe's phone</span>
+    </div>
+    <figcaption>Every message takes the long way round, through three random stops. Each stop sees only the next step, so nobody along the way knows both who sent it and who got it.</figcaption>
+  </figure>
+
   <div class="points">
     <div>
       <h3>No company in the middle</h3>
@@ -119,24 +134,28 @@
       <p>Chats are stored encrypted, behind your fingerprint, face or PIN. No cloud copies, no backups.</p>
     </div>
   </div>
+
   <div class="sigils">
     <div class="equation" aria-hidden="true">
+      <canvas class="fx" data-fx="merge" aria-hidden="true"></canvas>
       <figure><div data-sigil="31,rosette"></div><figcaption>You</figcaption></figure>
       <span class="op">+</span>
       <figure><div data-sigil="58,constellation"></div><figcaption>Joe</figcaption></figure>
       <span class="op">=</span>
-      <figure><div data-sigil="77,shards"></div><figcaption>Your chat</figcaption></figure>
+      <figure class="result"><div data-sigil="77,shards"></div><figcaption>Your chat</figcaption></figure>
     </div>
     <div>
       <h3>Check a chat at a glance</h3>
       <p>Everyone gets a sigil, artwork made from their secret key. Your chat with Joe has its own sigil, made from both of you, and it looks the same on both phones. Hold them side by side: if the sigils match, nobody is listening in.</p>
+      <button class="replay" type="button" id="replay">Watch them meet again</button>
     </div>
   </div>
+
   <div class="honest">
     <h3>Honest about the trade-offs</h3>
     <ul>
       <li><b>Android only.</b> iPhones don't let apps stay connected in the background without a company's server.</li>
-      <li><b>Private takes a moment.</b> Tor makes video calls choppier and Reels slower. Two switches, Faster calls and Faster reels, speed them up and say plainly what they share.</li>
+      <li><b>Private takes a moment.</b> Tor makes video calls choppier. The Faster calls switch speeds them up and says plainly what it shares.</li>
       <li><b>No backups.</b> If you lose your phone, its chats are gone too.</li>
     </ul>
   </div>
@@ -190,6 +209,12 @@
   </div>
 </section>
 
+<section class="closing">
+  <canvas class="fx" data-fx="hearth" aria-hidden="true"></canvas>
+  <h2>Your friends are <em>already inside.</em></h2>
+  <a class="button" href="https://github.com/Tejascodex001/sanctum/releases/latest/download/sanctum.apk">Download for Android</a>
+</section>
+
 </main>
 
 <footer class="foot">
@@ -199,5 +224,6 @@
 </footer>
 
 <script src="sigil.js"></script>
+<script src="particles.js"></script>
 </body>
 </html>
