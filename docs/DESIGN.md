@@ -177,6 +177,15 @@ Emoji reactions to any message with an id, in friends' chats and groups (`core/s
 - In groups a reaction can arrive before its message. It waits in the sealed key-value table (up to 200 per message) until the message comes.
 - **Quiet:** a reaction refreshes the chat (`Event::Chat`) but never notifies.
 
+## Editing
+Changing the words of a message you sent, in friends' chats, groups and notes (`core/src/edit.rs`). Not in temp chats.
+- **What can change:** a message's text, or a photo's, video's or file's caption. Polls, voice notes, call records, notices and history passed on to a newcomer can't. A text can't be emptied; a caption can.
+- **Who and when:** only the writer, and only for 15 minutes after sending (`EDIT_WINDOW`; notes any time). The window is checked on the writer's phone only, so an edit that waited in the outbox still lands.
+- **On the wire:** `Content::Edit { id, body, at }` inside MLS, to everyone in the chat, naming the message by its shared id. It carries the whole new text. Like reactions, `at` is a millisecond time and the newest edit wins (`StoredMessage::edited_at`), so edits arriving out of order settle the same everywhere.
+- **Checked on every phone:** the edit must come from the message's writer (MLS sender identity), and the new text is clipped to 4,000 characters.
+- In groups an edit can arrive before its message. The newest waits in the sealed key-value table until the message comes.
+- **Quiet:** an edit refreshes the chat but never notifies. Bubbles say "edited". Replies keep quoting the words as they were. Older builds ignore edits and keep showing the original.
+
 ## Typing
 "Asha is typing…" in friends' chats and groups (`core/src/typing.rs`).
 - **Ephemeral:** `Frame::Typing` is sent only to people in the chat whose link is up right now. It is never stored, never put in the outbox and never resent; anyone not connected simply doesn't see it. It carries no text, only which chat: empty for the pair's own chat, or the group's id (which `Frame::GroupMls` already carries).

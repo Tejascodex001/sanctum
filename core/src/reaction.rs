@@ -112,7 +112,8 @@ impl Session {
         Ok(())
     }
 
-    /// Stores a message that arrived, with any reactions that came first.
+    /// Stores a message that arrived, with any reactions (and edit) that
+    /// came first.
     /// Returns its sequence number.
     pub(crate) fn add_received(&mut self, chat_id: i64, mut msg: StoredMessage) -> Result<i64> {
         if let Some(id) = msg.id {
@@ -124,6 +125,7 @@ impl Session {
                 self.store.kv_delete(&name)?;
             }
         }
+        self.take_waiting_edit(chat_id, &mut msg)?;
         Ok(self.store.add_message(chat_id, &msg)?)
     }
 }

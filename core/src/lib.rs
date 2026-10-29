@@ -4,6 +4,7 @@
 pub mod base32;
 pub mod call;
 pub mod direct;
+pub mod edit;
 pub mod feedback;
 mod group;
 pub use group::MAX_GROUP;

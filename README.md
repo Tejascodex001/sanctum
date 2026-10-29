@@ -19,7 +19,7 @@ Sanctum is an Android app for a small circle of people who trust each other (abo
 
 ## What you can do
 
-- **Chat** one to one or in **groups** of up to 50, with replies, threads, reactions, and the "typing…" hint.
+- **Chat** one to one or in **groups** of up to 50, with replies, threads, reactions, edits, and the "typing…" hint.
 - **Send** photos, videos, files and **voice notes**.
 - **Call** a friend, with **voice or video**.
 - **Plan together** with polls, "which day works?" polls and plans that show who's going.
@@ -87,6 +87,7 @@ Each release is told apart by its build number.
 | ✅ | **Shared albums** | Albums in any chat or group. Everyone can add photos and videos, up to 30 at a time |
 | ✅ | **Daily moments** | One photo a day for all your friends, gone after 24 hours. Take it on the spot or pick one, and see friends' moments above your chats |
 | ✅ | **Reactions** | Hold a message for ❤️ 😂 😮 😢 🙏 👍 or any emoji, or double-tap for ❤️. Tap a reaction to add or take back yours; hold it to see who. Friends' chats and groups |
+| ✅ | **Edit messages** | Hold your message and pick Edit to fix its words or a caption, within 15 minutes of sending (notes any time). Everyone sees the new words, marked "edited". Friends' chats and groups |
 | ✅ | **Typing** | "Asha is typing…" in friends' chats and groups. Sent only while you're both connected, never stored, and never what you type |
 | ✅ | **Settings** | Tap your sigil: your name, light or dark theme (or like the phone), accent colour (your sigil's or your pick), lock, staying connected, nearby, updates and panic wipe |
 | ✅ | **Search** | Type in the home search box to find any message, poll, plan or file name across your chats. Done on the phone; hidden chats only while revealed |

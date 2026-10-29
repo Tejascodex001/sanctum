@@ -33,6 +33,7 @@ Sanctum is a private, serverless Android chat app for a small circle of friends.
 | `core/src/poll.rs` | Polls, date polls and plans, and everyone's answers |
 | `core/src/recall.rs` | Search across chats and the "While you were away" catch-up |
 | `core/src/reaction.rs` | Emoji reactions: one per person per message, newest wins |
+| `core/src/edit.rs` | Editing sent messages: the writer only, within 15 minutes, newest edit wins |
 | `core/src/typing.rs` | Typing signals: link-level, never stored or queued |
 | `core/src/call.rs` | 1:1 voice and video calls: signaling inside MLS, sealed media packets (`MediaHub`), replay window, jitter buffer |
 | `core/src/video.rs` | Video in calls: fragments and reassembly, rate control, sound before pictures |

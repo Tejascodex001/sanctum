@@ -19,6 +19,8 @@ class ChatMessage {
     this.call,
     this.notice = false,
     this.sharedBy,
+    this.edited = false,
+    this.canEdit = false,
   });
 
   final String body;
@@ -60,6 +62,12 @@ class ChatMessage {
   /// Earlier group messages the leader showed a newcomer: who passed them on.
   final String? sharedBy;
 
+  /// Its writer changed the words after sending.
+  final bool edited;
+
+  /// We can still change its words (ours, and recent enough).
+  final bool canEdit;
+
   /// Call records and notices aren't messages: no replies, reactions or ticks.
   bool get isRecord => call != null || notice;
 }
@@ -84,6 +92,9 @@ abstract interface class MessageSource {
 
   /// Sends [body], answering the message at [replyTo] if given.
   Future<void> send(String body, {int? replyTo});
+
+  /// Changes the words of our message at [seq] (only ones with [ChatMessage.canEdit]).
+  Future<void> edit(int seq, String body);
 
   /// Whether messages here can be replied to.
   bool get replies;
@@ -112,6 +123,8 @@ class StoreSource implements MessageSource {
             call: m.call,
             notice: m.notice,
             sharedBy: m.sharedBy,
+            edited: m.edited,
+            canEdit: m.canEdit,
             reply: m.reply == null
                 ? null
                 : ChatQuote(
@@ -125,6 +138,9 @@ class StoreSource implements MessageSource {
 
   @override
   Future<void> send(String body, {int? replyTo}) => messageSend(chatId: chatId, body: body, replyTo: replyTo);
+
+  @override
+  Future<void> edit(int seq, String body) => messageEdit(chatId: chatId, seq: seq, body: body);
 
   @override
   bool get replies => true;
@@ -154,6 +170,10 @@ class TempSource implements MessageSource {
 
   @override
   Future<void> send(String body, {int? replyTo}) => tempSend(id: id, body: body);
+
+  /// Temp messages burn as they are.
+  @override
+  Future<void> edit(int seq, String body) async {}
 
   @override
   bool get replies => false;

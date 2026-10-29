@@ -945,6 +945,7 @@ impl Session {
             } => self.on_moment(peer, id, sent_at, caption, media)?,
             Content::MomentGone { id } => self.on_moment_gone(peer, id)?,
             Content::React { id, emoji, at } => self.on_react(chat_id, peer, id, emoji, at)?,
+            Content::Edit { id, body, at } => self.on_edit(chat_id, peer, id, body, at)?,
             Content::CallInvite(offer) => self.on_call_invite(chat_id, peer, offer)?,
             Content::CallAnswer(answer) => self.on_call_answer(peer, answer)?,
             Content::CallEnd { call, reason } => self.on_call_end(peer, call, reason)?,
@@ -2089,6 +2090,76 @@ pub(crate) mod tests {
         assert_eq!(reactions(&alice, group, seq), want);
         assert_eq!(reactions(&bob, bg, bseq), want);
         assert_eq!(reactions(&carol, cg, cseq), want);
+    }
+
+    #[test]
+    fn editing_a_message_in_a_friends_chat() {
+        let (mut alice, mut bob) = (Phone::new(), Phone::new());
+        let (ab, ba) = befriend(&mut alice, &mut bob);
+        alice.s.send_text(ab, "see you at 7").unwrap();
+        connect(&mut alice, &mut bob);
+        bob.s.take_events();
+
+        assert_eq!(alice.s.edit_message(ab, 0, " see you at 8 ").unwrap(), vec![bob.pk()]);
+        connect(&mut alice, &mut bob);
+        let m = bob.s.store.message(ba, 0).unwrap().unwrap();
+        assert_eq!(m.body, "see you at 8");
+        assert!(m.edited_at > 0);
+        assert_eq!(alice.s.store.message(ab, 0).unwrap().unwrap().edited_at, m.edited_at);
+        let events = bob.s.take_events();
+        assert!(events.contains(&Event::Chat(ba)));
+        assert!(!events.iter().any(|e| matches!(e, Event::Message(_))), "an edit never notifies");
+        assert_eq!(bob.texts(ba).len(), 1, "not a new message");
+
+        // Only the writer, only with words, only for a while.
+        assert!(bob.s.edit_message(ba, 0, "mine now").is_err());
+        assert!(alice.s.edit_message(ab, 0, "  ").is_err(), "can't be emptied");
+        let id = m.id.unwrap();
+        bob.s.on_edit(ba, &[9; 32], id, "forged".into(), u64::MAX).unwrap();
+        assert_eq!(bob.s.store.message(ba, 0).unwrap().unwrap().body, "see you at 8");
+        // A late older edit can't undo the newer one.
+        bob.s.on_edit(ba, &alice.pk(), id, "see you at 7".into(), 1).unwrap();
+        assert_eq!(bob.s.store.message(ba, 0).unwrap().unwrap().body, "see you at 8");
+        let mut old = alice.s.store.message(ab, 0).unwrap().unwrap();
+        old.sent_at -= crate::edit::EDIT_WINDOW + 1;
+        alice.s.store.update_message(ab, 0, &old).unwrap();
+        assert!(matches!(alice.s.edit_message(ab, 0, "too late"), Err(SessionError::GroupRule(_))));
+    }
+
+    #[test]
+    fn everyone_in_a_group_sees_edits_even_ones_that_come_first() {
+        let (mut alice, mut bob, mut carol) = (Phone::new(), Phone::new(), Phone::new());
+        let (ab, _) = befriend(&mut alice, &mut bob);
+        let ac = alice.s.add_friend(&carol.s.my_code("Carol"), true).unwrap().chat_id;
+        carol.s.add_friend(&alice.s.my_code("Alice"), true).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        let (group, _) = alice.s.create_group("Trip", &[ab, ac]).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        connect(&mut alice, &mut bob);
+        let (bg, cg) = (group_of(&bob, "Trip").unwrap(), group_of(&carol, "Trip").unwrap());
+
+        // Alice writes and fixes a typo. Carol hears only the fix first.
+        alice.s.send_to_chat(group, "trian at 6", None).unwrap();
+        let seq = alice.s.store.messages_indexed(group, None).unwrap().last().unwrap().0;
+        alice.s.edit_message(group, seq, "train at 6").unwrap();
+        connect(&mut alice, &mut bob);
+        let bseq = bob.s.store.messages_indexed(bg, None).unwrap().last().unwrap().0;
+        assert_eq!(bob.s.store.message(bg, bseq).unwrap().unwrap().body, "train at 6");
+
+        // Bob can't change Alice's words for everyone.
+        let id = bob.s.store.message(bg, bseq).unwrap().unwrap().id.unwrap();
+        bob.s.on_edit(bg, &carol.pk(), id, "bus at 6".into(), u64::MAX).unwrap();
+        assert_eq!(bob.s.store.message(bg, bseq).unwrap().unwrap().body, "train at 6");
+
+        // An edit that arrives before its message waits for it.
+        carol.s.on_edit(cg, &alice.pk(), id, "train at 7".into(), u64::MAX - 1).unwrap();
+        assert!(carol.texts(cg).is_empty());
+        connect(&mut alice, &mut carol);
+        let cseq = carol.s.store.messages_indexed(cg, None).unwrap().last().unwrap().0;
+        let m = carol.s.store.message(cg, cseq).unwrap().unwrap();
+        assert_eq!((m.body.as_str(), m.edited_at), ("train at 7", u64::MAX - 1));
     }
 
     #[test]

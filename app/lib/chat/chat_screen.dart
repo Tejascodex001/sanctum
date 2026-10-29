@@ -62,6 +62,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   /// The message being answered, shown above the composer.
   ChatMessage? _replyTo;
 
+  /// Our message whose words the composer is changing.
+  ChatMessage? _editing;
+
   // A voice note being recorded (hold the mic; slide left to cancel).
   bool _recording = false;
   bool _cancelArmed = false;
@@ -174,6 +177,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   Future<void> _send() async {
     final body = _input.text.trim();
+    if (_editing != null) return _saveEdit(_editing!, body);
     if (body.isEmpty) return;
     HapticFeedback.lightImpact();
     _input.clear();
@@ -206,7 +210,76 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   void _startReply(ChatMessage m, {bool fromSheet = false}) {
     if (!widget.card.source.replies || m.seq == null) return;
     HapticFeedback.selectionClick();
-    setState(() => _replyTo = m);
+    if (_editing != null) _input.clear();
+    setState(() {
+      _replyTo = m;
+      _editing = null;
+    });
+    _raiseKeyboard(fromSheet: fromSheet);
+  }
+
+  /// Puts our message's words in the composer to change them.
+  void _startEdit(ChatMessage m) {
+    HapticFeedback.selectionClick();
+    setState(() {
+      _replyTo = null;
+      _editing = m;
+    });
+    _input.value = TextEditingValue(text: m.body, selection: TextSelection.collapsed(offset: m.body.length));
+    _raiseKeyboard(fromSheet: true);
+  }
+
+  void _cancelEdit() => setState(() {
+        _editing = null;
+        _input.clear();
+      });
+
+  Future<void> _saveEdit(ChatMessage m, String body) async {
+    // A text message can't be emptied; a caption can.
+    if (body.isEmpty && m.media == null) return;
+    HapticFeedback.lightImpact();
+    setState(() {
+      _editing = null;
+      _input.clear();
+      if (body != m.body) {
+        _messages = [
+          for (final x in _messages)
+            if (identical(x, m))
+              ChatMessage(
+                body: body,
+                fromMe: true,
+                sentAt: m.sentAt,
+                delivered: m.delivered,
+                seq: m.seq,
+                reply: m.reply,
+                media: m.media,
+                album: m.album,
+                reactions: m.reactions,
+                edited: true,
+                canEdit: true,
+              )
+            else
+              x
+        ];
+      }
+    });
+    if (body == m.body) return;
+    try {
+      await widget.card.source.edit(m.seq!, body);
+    } catch (e) {
+      if (mounted) {
+        final late = e.toString().contains('15 minutes');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(late
+              ? 'Messages can only be changed in the first 15 minutes.'
+              : "That didn't work. Try again in a moment."),
+        ));
+      }
+    }
+    await _reload();
+  }
+
+  void _raiseKeyboard({bool fromSheet = false}) {
     // The keyboard comes up after this frame (a field that still has focus
     // because the keyboard was hidden with Back ignores requestFocus), and
     // again once the actions sheet has finished closing, which can take
@@ -382,6 +455,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 onTap: () {
                   Navigator.pop(sheet);
                   saveMediaToPhone(context, chatId: widget.card.id, seq: m.seq!, media: m.media!);
+                },
+              ),
+            if (m.seq != null && m.canEdit)
+              ListTile(
+                leading: const Icon(Icons.edit_rounded),
+                title: Text(m.media == null ? 'Edit' : 'Edit caption'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _startEdit(m);
                 },
               ),
             if (!m.isRecord)
@@ -609,6 +691,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   Widget _composer(Color accent) {
     final reply = _replyTo;
+    final editing = _editing;
     return Container(
       padding: const EdgeInsets.fromLTRB(Space.md, Space.sm, Space.md, Space.md),
       child: Column(
@@ -617,29 +700,51 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           AnimatedSize(
             duration: Motion.medium,
             curve: Motion.emphasized,
-            child: reply == null
-                ? const SizedBox(width: double.infinity)
-                : Padding(
+            child: editing != null
+                ? Padding(
                     padding: const EdgeInsets.only(bottom: Space.sm),
                     child: Row(
                       children: [
                         Expanded(
                           child: _QuoteBlock(
-                            author: reply.fromMe ? 'You' : (reply.senderName ?? widget.card.title),
-                            snippet: reply.body,
+                            author: 'your message',
+                            snippet: editing.body.isEmpty ? 'No caption yet' : editing.body,
                             color: accent,
                             fg: Palette.text,
-                            label: 'Replying to',
+                            label: 'Editing',
                           ),
                         ),
                         IconButton(
-                          tooltip: 'Cancel reply',
+                          tooltip: 'Cancel editing',
                           icon: const Icon(Icons.close_rounded, size: 20),
-                          onPressed: () => setState(() => _replyTo = null),
+                          onPressed: _cancelEdit,
                         ),
                       ],
                     ),
-                  ),
+                  )
+                : reply == null
+                    ? const SizedBox(width: double.infinity)
+                    : Padding(
+                        padding: const EdgeInsets.only(bottom: Space.sm),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _QuoteBlock(
+                                author: reply.fromMe ? 'You' : (reply.senderName ?? widget.card.title),
+                                snippet: reply.body,
+                                color: accent,
+                                fg: Palette.text,
+                                label: 'Replying to',
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Cancel reply',
+                              icon: const Icon(Icons.close_rounded, size: 20),
+                              onPressed: () => setState(() => _replyTo = null),
+                            ),
+                          ],
+                        ),
+                      ),
           ),
           _composerRow(accent),
         ],
@@ -821,11 +926,12 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   Widget _composerRow(Color accent) {
     // Voice notes and attachments live on disk, so temp chats (memory
     // only) have neither.
-    final voice = !widget.card.temp && !_hasText;
+    final editing = _editing != null;
+    final voice = !widget.card.temp && !_hasText && !editing;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        if (!widget.card.temp && !_recording)
+        if (!widget.card.temp && !_recording && !editing)
           IconButton(
             tooltip: 'Attach',
             onPressed: _attach,
@@ -899,10 +1005,10 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                     ),
                   )
                 : IconButton(
-                    tooltip: 'Send',
-                    icon:
-                        Icon(Icons.arrow_upward_rounded, color: _hasText ? Palette.onColor(accent) : Palette.textFaint),
-                    onPressed: _hasText ? _send : null,
+                    tooltip: editing ? 'Save' : 'Send',
+                    icon: Icon(editing ? Icons.check_rounded : Icons.arrow_upward_rounded,
+                        color: _hasText ? Palette.onColor(accent) : Palette.textFaint),
+                    onPressed: _hasText || (editing && _editing!.media != null) ? _send : null,
                   ),
           ),
         ),
@@ -1341,14 +1447,18 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
             )
           else if (m.body.isNotEmpty || m.media == null)
             Text(m.body, style: AppText.body.copyWith(color: fg)),
-          if (widget.showTime || (mine && widget.showTicks)) ...[
+          if (widget.showTime || m.edited || (mine && widget.showTicks)) ...[
             const SizedBox(height: 3),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (widget.showTime)
+                if (widget.showTime || m.edited)
                   Text(
-                    m.expiresAt == null ? _time(m.sentAt) : '${_time(m.sentAt)} · ${_burnsIn(m.expiresAt!)}',
+                    [
+                      if (widget.showTime) _time(m.sentAt),
+                      if (widget.showTime && m.expiresAt != null) _burnsIn(m.expiresAt!),
+                      if (m.edited) widget.showTime ? 'edited' : 'Edited',
+                    ].join(' · '),
                     style: AppText.micro.copyWith(color: fg.withValues(alpha: 0.6)),
                   ),
                 if (mine && widget.showTicks) ...[

@@ -242,6 +242,9 @@ pub struct StoredMessage {
     /// A line the chat shows between messages ("Sam joined"), not a message
     /// anyone wrote. Kept on this phone only; `body` holds the words.
     pub notice: bool,
+    /// When its writer last changed `body` (milliseconds); 0 if never. A
+    /// late older edit can't undo a newer one.
+    pub edited_at: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -261,6 +264,26 @@ pub struct CallLog {
     pub outcome: u8,
     /// How long we talked, in seconds.
     pub seconds: u32,
+}
+
+/// The ninth message format, before edits.
+#[derive(Deserialize)]
+struct StoredMessageV8 {
+    from_me: bool,
+    body: String,
+    sent_at: u64,
+    delivered: bool,
+    id: Option<MessageId>,
+    reply: Option<Quote>,
+    sender: Option<[u8; 32]>,
+    media: Option<Media>,
+    poll: Option<Poll>,
+    votes: Vec<Vote>,
+    album: Option<Album>,
+    reactions: Vec<Reaction>,
+    call: Option<CallLog>,
+    shared_by: Option<[u8; 32]>,
+    notice: bool,
 }
 
 /// The eighth message format, before shared history and notices.
@@ -885,6 +908,26 @@ impl Store {
         if let Ok(m) = postcard::from_bytes::<StoredMessage>(&plain) {
             return Ok(m);
         }
+        if let Ok(v8) = postcard::from_bytes::<StoredMessageV8>(&plain) {
+            return Ok(StoredMessage {
+                from_me: v8.from_me,
+                body: v8.body,
+                sent_at: v8.sent_at,
+                delivered: v8.delivered,
+                id: v8.id,
+                reply: v8.reply,
+                sender: v8.sender,
+                media: v8.media,
+                poll: v8.poll,
+                votes: v8.votes,
+                album: v8.album,
+                reactions: v8.reactions,
+                call: v8.call,
+                shared_by: v8.shared_by,
+                notice: v8.notice,
+                ..Default::default()
+            });
+        }
         if let Ok(v7) = postcard::from_bytes::<StoredMessageV7>(&plain) {
             return Ok(StoredMessage {
                 from_me: v7.from_me,
@@ -1284,6 +1327,61 @@ mod tests {
         with_admins.admins = vec![[4; 32]];
         s.update_chat(9, &with_admins).unwrap();
         assert_eq!(s.chats().unwrap().remove(0).1, with_admins);
+    }
+
+    #[test]
+    fn messages_from_before_edits_upgrade() {
+        #[derive(Serialize)]
+        struct V8 {
+            from_me: bool,
+            body: String,
+            sent_at: u64,
+            delivered: bool,
+            id: Option<MessageId>,
+            reply: Option<Quote>,
+            sender: Option<[u8; 32]>,
+            media: Option<Media>,
+            poll: Option<Poll>,
+            votes: Vec<Vote>,
+            album: Option<Album>,
+            reactions: Vec<Reaction>,
+            call: Option<CallLog>,
+            shared_by: Option<[u8; 32]>,
+            notice: bool,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("s.db"), &[7; 32]).unwrap();
+        let chat = s.create_chat(&meta("Bob")).unwrap();
+        let old = V8 {
+            from_me: false,
+            body: "earlier".into(),
+            sent_at: 4,
+            delivered: true,
+            id: Some([3; 16]),
+            reply: None,
+            sender: Some([2; 32]),
+            media: None,
+            poll: None,
+            votes: Vec::new(),
+            album: None,
+            reactions: Vec::new(),
+            call: None,
+            shared_by: Some([5; 32]),
+            notice: false,
+        };
+        s.db.execute(
+            "INSERT INTO messages (chat_id, seq, sealed) VALUES (?1, 0, ?2)",
+            params![chat, s.seal(&message_aad(chat, 0), &old).unwrap()],
+        )
+        .unwrap();
+        let m = s.message(chat, 0).unwrap().unwrap();
+        assert_eq!((m.body.as_str(), m.shared_by, m.edited_at), ("earlier", Some([5; 32]), 0));
+        // And the new field round-trips.
+        let mut edited = m.clone();
+        edited.body = "changed".into();
+        edited.edited_at = 77;
+        s.update_message(chat, 0, &edited).unwrap();
+        assert_eq!(s.message(chat, 0).unwrap().unwrap(), edited);
     }
 
     #[test]

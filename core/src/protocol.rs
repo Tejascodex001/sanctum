@@ -377,6 +377,10 @@ pub enum Content {
     /// To the whole group: the leader passed recent messages on to this
     /// member, so nobody is surprised.
     HistoryShared { with: [u8; 32] },
+    /// The sender changed the words of their message with this id (its
+    /// text, or a photo's caption). `at` (milliseconds) orders edits that
+    /// arrive out of order, as for [`Content::React`].
+    Edit { id: MessageId, body: String, at: u64 },
 }
 
 /// What an admin asks of the leader (see [`Content::GroupRequest`]).

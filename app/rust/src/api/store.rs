@@ -63,6 +63,10 @@ pub struct MessageView {
     pub notice: bool,
     /// Earlier group messages the leader showed a newcomer: who passed them on.
     pub shared_by: Option<String>,
+    /// Its writer changed the words after sending.
+    pub edited: bool,
+    /// We can change its words now (ours, and recent enough).
+    pub can_edit: bool,
 }
 
 pub struct CallLogView {
@@ -314,6 +318,13 @@ fn reach(peers: Vec<[u8; 32]>) {
     }
 }
 
+/// Changes the words of our message at `seq` (its text or caption), on
+/// every phone in the chat. Nobody is notified.
+pub fn message_edit(chat_id: i64, seq: i64, body: String) -> anyhow::Result<()> {
+    reach(session::with(|s| Ok(s.edit_message(chat_id, seq, &body)?))?);
+    Ok(())
+}
+
 /// Deletes a message here, or (our own) on every phone in the chat.
 pub fn message_delete(chat_id: i64, seq: i64, for_everyone: bool) -> anyhow::Result<()> {
     reach(session::with(|s| Ok(s.delete_message(chat_id, seq, for_everyone)?))?);
@@ -369,10 +380,13 @@ pub fn message_list(chat_id: i64, limit: Option<u32>) -> anyhow::Result<Vec<Mess
             .filter_map(|(seq, m)| m.id.map(|id| (id, *seq)))
             .collect();
         let group = meta.kind == ChatKind::Group;
+        let notes = meta.kind == ChatKind::Notes;
         Ok(messages
             .into_iter()
             .map(|(seq, m)| MessageView {
                 seq,
+                edited: m.edited_at > 0,
+                can_edit: sanctum_core::edit::can_edit_now(&m, notes),
                 from_me: m.from_me,
                 sent_at: m.sent_at as i64,
                 delivered: m.delivered,

@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -35,7 +37,14 @@ class _FakeSource implements MessageSource {
   @override
   Future<void> send(String body, {int? replyTo}) async {
     await Future<void>.delayed(const Duration(milliseconds: 60));
-    stored.add(ChatMessage(body: body, fromMe: true, sentAt: DateTime.now(), seq: stored.length + 1));
+    stored.add(ChatMessage(body: body, fromMe: true, sentAt: DateTime.now(), seq: stored.length + 1, canEdit: true));
+  }
+
+  @override
+  Future<void> edit(int seq, String body) async {
+    final i = stored.indexWhere((m) => m.seq == seq);
+    final m = stored[i];
+    stored[i] = ChatMessage(body: body, fromMe: true, sentAt: m.sentAt, seq: seq, edited: true, canEdit: true);
   }
 }
 
@@ -50,6 +59,20 @@ State? _bubbleStateOf(WidgetTester tester, String text) {
     return true;
   });
   return found;
+}
+
+final _shotKey = GlobalKey();
+
+/// Saves a PNG of the chat when SCREENSHOT_DIR is set.
+Future<void> _shot(WidgetTester tester, String name) async {
+  final dir = Platform.environment['SCREENSHOT_DIR'];
+  if (dir == null) return;
+  await tester.runAsync(() async {
+    final boundary = _shotKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final image = await boundary.toImage(pixelRatio: 1);
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    File('$dir/$name.png').writeAsBytesSync(bytes!.buffer.asUint8List());
+  });
 }
 
 // Runs the real Rust core on the host: `cargo build -p rust_lib_sanctum` first.
@@ -83,7 +106,7 @@ void main() {
     await tester.pumpWidget(Restyler(
       builder: (_) => MaterialApp(
         theme: sanctumTheme(accent: sigil.look.accent.color),
-        home: ChatScreen(card: card, close: () {}),
+        home: RepaintBoundary(key: _shotKey, child: ChatScreen(card: card, close: () {})),
       ),
     ));
     Future<void> settle([int frames = 8]) async {
@@ -118,5 +141,27 @@ void main() {
     await settle(8);
     expect(calls, contains('TextInput.show'));
     expect(find.textContaining('Replying to'), findsOneWidget);
+    await tester.tap(find.byTooltip('Cancel reply'));
+    await settle(4);
+
+    // "Edit" puts the words in the box; saving changes the bubble, marked edited.
+    await tester.longPress(find.text('hello there'));
+    await settle(4);
+    await tester.tap(find.text('Edit'));
+    await settle(8);
+    expect(find.text('Editing your message'), findsOneWidget);
+    final field = tester.widget<TextField>(find.byType(TextField).last);
+    expect(field.controller!.text, 'hello there');
+    await _shot(tester, 'chat_editing');
+    await tester.enterText(find.byType(TextField).last, 'hello again');
+    await tester.pump();
+    await tester.tap(find.byTooltip('Save'));
+    await settle();
+    expect(source.stored.single.body, 'hello again');
+    expect(find.text('hello again'), findsOneWidget);
+    expect(find.text('hello there'), findsNothing);
+    expect(find.textContaining('edited'), findsOneWidget);
+    expect(find.text('Editing your message'), findsNothing);
+    await _shot(tester, 'chat_edited');
   });
 }

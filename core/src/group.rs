@@ -760,6 +760,7 @@ impl Session {
             Content::Poll { id, sent_at, poll } => self.on_poll(chat_id, peer, id, sent_at, poll)?,
             Content::Vote { poll, choices, at } => self.on_vote(chat_id, peer, poll, choices, at)?,
             Content::React { id, emoji, at } => self.on_react(chat_id, peer, id, emoji, at)?,
+            Content::Edit { id, body, at } => self.on_edit(chat_id, peer, id, body, at)?,
             // Delete for everyone: only the sender's own message.
             Content::DeleteMessage { id } => {
                 if let Some((seq, m)) = self.store.message_by_id(chat_id, &id)? {

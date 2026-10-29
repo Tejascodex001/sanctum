@@ -94,6 +94,18 @@ Future<void> chatSetPinned({required PlatformInt64 id, required bool pinned}) =>
 Future<void> chatRename({required PlatformInt64 id, required String name}) =>
     RustLib.instance.api.crateApiStoreChatRename(id: id, name: name);
 
+/// Changes the words of our message at `seq` (its text or caption), on
+/// every phone in the chat. Nobody is notified.
+Future<void> messageEdit({
+  required PlatformInt64 chatId,
+  required PlatformInt64 seq,
+  required String body,
+}) => RustLib.instance.api.crateApiStoreMessageEdit(
+  chatId: chatId,
+  seq: seq,
+  body: body,
+);
+
 /// Deletes a message here, or (our own) on every phone in the chat.
 Future<void> messageDelete({
   required PlatformInt64 chatId,
@@ -296,6 +308,12 @@ class MessageView {
   /// Earlier group messages the leader showed a newcomer: who passed them on.
   final String? sharedBy;
 
+  /// Its writer changed the words after sending.
+  final bool edited;
+
+  /// We can change its words now (ours, and recent enough).
+  final bool canEdit;
+
   const MessageView({
     required this.seq,
     required this.fromMe,
@@ -311,6 +329,8 @@ class MessageView {
     this.call,
     required this.notice,
     this.sharedBy,
+    required this.edited,
+    required this.canEdit,
   });
 
   @override
@@ -328,7 +348,9 @@ class MessageView {
       reactions.hashCode ^
       call.hashCode ^
       notice.hashCode ^
-      sharedBy.hashCode;
+      sharedBy.hashCode ^
+      edited.hashCode ^
+      canEdit.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -348,7 +370,9 @@ class MessageView {
           reactions == other.reactions &&
           call == other.call &&
           notice == other.notice &&
-          sharedBy == other.sharedBy;
+          sharedBy == other.sharedBy &&
+          edited == other.edited &&
+          canEdit == other.canEdit;
 }
 
 /// Everyone who reacted to a message with one emoji.
