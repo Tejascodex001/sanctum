@@ -16,6 +16,7 @@ import 'albums.dart';
 import 'media.dart';
 import 'poll.dart';
 import '../security/screenshots.dart';
+import '../sigil/emblem.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/store.dart';
@@ -1099,10 +1100,7 @@ class _Header extends StatelessWidget {
           ),
           Hero(
             tag: 'emblem-${card.id}',
-            child: SizedBox.square(
-              dimension: 40,
-              child: ClipOval(child: SigilView(spec: card.sigil)),
-            ),
+            child: ChatEmblem(sigil: card.sigil, group: card.group, size: 40, border: false),
           ),
           const SizedBox(width: Space.md),
           Expanded(
@@ -1388,7 +1386,10 @@ class _BubbleState extends State<_Bubble> with SingleTickerProviderStateMixin {
           if (m.senderName != null)
             Padding(
               padding: const EdgeInsets.only(bottom: 2),
-              child: Text(m.senderName!, style: AppText.micro.copyWith(color: accent, fontWeight: FontWeight.w700)),
+              child: Text(
+                m.senderName!,
+                style: AppText.micro.copyWith(color: Palette.person(m.senderName!), fontWeight: FontWeight.w700),
+              ),
             ),
           if (m.sharedBy != null)
             Padding(

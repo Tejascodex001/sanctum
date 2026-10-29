@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 678443599;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -810351947;
 
 // Section: executor
 
@@ -2314,6 +2314,8 @@ fn wire__crate__api__moment__moment_share_impl(
             let api_thumb = <Vec<u8>>::sse_decode(&mut deserializer);
             let api_width = <u32>::sse_decode(&mut deserializer);
             let api_height = <u32>::sse_decode(&mut deserializer);
+            let api_seconds = <u8>::sse_decode(&mut deserializer);
+            let api_once = <bool>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -2326,7 +2328,78 @@ fn wire__crate__api__moment__moment_share_impl(
                             api_thumb,
                             api_width,
                             api_height,
+                            api_seconds,
+                            api_once,
                         )?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__moment__moment_spent_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "moment_spent",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_id = <Vec<u8>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::moment::moment_spent(api_id)?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__moment__moment_views_shared_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "moment_views_shared",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::moment::moment_views_shared()?;
                         Ok(output_ok)
                     })(),
                 )
@@ -3083,6 +3156,41 @@ fn wire__crate__api__session__session_open_impl(
                             api_dir,
                             api_store_key,
                         )?;
+                        Ok(output_ok)
+                    })(),
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__moment__set_moment_views_shared_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_moment_views_shared",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_shared = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let output_ok = crate::api::moment::set_moment_views_shared(api_shared)?;
                         Ok(output_ok)
                     })(),
                 )
@@ -4084,6 +4192,18 @@ impl SseDecode for Vec<crate::api::moment::MomentView> {
     }
 }
 
+impl SseDecode for Vec<crate::api::moment::MomentViewer> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::moment::MomentViewer>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::recall::OpenPollView> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -4321,6 +4441,7 @@ impl SseDecode for crate::api::moment::MomentView {
         let mut var_mine = <bool>::sse_decode(deserializer);
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_sigilKey = <Vec<u8>>::sse_decode(deserializer);
+        let mut var_chatId = <Option<i64>>::sse_decode(deserializer);
         let mut var_sentAt = <i64>::sse_decode(deserializer);
         let mut var_expiresAt = <i64>::sse_decode(deserializer);
         let mut var_caption = <String>::sse_decode(deserializer);
@@ -4329,11 +4450,16 @@ impl SseDecode for crate::api::moment::MomentView {
         let mut var_thumb = <Vec<u8>>::sse_decode(deserializer);
         let mut var_ready = <bool>::sse_decode(deserializer);
         let mut var_seen = <bool>::sse_decode(deserializer);
+        let mut var_seconds = <u8>::sse_decode(deserializer);
+        let mut var_once = <bool>::sse_decode(deserializer);
+        let mut var_spent = <bool>::sse_decode(deserializer);
+        let mut var_viewers = <Vec<crate::api::moment::MomentViewer>>::sse_decode(deserializer);
         return crate::api::moment::MomentView {
             id: var_id,
             mine: var_mine,
             name: var_name,
             sigil_key: var_sigilKey,
+            chat_id: var_chatId,
             sent_at: var_sentAt,
             expires_at: var_expiresAt,
             caption: var_caption,
@@ -4342,6 +4468,24 @@ impl SseDecode for crate::api::moment::MomentView {
             thumb: var_thumb,
             ready: var_ready,
             seen: var_seen,
+            seconds: var_seconds,
+            once: var_once,
+            spent: var_spent,
+            viewers: var_viewers,
+        };
+    }
+}
+
+impl SseDecode for crate::api::moment::MomentViewer {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_sigilKey = <Vec<u8>>::sse_decode(deserializer);
+        let mut var_at = <i64>::sse_decode(deserializer);
+        return crate::api::moment::MomentViewer {
+            name: var_name,
+            sigil_key: var_sigilKey,
+            at: var_at,
         };
     }
 }
@@ -4990,41 +5134,49 @@ fn pde_ffi_dispatcher_primary_impl(
         61 => wire__crate__api__moment__moment_list_impl(port, ptr, rust_vec_len, data_len),
         62 => wire__crate__api__moment__moment_seen_impl(port, ptr, rust_vec_len, data_len),
         63 => wire__crate__api__moment__moment_share_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__session__my_code_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__api__session__nearby_chats_impl(port, ptr, rust_vec_len, data_len),
-        66 => wire__crate__api__session__nearby_port_impl(port, ptr, rust_vec_len, data_len),
-        67 => wire__crate__api__session__nearby_set_impl(port, ptr, rust_vec_len, data_len),
-        68 => wire__crate__api__session__net_refresh_impl(port, ptr, rust_vec_len, data_len),
-        69 => wire__crate__api__session__net_set_background_impl(port, ptr, rust_vec_len, data_len),
-        70 => wire__crate__api__session__net_start_impl(port, ptr, rust_vec_len, data_len),
-        71 => wire__crate__api__session__net_status_impl(port, ptr, rust_vec_len, data_len),
-        72 => wire__crate__api__session__online_chats_impl(port, ptr, rust_vec_len, data_len),
-        73 => wire__crate__api__session__pin_hash_impl(port, ptr, rust_vec_len, data_len),
-        74 => wire__crate__api__poll__plan_send_impl(port, ptr, rust_vec_len, data_len),
-        75 => wire__crate__api__poll__poll_send_impl(port, ptr, rust_vec_len, data_len),
-        76 => wire__crate__api__poll__poll_vote_impl(port, ptr, rust_vec_len, data_len),
-        77 => wire__crate__api__session__profile_is_decoy_impl(port, ptr, rust_vec_len, data_len),
-        78 => wire__crate__api__session__profile_set_name_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__api__session__profile_use_impl(port, ptr, rust_vec_len, data_len),
-        80 => wire__crate__api__session__request_accept_impl(port, ptr, rust_vec_len, data_len),
-        81 => wire__crate__api__session__request_decline_impl(port, ptr, rust_vec_len, data_len),
-        82 => wire__crate__api__session__request_list_impl(port, ptr, rust_vec_len, data_len),
-        83 => wire__crate__api__recall__search_messages_impl(port, ptr, rust_vec_len, data_len),
-        84 => wire__crate__api__session__session_open_impl(port, ptr, rust_vec_len, data_len),
-        85 => wire__crate__api__sigil__sigil_for_key_impl(port, ptr, rust_vec_len, data_len),
-        86 => wire__crate__api__sigil__sigil_for_pair_impl(port, ptr, rust_vec_len, data_len),
-        87 => wire__crate__api__sigil__sigil_random_impl(port, ptr, rust_vec_len, data_len),
-        88 => wire__crate__api__store__store_new_key_impl(port, ptr, rust_vec_len, data_len),
-        89 => wire__crate__api__temp_chat__temp_list_impl(port, ptr, rust_vec_len, data_len),
-        90 => wire__crate__api__temp_chat__temp_messages_impl(port, ptr, rust_vec_len, data_len),
-        91 => wire__crate__api__temp_chat__temp_new_impl(port, ptr, rust_vec_len, data_len),
-        92 => wire__crate__api__temp_chat__temp_send_impl(port, ptr, rust_vec_len, data_len),
-        93 => wire__crate__api__temp_chat__temp_wipe_impl(port, ptr, rust_vec_len, data_len),
-        94 => wire__crate__api__temp_chat__temp_wipe_all_impl(port, ptr, rust_vec_len, data_len),
-        95 => wire__crate__api__update__update_check_impl(port, ptr, rust_vec_len, data_len),
-        96 => wire__crate__api__update__update_download_impl(port, ptr, rust_vec_len, data_len),
-        97 => wire__crate__api__update__update_progress_impl(port, ptr, rust_vec_len, data_len),
-        98 => wire__crate__api__session__wipe_everything_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__moment__moment_spent_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__moment__moment_views_shared_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__api__session__my_code_impl(port, ptr, rust_vec_len, data_len),
+        67 => wire__crate__api__session__nearby_chats_impl(port, ptr, rust_vec_len, data_len),
+        68 => wire__crate__api__session__nearby_port_impl(port, ptr, rust_vec_len, data_len),
+        69 => wire__crate__api__session__nearby_set_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__api__session__net_refresh_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__api__session__net_set_background_impl(port, ptr, rust_vec_len, data_len),
+        72 => wire__crate__api__session__net_start_impl(port, ptr, rust_vec_len, data_len),
+        73 => wire__crate__api__session__net_status_impl(port, ptr, rust_vec_len, data_len),
+        74 => wire__crate__api__session__online_chats_impl(port, ptr, rust_vec_len, data_len),
+        75 => wire__crate__api__session__pin_hash_impl(port, ptr, rust_vec_len, data_len),
+        76 => wire__crate__api__poll__plan_send_impl(port, ptr, rust_vec_len, data_len),
+        77 => wire__crate__api__poll__poll_send_impl(port, ptr, rust_vec_len, data_len),
+        78 => wire__crate__api__poll__poll_vote_impl(port, ptr, rust_vec_len, data_len),
+        79 => wire__crate__api__session__profile_is_decoy_impl(port, ptr, rust_vec_len, data_len),
+        80 => wire__crate__api__session__profile_set_name_impl(port, ptr, rust_vec_len, data_len),
+        81 => wire__crate__api__session__profile_use_impl(port, ptr, rust_vec_len, data_len),
+        82 => wire__crate__api__session__request_accept_impl(port, ptr, rust_vec_len, data_len),
+        83 => wire__crate__api__session__request_decline_impl(port, ptr, rust_vec_len, data_len),
+        84 => wire__crate__api__session__request_list_impl(port, ptr, rust_vec_len, data_len),
+        85 => wire__crate__api__recall__search_messages_impl(port, ptr, rust_vec_len, data_len),
+        86 => wire__crate__api__session__session_open_impl(port, ptr, rust_vec_len, data_len),
+        87 => wire__crate__api__moment__set_moment_views_shared_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        88 => wire__crate__api__sigil__sigil_for_key_impl(port, ptr, rust_vec_len, data_len),
+        89 => wire__crate__api__sigil__sigil_for_pair_impl(port, ptr, rust_vec_len, data_len),
+        90 => wire__crate__api__sigil__sigil_random_impl(port, ptr, rust_vec_len, data_len),
+        91 => wire__crate__api__store__store_new_key_impl(port, ptr, rust_vec_len, data_len),
+        92 => wire__crate__api__temp_chat__temp_list_impl(port, ptr, rust_vec_len, data_len),
+        93 => wire__crate__api__temp_chat__temp_messages_impl(port, ptr, rust_vec_len, data_len),
+        94 => wire__crate__api__temp_chat__temp_new_impl(port, ptr, rust_vec_len, data_len),
+        95 => wire__crate__api__temp_chat__temp_send_impl(port, ptr, rust_vec_len, data_len),
+        96 => wire__crate__api__temp_chat__temp_wipe_impl(port, ptr, rust_vec_len, data_len),
+        97 => wire__crate__api__temp_chat__temp_wipe_all_impl(port, ptr, rust_vec_len, data_len),
+        98 => wire__crate__api__update__update_check_impl(port, ptr, rust_vec_len, data_len),
+        99 => wire__crate__api__update__update_download_impl(port, ptr, rust_vec_len, data_len),
+        100 => wire__crate__api__update__update_progress_impl(port, ptr, rust_vec_len, data_len),
+        101 => wire__crate__api__session__wipe_everything_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -5608,6 +5760,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::moment::MomentView {
             self.mine.into_into_dart().into_dart(),
             self.name.into_into_dart().into_dart(),
             self.sigil_key.into_into_dart().into_dart(),
+            self.chat_id.into_into_dart().into_dart(),
             self.sent_at.into_into_dart().into_dart(),
             self.expires_at.into_into_dart().into_dart(),
             self.caption.into_into_dart().into_dart(),
@@ -5616,6 +5769,10 @@ impl flutter_rust_bridge::IntoDart for crate::api::moment::MomentView {
             self.thumb.into_into_dart().into_dart(),
             self.ready.into_into_dart().into_dart(),
             self.seen.into_into_dart().into_dart(),
+            self.seconds.into_into_dart().into_dart(),
+            self.once.into_into_dart().into_dart(),
+            self.spent.into_into_dart().into_dart(),
+            self.viewers.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5628,6 +5785,28 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::moment::MomentView>
     for crate::api::moment::MomentView
 {
     fn into_into_dart(self) -> crate::api::moment::MomentView {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::moment::MomentViewer {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.name.into_into_dart().into_dart(),
+            self.sigil_key.into_into_dart().into_dart(),
+            self.at.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::moment::MomentViewer
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::moment::MomentViewer>
+    for crate::api::moment::MomentViewer
+{
+    fn into_into_dart(self) -> crate::api::moment::MomentViewer {
         self
     }
 }
@@ -6483,6 +6662,16 @@ impl SseEncode for Vec<crate::api::moment::MomentView> {
     }
 }
 
+impl SseEncode for Vec<crate::api::moment::MomentViewer> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::moment::MomentViewer>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::recall::OpenPollView> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -6665,6 +6854,7 @@ impl SseEncode for crate::api::moment::MomentView {
         <bool>::sse_encode(self.mine, serializer);
         <String>::sse_encode(self.name, serializer);
         <Vec<u8>>::sse_encode(self.sigil_key, serializer);
+        <Option<i64>>::sse_encode(self.chat_id, serializer);
         <i64>::sse_encode(self.sent_at, serializer);
         <i64>::sse_encode(self.expires_at, serializer);
         <String>::sse_encode(self.caption, serializer);
@@ -6673,6 +6863,19 @@ impl SseEncode for crate::api::moment::MomentView {
         <Vec<u8>>::sse_encode(self.thumb, serializer);
         <bool>::sse_encode(self.ready, serializer);
         <bool>::sse_encode(self.seen, serializer);
+        <u8>::sse_encode(self.seconds, serializer);
+        <bool>::sse_encode(self.once, serializer);
+        <bool>::sse_encode(self.spent, serializer);
+        <Vec<crate::api::moment::MomentViewer>>::sse_encode(self.viewers, serializer);
+    }
+}
+
+impl SseEncode for crate::api::moment::MomentViewer {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.name, serializer);
+        <Vec<u8>>::sse_encode(self.sigil_key, serializer);
+        <i64>::sse_encode(self.at, serializer);
     }
 }
 

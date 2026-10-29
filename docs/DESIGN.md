@@ -251,6 +251,8 @@ One photo a day for all your friends, gone 24 hours after it was shared (`core/s
 - **Not a message:** moments live in a sealed list of their own (in the key-value table), not in any chat. Sharing a new one replaces the old one everywhere: each phone keeps only a friend's newest.
 - **Expiry:** once a moment's 24 hours are over, it's deleted with its file, on every phone. A moment that arrives after its day is over is ignored. Deleting your own moment also deletes it on friends' phones (`Content::MomentGone`).
 - **Hidden chats:** a hidden friend's moment isn't shown, so it can't give the chat away.
+- **Rules:** when sharing, the owner can limit each look to 5, 10 or 15 seconds and/or make it view once. `Content::MomentRules { id, seconds, once }` follows the moment in the same outbox (which keeps order), so older builds just show the moment as before. A timed look shows a bar and moves on when time's up (hold to pause). A view-once moment's photo is deleted from the friend's phone as soon as they move on; the entry stays (`spent`) so a late copy can't bring it back. Screenshots are already blocked everywhere in the app.
+- **Who saw it:** a friend's phone sends `Content::MomentSeen { id }` the first time they look, and the owner keeps `(who, when)` with the moment. It's fair both ways: "Show who saw moments" in Settings (on by default) turning off stops telling friends and hides who saw yours. Stored moments moved to a new format (`moments-v2`) on first read; the old list is read once and deleted.
 - The photo can be taken right then with the camera app (written to Sanctum's cache through a one-off link, then deleted) or picked from the gallery. Either way it's resized and stripped of hidden data such as location.
 
 ## Search and catch-up
@@ -311,6 +313,8 @@ Flutter with **Material 3** as the foundation (accessibility, text input, platfo
 - **Shape and space:** 4-pt spacing scale, radii 12/16/22/28, hairline borders instead of shadows.
 - **Motion:** Material 3 emphasized curves; 160/280/420 ms. Only opacity and transforms animate.
 - **Sigils** are drawn once into GPU images and cached (LRU); lists and the slowly turning chat/lock backdrops only move those images, so nothing is re-drawn per frame.
+- **Emblems** (`app/lib/sigil/emblem.dart`): a friend's sigil is round; a group's is a rounded square with a small people badge, in the list and the chat header. A gold ring marks a friend with a moment you haven't seen. In groups, each person's name above their messages has its own colour (picked from their name), and the list preview says who wrote last ("Asha: …").
+- **The door:** a small gold door from the logo sits beside "Sanctum" (`app/lib/home/sanctum_door.dart`, drawn from the same shapes as `docs/brand/`). Tapping swings it open; seven quick taps open it wide onto a card with how long you've been here, your friends and groups (not hidden ones), and "0 servers · 0 ads · 0 trackers". Long-press still reveals hidden chats.
 - **Opening a chat:** messages load first, then the page fades and settles up while the chat's emblem flies from the card into the header (Hero). The backdrop sigil fades in after the transition.
 
 ## Roadmap

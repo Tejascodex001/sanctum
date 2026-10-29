@@ -6,6 +6,7 @@ import '../security/panic.dart';
 import '../security/pin_settings.dart';
 import '../sigil/sigil_painter.dart';
 import '../src/rust/api/call.dart';
+import '../src/rust/api/moment.dart';
 import '../src/rust/api/session.dart';
 import '../src/rust/api/sigil.dart';
 import '../theme/appearance.dart';
@@ -120,6 +121,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const _Section('APPEARANCE'),
           _Group(children: [_AppearanceSettings(sigilAccent: sigil.accent.color)]),
+          const _Section('MOMENTS'),
+          const _Group(children: [MomentSettings()]),
           const _Section('CALLS'),
           const _Group(children: [CallsSettings()]),
           const _Section('LOCK'),
@@ -286,6 +289,50 @@ class _Swatch extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// Whether friends learn when you've seen their moments, and you see who saw
+/// yours: both or neither.
+class MomentSettings extends StatefulWidget {
+  const MomentSettings({super.key});
+
+  @override
+  State<MomentSettings> createState() => _MomentSettingsState();
+}
+
+class _MomentSettingsState extends State<MomentSettings> {
+  bool? _shared;
+
+  @override
+  void initState() {
+    super.initState();
+    momentViewsShared().then((on) {
+      if (mounted) setState(() => _shared = on);
+    }, onError: (_) {
+      if (mounted) setState(() => _shared = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shared = _shared;
+    if (shared == null) return const SizedBox(height: 64);
+    return SwitchListTile(
+      value: shared,
+      title: const Text('Show who saw moments'),
+      subtitle: Text(
+        shared
+            ? 'Friends see when you\'ve looked at their moment, and you see who looked at yours.'
+            : 'Friends don\'t learn when you look at their moment, and you don\'t see who looked at yours.',
+        style: AppText.caption,
+      ),
+      onChanged: (v) async {
+        HapticFeedback.selectionClick();
+        setState(() => _shared = v);
+        await setMomentViewsShared(shared: v);
+      },
+    );
+  }
 }
 
 /// Calls through Tor (private, a little slower) or straight between the

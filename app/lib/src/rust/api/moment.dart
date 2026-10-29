@@ -10,7 +10,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 Future<List<MomentView>> momentList() =>
     RustLib.instance.api.crateApiMomentMomentList();
 
-/// Shares a photo as today's moment, replacing any earlier one.
+/// Shares a photo as today's moment, replacing any earlier one. `seconds`
+/// (0: no limit) is how long each look lasts; `once`: each friend can open
+/// it one time.
 Future<void> momentShare({
   required String path,
   required String mime,
@@ -19,6 +21,8 @@ Future<void> momentShare({
   required List<int> thumb,
   required int width,
   required int height,
+  required int seconds,
+  required bool once,
 }) => RustLib.instance.api.crateApiMomentMomentShare(
   path: path,
   mime: mime,
@@ -27,14 +31,29 @@ Future<void> momentShare({
   thumb: thumb,
   width: width,
   height: height,
+  seconds: seconds,
+  once: once,
 );
 
 /// Takes our moment down, here and on friends' phones.
 Future<void> momentDelete() =>
     RustLib.instance.api.crateApiMomentMomentDelete();
 
+/// We looked at a moment (tells its owner, if we share views).
 Future<void> momentSeen({required List<int> id}) =>
     RustLib.instance.api.crateApiMomentMomentSeen(id: id);
+
+/// We've had our one look at a view-once moment: its photo is deleted.
+Future<void> momentSpent({required List<int> id}) =>
+    RustLib.instance.api.crateApiMomentMomentSpent(id: id);
+
+/// Whether we tell friends when we've seen their moments, and see who saw
+/// ours (both or neither).
+Future<bool> momentViewsShared() =>
+    RustLib.instance.api.crateApiMomentMomentViewsShared();
+
+Future<void> setMomentViewsShared({required bool shared}) =>
+    RustLib.instance.api.crateApiMomentSetMomentViewsShared(shared: shared);
 
 /// A moment's photo, decrypted (None until it has arrived).
 Future<Uint8List?> momentBytes({required List<int> id}) =>
@@ -50,6 +69,9 @@ class MomentView {
   /// Their chat's sigil (empty for ours).
   final Uint8List sigilKey;
 
+  /// Their chat with us (None for ours).
+  final PlatformInt64? chatId;
+
   /// Unix seconds.
   final PlatformInt64 sentAt;
   final PlatformInt64 expiresAt;
@@ -64,11 +86,24 @@ class MomentView {
   final bool ready;
   final bool seen;
 
+  /// How long each look lasts, in seconds (0: no limit).
+  final int seconds;
+
+  /// Each friend can open it once.
+  final bool once;
+
+  /// A view-once moment we've opened: nothing left to show.
+  final bool spent;
+
+  /// Ours: who looked, first look first (empty when we don't share views).
+  final List<MomentViewer> viewers;
+
   const MomentView({
     required this.id,
     required this.mine,
     required this.name,
     required this.sigilKey,
+    this.chatId,
     required this.sentAt,
     required this.expiresAt,
     required this.caption,
@@ -77,6 +112,10 @@ class MomentView {
     required this.thumb,
     required this.ready,
     required this.seen,
+    required this.seconds,
+    required this.once,
+    required this.spent,
+    required this.viewers,
   });
 
   @override
@@ -85,6 +124,7 @@ class MomentView {
       mine.hashCode ^
       name.hashCode ^
       sigilKey.hashCode ^
+      chatId.hashCode ^
       sentAt.hashCode ^
       expiresAt.hashCode ^
       caption.hashCode ^
@@ -92,7 +132,11 @@ class MomentView {
       height.hashCode ^
       thumb.hashCode ^
       ready.hashCode ^
-      seen.hashCode;
+      seen.hashCode ^
+      seconds.hashCode ^
+      once.hashCode ^
+      spent.hashCode ^
+      viewers.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -103,6 +147,7 @@ class MomentView {
           mine == other.mine &&
           name == other.name &&
           sigilKey == other.sigilKey &&
+          chatId == other.chatId &&
           sentAt == other.sentAt &&
           expiresAt == other.expiresAt &&
           caption == other.caption &&
@@ -110,5 +155,37 @@ class MomentView {
           height == other.height &&
           thumb == other.thumb &&
           ready == other.ready &&
-          seen == other.seen;
+          seen == other.seen &&
+          seconds == other.seconds &&
+          once == other.once &&
+          spent == other.spent &&
+          viewers == other.viewers;
+}
+
+class MomentViewer {
+  final String name;
+
+  /// Their chat's sigil.
+  final Uint8List sigilKey;
+
+  /// Unix seconds.
+  final PlatformInt64 at;
+
+  const MomentViewer({
+    required this.name,
+    required this.sigilKey,
+    required this.at,
+  });
+
+  @override
+  int get hashCode => name.hashCode ^ sigilKey.hashCode ^ at.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MomentViewer &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          sigilKey == other.sigilKey &&
+          at == other.at;
 }

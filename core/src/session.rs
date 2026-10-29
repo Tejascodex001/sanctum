@@ -944,6 +944,8 @@ impl Session {
                 media,
             } => self.on_moment(peer, id, sent_at, caption, media)?,
             Content::MomentGone { id } => self.on_moment_gone(peer, id)?,
+            Content::MomentRules { id, seconds, once } => self.on_moment_rules(peer, id, seconds, once)?,
+            Content::MomentSeen { id } => self.on_moment_seen(peer, id)?,
             Content::React { id, emoji, at } => self.on_react(chat_id, peer, id, emoji, at)?,
             Content::Edit { id, body, at } => self.on_edit(chat_id, peer, id, body, at)?,
             Content::CallInvite(offer) => self.on_call_invite(chat_id, peer, offer)?,
@@ -2279,7 +2281,7 @@ pub(crate) mod tests {
         befriend(&mut alice, &mut bob);
         connect(&mut alice, &mut bob);
         let (path, bytes) = photo(&alice, 90_000);
-        assert_eq!(alice.s.share_moment(outgoing(&path)).unwrap(), vec![bob.pk()]);
+        assert_eq!(alice.s.share_moment(outgoing(&path), 0, false).unwrap(), vec![bob.pk()]);
         connect(&mut alice, &mut bob);
         let seen = bob.s.moments().unwrap();
         assert_eq!(seen.len(), 1);
@@ -2292,7 +2294,7 @@ pub(crate) mod tests {
 
         // A second one replaces the first, on both phones.
         let (path, _) = photo(&alice, 500);
-        alice.s.share_moment(outgoing(&path)).unwrap();
+        alice.s.share_moment(outgoing(&path), 0, false).unwrap();
         connect(&mut alice, &mut bob);
         let now_seen = bob.s.moments().unwrap();
         assert_eq!(now_seen.len(), 1);
@@ -2309,6 +2311,72 @@ pub(crate) mod tests {
         let media = crate::protocol::Media { kind: crate::protocol::MediaKind::Image, ..Default::default() };
         bob.s.on_moment(&alice.pk(), [1; 16], now() - crate::moment::LIFETIME - 5, String::new(), media).unwrap();
         assert!(bob.s.moments().unwrap().is_empty());
+    }
+
+    #[test]
+    fn moments_say_who_saw_them_and_can_be_looked_at_once() {
+        let (mut alice, mut bob, mut carol) = (Phone::new(), Phone::new(), Phone::new());
+        befriend(&mut alice, &mut bob);
+        alice.s.add_friend(&carol.s.my_code("Carol"), true).unwrap();
+        carol.s.add_friend(&alice.s.my_code("Alice"), true).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        let (path, _) = photo(&alice, 2_000);
+        alice.s.share_moment(outgoing(&path), 10, true).unwrap();
+        connect(&mut alice, &mut bob);
+        connect(&mut alice, &mut carol);
+        let theirs = bob.s.moments().unwrap().remove(0);
+        assert_eq!((theirs.seconds, theirs.once, theirs.spent), (10, true, false));
+
+        // Bob shares views; Carol doesn't.
+        assert_eq!(bob.s.moment_seen(&theirs.id).unwrap(), vec![alice.pk()]);
+        carol.s.set_moment_views_shared(false).unwrap();
+        assert!(carol.s.moment_seen(&theirs.id).unwrap().is_empty());
+        connect(&mut bob, &mut alice);
+        connect(&mut carol, &mut alice);
+        let mine = alice.s.moments().unwrap().remove(0);
+        assert_eq!(mine.viewers.iter().map(|(w, _)| *w).collect::<Vec<_>>(), vec![bob.pk()]);
+        // Seen twice still counts once.
+        alice.s.on_moment_seen(&bob.pk(), mine.id).unwrap();
+        assert_eq!(alice.s.moments().unwrap()[0].viewers.len(), 1);
+        // Only for our own moment.
+        bob.s.on_moment_seen(&carol.pk(), theirs.id).unwrap();
+        assert!(bob.s.moments().unwrap()[0].viewers.is_empty());
+
+        // View once: after the look the photo is gone from Bob's phone, and
+        // a late copy doesn't bring it back.
+        assert!(bob.s.moment_bytes(&theirs.id).unwrap().is_some());
+        bob.s.moment_spent(&theirs.id).unwrap();
+        assert_eq!(bob.s.moment_bytes(&theirs.id).unwrap(), None);
+        let m = bob.s.moments().unwrap().remove(0);
+        assert!(m.spent && m.seen);
+        bob.s.on_moment(&alice.pk(), theirs.id, theirs.sent_at, String::new(), theirs.media.clone()).unwrap();
+        assert!(bob.s.moments().unwrap()[0].spent);
+        // Our own can't be "spent".
+        alice.s.moment_spent(&mine.id).unwrap();
+        assert!(!alice.s.moments().unwrap()[0].spent);
+    }
+
+    #[test]
+    fn moments_from_before_rules_are_kept() {
+        #[derive(serde::Serialize)]
+        struct V1 {
+            id: MessageId,
+            from: Option<[u8; 32]>,
+            sent_at: u64,
+            caption: String,
+            media: crate::protocol::Media,
+            seen: bool,
+        }
+        let alice = Phone::new();
+        let old = vec![V1 { id: [4; 16], from: Some([5; 32]), sent_at: now(), caption: "hi".into(), media: Default::default(), seen: true }];
+        alice.s.store.kv_put(b"moments", &old).unwrap();
+        // [5; 32] isn't a friend, so it's purged on reading; check the
+        // stored list was moved, not lost.
+        let list = alice.s.load_moments_for_test();
+        assert_eq!(list.len(), 1);
+        assert_eq!((list[0].caption.as_str(), list[0].seconds, list[0].once), ("hi", 0, false));
+        assert!(alice.s.store.kv_get::<Vec<crate::moment::Moment>>(b"moments-v2").unwrap().is_some());
     }
 
     #[test]

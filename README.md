@@ -58,7 +58,7 @@ Each release is told apart by its build number.
 | ✅ | **Friend requests** | One person enters a code and the other accepts. Requests show the pair's sigil and safety number |
 | ✅ | **Verification** | Scanning a QR in person verifies a friend. Otherwise, compare the 12-digit safety number (as in Signal and Threema) |
 | ✅ | **1:1 chat over Tor** | MLS end-to-end encryption, onion services, IPs hidden. Live links: messages arrive in about a second, with online indicators and ✓/✓✓ ticks |
-| ✅ | **Group chats** | Peer to peer, no server. Up to 50 people. Members pass messages and photos on to each other, so a message reaches you even if whoever sent it has gone offline since, and a photo isn't uploaded by its sender once per member. The leader manages members and can make up to 5 admins who add or remove people for the group; leadership can be handed over. When adding someone, the leader can show them the last week of text messages (everyone is told). Members who aren't friends still reach each other |
+| ✅ | **Group chats** | Peer to peer, no server. Up to 50 people. Members pass messages and photos on to each other, so a message reaches you even if whoever sent it has gone offline since, and a photo isn't uploaded by its sender once per member. The leader manages members and can make up to 5 admins who add or remove people for the group; leadership can be handed over. When adding someone, the leader can show them the last week of text messages (everyone is told). Members who aren't friends still reach each other. Groups have square emblems with a badge, and each person's name has its own colour |
 | ✅ | **Temp chats** | Kept in memory only, on both phones. Each message burns 24 hours after it's sent, and either person can wipe the chat for both |
 | ✅ | **Nearby (Wi-Fi / hotspot)** | Chat with friends on the same Wi-Fi or one phone's hotspot, with no internet. Opt-in |
 | ✅ | **Nearby over Bluetooth** | For friends who've connected once before. Android 10+. Part of the same Nearby switch |
@@ -85,7 +85,7 @@ Each release is told apart by its build number.
 |---|---|---|
 | ✅ | **Polls, date polls and plans** | Ask a question, find a day that works for everyone, or plan something (when and where) and see who's going. In friends' chats and groups |
 | ✅ | **Shared albums** | Albums in any chat or group. Everyone can add photos and videos, up to 30 at a time |
-| ✅ | **Daily moments** | One photo a day for all your friends, gone after 24 hours. Take it on the spot or pick one, and see friends' moments above your chats |
+| ✅ | **Daily moments** | One photo a day for all your friends, gone after 24 hours. Take it on the spot or pick one, and see friends' moments above your chats. Limit each look to a few seconds or make it view once, and see who saw yours (you can turn that off; then they don't learn when you look either). A gold ring marks a friend with a new moment |
 | ✅ | **Reactions** | Hold a message for ❤️ 😂 😮 😢 🙏 👍 or any emoji, or double-tap for ❤️. Tap a reaction to add or take back yours; hold it to see who. Friends' chats and groups |
 | ✅ | **Edit messages** | Hold your message and pick Edit to fix its words or a caption, within 15 minutes of sending (notes any time). Everyone sees the new words, marked "edited". Friends' chats and groups |
 | ✅ | **Typing** | "Asha is typing…" in friends' chats and groups. Sent only while you're both connected, never stored, and never what you type |

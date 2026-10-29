@@ -81,6 +81,11 @@ class ChatCard {
                 MediaKindView.audio => 'Voice note',
                 MediaKindView.file => last.media!.name,
               };
+    // In a group, say who wrote it.
+    if (group && preview != null && !last.isRecord) {
+      final who = last.fromMe ? 'You' : last.senderName;
+      if (who != null) preview = '$who: $preview';
+    }
     updatedAt = messages.last.sentAt;
     nextBurn = messages.first.expiresAt;
   }

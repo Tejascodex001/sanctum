@@ -34,6 +34,21 @@ abstract final class Palette {
   static Color get textMuted => light ? const Color(0xA3000000) : const Color(0x9EFFFFFF);
   static Color get textFaint => light ? const Color(0x6B000000) : const Color(0x66FFFFFF);
   static const danger = Color(0xFFFF5D5D);
+
+  /// Sanctum's own gold (the door in the logo), a little deeper in light mode.
+  static Color get gold => light ? const Color(0xFFB8862F) : const Color(0xFFE8BE62);
+
+  /// A person's colour in a group chat: the same for the same name on every
+  /// screen, readable in light and dark.
+  static Color person(String name) {
+    var h = 0;
+    for (final c in name.codeUnits) {
+      h = (h * 31 + c) & 0x7fffffff;
+    }
+    final base = HSLColor.fromColor(accents[h % accents.length]);
+    return (light ? base.withLightness((base.lightness * 0.62).clamp(0.0, 1.0)) : base).toColor();
+  }
+
   static const warning = Color(0xFFFFC145);
 
   /// Accent colours to pick from in Settings, instead of the sigil's own.

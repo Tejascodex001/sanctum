@@ -381,6 +381,13 @@ pub enum Content {
     /// text, or a photo's caption). `at` (milliseconds) orders edits that
     /// arrive out of order, as for [`Content::React`].
     Edit { id: MessageId, body: String, at: u64 },
+    /// Sent right after [`Content::Moment`]: how friends may look at it.
+    /// `seconds`: how long each look lasts (0: as long as they like).
+    /// `once`: each friend can open it one time. Older builds ignore it and
+    /// show the moment as before.
+    MomentRules { id: MessageId, seconds: u8, once: bool },
+    /// To a moment's owner: the sender looked at it.
+    MomentSeen { id: MessageId },
 }
 
 /// What an admin asks of the leader (see [`Content::GroupRequest`]).

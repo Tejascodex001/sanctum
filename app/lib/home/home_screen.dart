@@ -15,6 +15,7 @@ import '../background/background.dart';
 import '../identity/secrets.dart';
 import '../moments/moments.dart';
 import 'recall_views.dart';
+import 'sanctum_door.dart';
 import '../app_visible.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
@@ -663,6 +664,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (added == true) _goTo(0);
   }
 
+  final _door = GlobalKey<TappableDoorState>();
+  final _knocks = <DateTime>[];
+
+  /// Each tap swings the door; seven within a few seconds open the way in.
+  Future<void> _knock() async {
+    HapticFeedback.selectionClick();
+    _door.currentState?.knock();
+    final now = DateTime.now();
+    _knocks
+      ..add(now)
+      ..removeWhere((t) => now.difference(t) > const Duration(seconds: 4));
+    if (_knocks.length < 7) return;
+    _knocks.clear();
+    final chats = (await chatList()).where((c) => !c.hidden).toList();
+    if (!mounted || chats.isEmpty) return;
+    final first = chats.map((c) => c.createdAt).reduce((a, b) => a < b ? a : b);
+    final days = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(first * 1000)).inDays + 1;
+    await showSanctuary(
+      context,
+      days: days,
+      friends: chats.where((c) => c.kind == ChatKindView.direct).length,
+      groups: chats.where((c) => c.kind == ChatKindView.group && c.active).length,
+    );
+  }
+
   void _showMe() {
     HapticFeedback.selectionClick();
     Navigator.push(context, MaterialPageRoute<void>(builder: (_) => SettingsScreen(mySigil: widget.mySigil)));
@@ -682,12 +708,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   child: Row(
                     children: [
                       // Long-press: reveal hidden chats (after a biometric check).
+                      // Tap: the door opens (and seven quick taps…).
                       GestureDetector(
+                        behavior: HitTestBehavior.opaque,
                         onLongPress: _toggleHidden,
-                        child: const Text('Sanctum', style: AppText.display),
+                        onTap: _knock,
+                        child: Row(
+                          children: [
+                            TappableDoor(key: _door, size: 22),
+                            const SizedBox(width: 6),
+                            const Text('Sanctum', style: AppText.display),
+                          ],
+                        ),
                       ),
                       const SizedBox(width: Space.md),
-                      const _NetPill(),
+                      // Shrinks first on a narrow screen.
+                      const Flexible(flex: 100, child: _NetPill()),
                       const Spacer(),
                       AnimatedSwitcher(
                         duration: Motion.fast,
@@ -695,6 +731,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             ? IconButton(
                                 key: const ValueKey('wipe-all'),
                                 tooltip: 'Wipe all',
+                                visualDensity: VisualDensity.compact,
                                 onPressed: _wipeAll,
                                 icon: const Icon(Icons.local_fire_department_rounded, color: Palette.danger),
                               )
@@ -702,6 +739,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                       IconButton(
                         tooltip: 'Search',
+                        visualDensity: VisualDensity.compact,
                         onPressed: () => _searching ? _closeSearch() : setState(() => _searching = true),
                         icon: Icon(_searching ? Icons.search_off_rounded : Icons.search_rounded),
                       ),
@@ -1013,9 +1051,13 @@ class _NetPill extends StatelessWidget {
                   decoration: BoxDecoration(color: color, shape: BoxShape.circle),
                 ),
                 const SizedBox(width: 6),
-                Text(
-                  label,
-                  style: AppText.micro.copyWith(color: color, fontWeight: FontWeight.w600),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.micro.copyWith(color: color, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ],
             ),

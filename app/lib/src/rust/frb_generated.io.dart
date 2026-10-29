@@ -183,6 +183,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MomentView> dco_decode_list_moment_view(dynamic raw);
 
   @protected
+  List<MomentViewer> dco_decode_list_moment_viewer(dynamic raw);
+
+  @protected
   List<OpenPollView> dco_decode_list_open_poll_view(dynamic raw);
 
   @protected
@@ -232,6 +235,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   MomentView dco_decode_moment_view(dynamic raw);
+
+  @protected
+  MomentViewer dco_decode_moment_viewer(dynamic raw);
 
   @protected
   NetInfo dco_decode_net_info(dynamic raw);
@@ -525,6 +531,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<MomentView> sse_decode_list_moment_view(SseDeserializer deserializer);
 
   @protected
+  List<MomentViewer> sse_decode_list_moment_viewer(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<OpenPollView> sse_decode_list_open_poll_view(
     SseDeserializer deserializer,
   );
@@ -588,6 +599,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   MomentView sse_decode_moment_view(SseDeserializer deserializer);
+
+  @protected
+  MomentViewer sse_decode_moment_viewer(SseDeserializer deserializer);
 
   @protected
   NetInfo sse_decode_net_info(SseDeserializer deserializer);
@@ -949,6 +963,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_moment_viewer(
+    List<MomentViewer> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_open_poll_view(
     List<OpenPollView> self,
     SseSerializer serializer,
@@ -1034,6 +1054,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_moment_view(MomentView self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_moment_viewer(MomentViewer self, SseSerializer serializer);
 
   @protected
   void sse_encode_net_info(NetInfo self, SseSerializer serializer);

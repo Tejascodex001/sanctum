@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../moments/moments.dart';
 import '../net/net_bus.dart';
 import '../notify/notifier.dart';
+import '../sigil/emblem.dart';
 import '../sigil/sigil_painter.dart';
 import '../theme/tokens.dart';
 import 'chat_card.dart';
@@ -73,15 +75,13 @@ class _Emblem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 46,
-      height: 46,
-      padding: const EdgeInsets.all(1.5),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: card.sigil.look.accent.color.withValues(alpha: 0.55), width: 1.2),
-      ),
-      child: ClipOval(child: SigilView(spec: card.sigil)),
+    // A gold ring while this friend has a moment we haven't seen.
+    final friend = card.friend && !card.group && !card.temp;
+    if (!friend) return ChatEmblem(sigil: card.sigil, group: card.group);
+    return ValueListenableBuilder<Set<int>>(
+      valueListenable: unseenMoments,
+      builder: (context, unseen, _) =>
+          ChatEmblem(sigil: card.sigil, ring: unseen.contains(card.id) ? Palette.gold : null),
     );
   }
 }
